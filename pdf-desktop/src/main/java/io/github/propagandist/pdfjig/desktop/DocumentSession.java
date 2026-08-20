@@ -11,8 +11,13 @@ import java.nio.file.Path;
  */
 public final class DocumentSession implements AutoCloseable {
 
-    /** サムネイルの長辺。固定サイズの一覧にする（SPEC.md §7.1）。 */
-    static final int THUMBNAIL_EDGE_PIXELS = 160;
+    /**
+     * サムネイルを描く長辺の画素数。固定サイズの一覧にする（SPEC.md §7.1）。
+     *
+     * <p>画面に出す長辺（{@link ThumbnailTile#IMAGE_EDGE}）より大きく取ってある。
+     * 表示倍率 150% の環境では論理 150px が物理 225px になり、等倍で描くと眠い絵になるため。
+     */
+    static final int THUMBNAIL_EDGE_PIXELS = 220;
 
     private final Path path;
 

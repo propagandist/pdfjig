@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
@@ -35,11 +34,9 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListView;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
-import javafx.scene.control.SelectionMode;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
@@ -71,7 +68,7 @@ public final class MainWindow {
 
     private final AiProvider aiProvider;
 
-    private final ListView<PageSelection> thumbnails = new ListView<>();
+    private final ThumbnailGrid thumbnails = new ThumbnailGrid();
 
     private final Label status = new Label();
 
@@ -96,20 +93,15 @@ public final class MainWindow {
      * @return 画面の根
      */
     public Parent build() {
-        thumbnails.setPlaceholder(new Label("PDF を開いてください。"));
-        thumbnails.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
-        thumbnails.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.DELETE) {
-                deleteSelected();
-            }
-        });
+        thumbnails.setOnDelete(this::deleteSelected);
 
         HBox statusBar = new HBox(status);
+        statusBar.getStyleClass().add("status-bar");
         statusBar.setPadding(new Insets(6, 12, 6, 12));
 
         BorderPane root = new BorderPane();
         root.setTop(buildMenuBar());
-        root.setCenter(thumbnails);
+        root.setCenter(thumbnails.node());
         root.setBottom(statusBar);
 
         updateTitle();
@@ -256,7 +248,7 @@ public final class MainWindow {
     }
 
     private void deleteSelected() {
-        int index = thumbnails.getSelectionModel().getSelectedIndex();
+        int index = thumbnails.selectedIndex();
         if (session == null || index < 0) {
             return;
         }
@@ -268,7 +260,7 @@ public final class MainWindow {
     }
 
     private void rotateSelected(Rotation additional) {
-        int index = thumbnails.getSelectionModel().getSelectedIndex();
+        int index = thumbnails.selectedIndex();
         if (session == null || index < 0) {
             return;
         }
@@ -383,9 +375,7 @@ public final class MainWindow {
         closeSession();
         session = opened;
 
-        thumbnails.setCellFactory(
-                view -> new ThumbnailCell(view, opened.order(), opened.thumbnails()));
-        thumbnails.setItems(opened.order().pages());
+        thumbnails.show(opened.order(), opened.thumbnails());
         opened.order().pages().addListener(orderListener);
 
         documentOpen.set(true);
@@ -398,7 +388,7 @@ public final class MainWindow {
             return;
         }
         session.order().pages().removeListener(orderListener);
-        thumbnails.setItems(FXCollections.observableArrayList());
+        thumbnails.clear();
 
         // 描画スレッドの停止を待つ。1 枚分の描画が終わるまでなので、ここでの待ちは短い。
         session.close();

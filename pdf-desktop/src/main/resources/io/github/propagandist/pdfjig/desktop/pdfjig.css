@@ -1,16 +1,90 @@
-/* サムネイル一覧の見た目。ページの境界が分かることだけを目的にする。 */
+/*
+ * サムネイル一覧の見た目。
+ *
+ * 目的は 2 つだけ。ページの形（縦長 / 横長 / 回転）が分かること、
+ * いま何枚目を選んでいるかが分かること。装飾はそれ以上のことをしない。
+ */
 
-.thumbnail-frame {
-    -fx-background-color: white;
-    -fx-border-color: #c8c8c8;
-    -fx-border-width: 1;
+.root {
+    -fx-font-family: "Yu Gothic UI", "Meiryo UI", "Segoe UI", sans-serif;
 }
 
-.list-cell:selected .thumbnail-frame {
-    -fx-border-color: #3a76d8;
+/* ── 一覧 ───────────────────────────────────────────────────────── */
+
+.thumbnail-list {
+    -fx-background-color: #eef0f3;
+    -fx-background-insets: 0;
+    -fx-padding: 4 10 4 10;
+}
+
+.thumbnail-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+/*
+ * ListView 既定の選択背景を消す。選ぶのは行ではなく 1 枚のページであり、
+ * 行を横断する青い帯が出ると何を選んでいるのか読めなくなる。
+ */
+.thumbnail-list .list-cell:filled:selected,
+.thumbnail-list .list-cell:filled:selected:focused,
+.thumbnail-list .list-cell:filled:hover {
+    -fx-background-color: transparent;
+}
+
+/* ── タイル ─────────────────────────────────────────────────────── */
+
+.thumbnail-tile {
+    -fx-padding: 10 8 8 8;
+    -fx-background-radius: 6;
+    -fx-background-color: transparent;
+}
+
+.thumbnail-tile:hover {
+    -fx-background-color: #e3e7ec;
+}
+
+.thumbnail-tile:selected {
+    -fx-background-color: #dce8fa;
+}
+
+/* ページそのもの。影で紙を持ち上げ、境界を線に頼らず示す。 */
+.thumbnail-frame {
+    -fx-background-color: white;
+    -fx-border-color: #c3cad2;
+    -fx-border-width: 1;
+    -fx-effect: dropshadow(gaussian, rgba(31, 42, 55, 0.20), 7, 0, 0, 2);
+}
+
+.thumbnail-tile:selected .thumbnail-frame {
+    -fx-border-color: #2f6fd0;
     -fx-border-width: 2;
 }
 
-.list-cell {
-    -fx-padding: 8;
+/* ドロップ先。選択と別の色にして、どちらの状態か取り違えないようにする。 */
+.thumbnail-tile:drop-target .thumbnail-frame {
+    -fx-border-color: #e8a33d;
+    -fx-border-width: 2;
+}
+
+.thumbnail-caption {
+    -fx-text-fill: #5b6672;
+    -fx-font-size: 11px;
+}
+
+.thumbnail-tile:selected .thumbnail-caption {
+    -fx-text-fill: #1f4f9e;
+    -fx-font-weight: bold;
+}
+
+/* ── 周辺 ───────────────────────────────────────────────────────── */
+
+.status-bar {
+    -fx-background-color: white;
+    -fx-border-color: #d8dde3;
+    -fx-border-width: 1 0 0 0;
+}
+
+.status-bar .label {
+    -fx-text-fill: #4a5560;
 }
