@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.MergeOptions;
 import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
@@ -15,11 +16,14 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.FXCollections;
@@ -41,6 +45,7 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
@@ -57,6 +62,9 @@ import javafx.stage.Stage;
 public final class MainWindow {
 
     private static final String TITLE = "pdfjig";
+
+    /** 分割の出力ファイル名。pdf-core の分割と同じ形にそろえる。 */
+    private static final String SPLIT_NAME_FORMAT = "%s_%03d.pdf";
 
     private final Stage stage;
 
@@ -148,13 +156,26 @@ public final class MainWindow {
         rotateLeft.setOnAction(event -> rotateSelected(Rotation.COUNTERCLOCKWISE_90));
         rotateLeft.disableProperty().bind(documentOpen.not().or(busy));
 
+        MenuItem keepRange = new MenuItem("範囲を指定して残す…");
+        keepRange.setOnAction(event -> keepRange());
+        keepRange.disableProperty().bind(documentOpen.not().or(busy));
+
         MenuItem reset = new MenuItem("並びと向きを元に戻す");
         reset.setOnAction(event -> resetOrder());
         reset.disableProperty().bind(documentOpen.not().or(busy));
 
+        MenuItem merge = new MenuItem("複数の PDF を結合…");
+        merge.setOnAction(event -> mergeDocuments());
+        merge.disableProperty().bind(busy);
+
+        MenuItem split = new MenuItem("この文書を分割…");
+        split.setOnAction(event -> splitDocument());
+        split.disableProperty().bind(documentOpen.not().or(busy));
+
         return new MenuBar(
                 new Menu("ファイル", null, open, save, close, quit),
-                new Menu("ページ", null, delete, rotateRight, rotateLeft, reset));
+                new Menu("ページ", null, delete, rotateRight, rotateLeft, keepRange, reset),
+                new Menu("ツール", null, merge, split));
     }
 
     /**
@@ -253,6 +274,104 @@ public final class MainWindow {
         session.order().rotateAt(index, additional);
     }
 
+    private void keepRange() {
+        if (session == null) {
+            return;
+        }
+        PageRangePrompt.ask(stage, session.order().size())
+                .ifPresent(range -> session.order().keepOnly(range));
+    }
+
+    /**
+     * 複数の PDF を 1 つに結合する。
+     *
+     * <p>選んだ順序はダイアログの実装と環境に左右されるため当てにできない。
+     * 名前順に並べたうえで、その順序を見せて承認を求める。
+     */
+    private void mergeDocuments() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("結合する PDF を選ぶ");
+        chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
+
+        List<File> chosen = chooser.showOpenMultipleDialog(stage);
+        if (chosen == null) {
+            return;
+        }
+        if (chosen.size() < 2) {
+            show(AlertType.INFORMATION, "結合するには 2 つ以上のファイルを選んでください。");
+            return;
+        }
+
+        List<Path> inputs = chosen.stream()
+                .map(File::toPath)
+                .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                .toList();
+        if (!confirmMergeOrder(inputs)) {
+            return;
+        }
+
+        FileChooser target = new FileChooser();
+        target.setTitle("結合したファイルの保存先");
+        target.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
+        target.setInitialFileName("merged.pdf");
+
+        File saveTo = target.showSaveDialog(stage);
+        if (saveTo == null) {
+            return;
+        }
+        Path output = saveTo.toPath();
+        runAsync(() -> mergeInto(inputs, output), this::showWarnings);
+    }
+
+    /**
+     * 現在の文書を分割する。
+     *
+     * <p>切り出すのは <b>編集中の並び</b> である。pdf-core の分割は元の並びを対象に
+     * するためここでは使わない。並べ替えや削除をした後で分割したとき、それが
+     * 反映されない結果を渡すほうが利用者を惑わせる。
+     */
+    private void splitDocument() {
+        if (session == null) {
+            return;
+        }
+        Optional<Integer> chunk = PageCountPrompt.ask(stage, session.order().size());
+        if (chunk.isEmpty()) {
+            return;
+        }
+
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("分割したファイルの保存先");
+        File directory = chooser.showDialog(stage);
+        if (directory == null) {
+            return;
+        }
+
+        Path source = session.path();
+        List<PageSelection> pages = session.order().toPageSelections();
+        String baseName = baseNameOf(session.path());
+        int pagesPerFile = chunk.get();
+        Path outputDir = directory.toPath();
+
+        runAsync(
+                () -> splitInto(source, pages, pagesPerFile, outputDir, baseName),
+                this::showSplitResult);
+    }
+
+    private boolean confirmMergeOrder(List<Path> inputs) {
+        String order = IntStream.range(0, inputs.size())
+                .mapToObj(i -> (i + 1) + ". " + inputs.get(i).getFileName())
+                .collect(Collectors.joining(System.lineSeparator()));
+
+        Alert alert = new Alert(
+                AlertType.CONFIRMATION,
+                "この順に結合します。" + System.lineSeparator() + System.lineSeparator() + order,
+                ButtonType.OK,
+                ButtonType.CANCEL);
+        alert.setHeaderText("選んだ順序は環境によって変わるため、名前順に並べています。");
+        alert.initOwner(stage);
+        return alert.showAndWait().filter(ButtonType.OK::equals).isPresent();
+    }
+
     private void resetOrder() {
         if (session != null) {
             session.order().reset();
@@ -311,6 +430,58 @@ public final class MainWindow {
         return List.copyOf(warnings);
     }
 
+    private static List<Warning> mergeInto(List<Path> inputs, Path output) {
+        List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
+        PageOperations operations = new PdfBoxPageOperations(warnings::add);
+
+        Path temporary = temporaryNextTo(output);
+        try {
+            operations.merge(inputs, temporary, MergeOptions.defaults());
+            move(temporary, output);
+        } finally {
+            deleteQuietly(temporary);
+        }
+        return List.copyOf(warnings);
+    }
+
+    private static SplitResult splitInto(
+            Path source,
+            List<PageSelection> pages,
+            int pagesPerFile,
+            Path outputDir,
+            String baseName) {
+        List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
+        PageOperations operations = new PdfBoxPageOperations(warnings::add);
+
+        int fileCount = (pages.size() + pagesPerFile - 1) / pagesPerFile;
+        List<Path> outputs = IntStream.rangeClosed(1, fileCount)
+                .mapToObj(number -> outputDir.resolve(
+                        String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)))
+                .toList();
+
+        // 1 つでも書けないなら、何も書かずに失敗させる。pdf-core の分割と同じ約束にする。
+        for (Path output : outputs) {
+            if (Files.exists(output)) {
+                throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
+            }
+        }
+        for (int i = 0; i < fileCount; i++) {
+            int from = i * pagesPerFile;
+            int to = Math.min(from + pagesPerFile, pages.size());
+            operations.assemble(source, pages.subList(from, to), outputs.get(i));
+        }
+        return new SplitResult(fileCount, List.copyOf(warnings));
+    }
+
+    /** 分割の結果。書き出した数と、その途中で出た警告。 */
+    private record SplitResult(int fileCount, List<Warning> warnings) {
+    }
+
+    private void showSplitResult(SplitResult result) {
+        show(AlertType.INFORMATION, result.fileCount() + " 個のファイルを書き出しました。");
+        showWarnings(result.warnings());
+    }
+
     private static Path temporaryNextTo(Path output) {
         try {
             Path temporary = Files.createTempFile(
@@ -340,10 +511,13 @@ public final class MainWindow {
     }
 
     private String suggestedFileName() {
-        String name = session.path().getFileName().toString();
+        return baseNameOf(session.path()) + "-edited.pdf";
+    }
+
+    private static String baseNameOf(Path path) {
+        String name = path.getFileName().toString();
         int extension = name.lastIndexOf('.');
-        String base = extension > 0 ? name.substring(0, extension) : name;
-        return base + "-edited.pdf";
+        return extension > 0 ? name.substring(0, extension) : name;
     }
 
     private <T> void runAsync(Supplier<T> work, Consumer<T> onSucceeded) {

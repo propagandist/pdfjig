@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PageRange;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
@@ -119,6 +120,20 @@ public final class PageOrder {
     public void rotateAt(int index, Rotation additional) {
         requireIndex(index);
         pages.set(index, pages.get(index).rotatedBy(additional));
+    }
+
+    /**
+     * 指定した範囲だけを残す。
+     *
+     * <p>範囲は <b>一覧の中での位置</b> であり、元文書のページ番号ではない。
+     * 並べ替えた後は「今見えている 3 枚目から 5 枚目」と言えるほうが素直なため。
+     *
+     * @param range 残す範囲（1 始まり、両端を含む）
+     * @throws PdfjigException 範囲が現在の枚数に収まらない場合
+     */
+    public void keepOnly(PageRange range) {
+        range.validateAgainst(pages.size());
+        pages.setAll(List.copyOf(pages.subList(range.firstPage() - 1, range.lastPage())));
     }
 
     /** 元の並びと向きから変わっているか。 */

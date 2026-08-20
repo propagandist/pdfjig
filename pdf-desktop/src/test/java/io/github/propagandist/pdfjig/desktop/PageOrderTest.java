@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PageRange;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
@@ -105,6 +106,40 @@ class PageOrderTest {
         assertEquals(
                 List.of(Rotation.CLOCKWISE_90, Rotation.NONE, Rotation.NONE),
                 order.toPageSelections().stream().map(PageSelection::additionalRotation).toList());
+    }
+
+    @Test
+    @DisplayName("指定した範囲だけを残せる")
+    void keepsOnlyTheGivenRange() {
+        PageOrder order = PageOrder.of(5);
+
+        order.keepOnly(PageRange.of(2, 4));
+
+        assertEquals(List.of(2, 3, 4), pageNumbersOf(order));
+    }
+
+    @Test
+    @DisplayName("範囲は一覧の位置で解釈される")
+    void interpretsRangeAsPositions() {
+        PageOrder order = PageOrder.of(4);
+        order.move(3, 0);
+
+        // 並びは 4, 1, 2, 3。その 1 枚目から 2 枚目を残す。
+        order.keepOnly(PageRange.of(1, 2));
+
+        assertEquals(List.of(4, 1), pageNumbersOf(order));
+    }
+
+    @Test
+    @DisplayName("現在の枚数に収まらない範囲は PAGE_OUT_OF_RANGE")
+    void rejectsRangeBeyondCurrentSize() {
+        PageOrder order = PageOrder.of(3);
+        order.removeAt(0);
+
+        assertEquals(
+                ErrorCode.PAGE_OUT_OF_RANGE,
+                assertThrows(PdfjigException.class, () -> order.keepOnly(PageRange.of(1, 3)))
+                        .errorCode());
     }
 
     @Test
