@@ -27,6 +27,9 @@ public enum ErrorCode {
     /** 対応していない暗号化方式。 */
     UNSUPPORTED_ENCRYPTION("この暗号化方式には対応していません。"),
 
+    /** テキストを抽出できない。 */
+    TEXT_EXTRACTION_FAILED("テキストを抽出できませんでした。"),
+
     /** 読み書きの失敗。 */
     IO_FAILURE("ファイルの読み書きに失敗しました。");
 
