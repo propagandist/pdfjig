@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.PageRange;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 import javafx.collections.FXCollections;
@@ -23,8 +24,13 @@ import javafx.collections.ObservableList;
  */
 public final class PageOrder {
 
-    /** 元文書のページ数。並びを戻すときの基準になる。 */
-    private final int sourcePageCount;
+    /**
+     * 並びを戻すときの基準。
+     *
+     * <p>文書を追加するたびに伸びる。ページ数ひとつでは表せないのは、
+     * どの出どころの何ページ目が並んでいたかまで戻す必要があるため。
+     */
+    private final List<PageSelection> baseline = new ArrayList<>();
 
     /** 表示順に並んだページ指定。 */
     private final ObservableList<PageSelection> pages;
@@ -41,9 +47,9 @@ public final class PageOrder {
     private final ObservableList<PageSelection> view;
 
     private PageOrder(int sourcePageCount) {
-        this.sourcePageCount = sourcePageCount;
-        this.pages = FXCollections.observableArrayList(identityOrder(sourcePageCount));
+        this.pages = FXCollections.observableArrayList();
         this.view = FXCollections.unmodifiableObservableList(pages);
+        append(0, sourcePageCount);
     }
 
     /**
@@ -71,6 +77,27 @@ public final class PageOrder {
      */
     public ObservableList<PageSelection> pages() {
         return view;
+    }
+
+    /**
+     * 追加した文書のページを、並びの末尾に足す。
+     *
+     * <p>差し込む位置を選ばせないのは、足した直後にサムネイル上でドラッグして
+     * 動かせるためである。位置を尋ねるダイアログを挟むより、置いてから動かすほうが早い。
+     *
+     * <p>戻すときの基準も一緒に伸びる。{@link #reset()} は追加した文書を含んだまま、
+     * それぞれの元の順に並べ直す。
+     *
+     * @param sourceIndex 追加した文書の出どころ番号
+     * @param pageCount   その文書のページ数
+     */
+    public void append(int sourceIndex, int pageCount) {
+        if (pageCount < 1) {
+            throw new PdfjigException(ErrorCode.EMPTY_RESULT);
+        }
+        List<PageSelection> added = identityOrder(sourceIndex, pageCount);
+        baseline.addAll(added);
+        pages.addAll(added);
     }
 
     /** 現在の枚数。 */
@@ -150,18 +177,25 @@ public final class PageOrder {
         pages.setAll(List.copyOf(pages.subList(range.firstPage() - 1, range.lastPage())));
     }
 
-    /** 元の並びと向きから変わっているか。 */
+    /** 元の並びと向きから変わっているか。追加した文書があっても、それ自体は変更にあたらない。 */
     public boolean modified() {
-        return !pages.equals(identityOrder(sourcePageCount));
+        return !pages.equals(baseline);
     }
 
-    /** 元の並びと向きに戻す。 */
+    /**
+     * 元の並びと向きに戻す。
+     *
+     * <p>追加した文書は含んだまま、それぞれの元の順に並べ直す。追加そのものを取り消したい
+     * ときは文書を閉じて開き直す。メニューの文言どおり、ここで戻すのは並びと向きだけである。
+     */
     public void reset() {
-        pages.setAll(identityOrder(sourcePageCount));
+        pages.setAll(baseline);
     }
 
-    private static List<PageSelection> identityOrder(int pageCount) {
-        return IntStream.rangeClosed(1, pageCount).mapToObj(PageSelection::of).toList();
+    private static List<PageSelection> identityOrder(int sourceIndex, int pageCount) {
+        return IntStream.rangeClosed(1, pageCount)
+                .mapToObj(pageNumber -> PageSelection.of(sourceIndex, pageNumber))
+                .toList();
     }
 
     private void requireIndex(int index) {

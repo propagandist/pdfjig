@@ -126,12 +126,15 @@ final class ThumbnailTile {
         shown = selection;
 
         caption.setText(String.valueOf(pageIndex + 1));
-        Tooltip.install(root, new Tooltip(describe(selection)));
+        Tooltip.install(root, new Tooltip(grid.describe(selection)));
 
         // 描くのは元の向きのページなので、加えた回転は表示側で当てる。
         imageView.setRotate(selection.additionalRotation().degrees());
 
-        Optional<Image> cached = grid.thumbnails().cached(selection.pageNumber());
+        int sourceIndex = selection.sourceIndex();
+        int pageNumber = selection.pageNumber();
+
+        Optional<Image> cached = grid.thumbnails().cached(sourceIndex, pageNumber);
         if (cached.isPresent()) {
             apply(cached.get(), selection);
             return;
@@ -139,21 +142,28 @@ final class ThumbnailTile {
 
         placeholder(selection);
 
-        int pageNumber = selection.pageNumber();
-        Task<Image> task = grid.thumbnails().request(pageNumber);
+        Task<Image> task = grid.thumbnails().request(sourceIndex, pageNumber);
         task.setOnSucceeded(event -> {
             // 描画が終わる前にタイルが別のページへ回されていることがある。
-            if (shown != null && shown.pageNumber() == pageNumber) {
+            if (stillShowing(sourceIndex, pageNumber)) {
                 apply(task.getValue(), shown);
             }
         });
         task.setOnFailed(event -> {
             // 絵が出ないだけで操作は続けられる。黙って枠のままにせず、理由を添える。
-            if (shown != null && shown.pageNumber() == pageNumber) {
-                Tooltip.install(root, new Tooltip("元の " + pageNumber + " ページ目（表示できません）"));
+            if (stillShowing(sourceIndex, pageNumber)) {
+                Tooltip.install(
+                        root, new Tooltip(grid.describe(shown) + "（表示できません）"));
             }
         });
         pending = task;
+    }
+
+    /** そのページをまだ表示しているか。同じページ番号でも文書が違えば別物である。 */
+    private boolean stillShowing(int sourceIndex, int pageNumber) {
+        return shown != null
+                && shown.sourceIndex() == sourceIndex
+                && shown.pageNumber() == pageNumber;
     }
 
     /** 余った桁を空にする。行の幅は保ったままにして、桁が詰まらないようにする。 */
@@ -201,13 +211,6 @@ final class ThumbnailTile {
             root.requestFocus();
         }
         event.consume();
-    }
-
-    private static String describe(PageSelection selection) {
-        String origin = "元の " + selection.pageNumber() + " ページ目";
-        return selection.rotated()
-                ? origin + "（" + selection.additionalRotation().degrees() + " 度回転）"
-                : origin;
     }
 
     private void cancelPending() {

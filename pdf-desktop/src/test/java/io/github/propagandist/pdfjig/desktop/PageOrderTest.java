@@ -189,6 +189,49 @@ class PageOrderTest {
     }
 
     @Test
+    @DisplayName("追加した文書のページは末尾に付く")
+    void appendsPagesOfAddedDocument() {
+        PageOrder order = PageOrder.of(2);
+
+        order.append(1, 3);
+
+        assertEquals(
+                List.of("0:1", "0:2", "1:1", "1:2", "1:3"),
+                order.toPageSelections().stream()
+                        .map(page -> page.sourceIndex() + ":" + page.pageNumber())
+                        .toList());
+    }
+
+    @Test
+    @DisplayName("追加しただけでは変更にあたらない")
+    void appendingIsNotAModification() {
+        PageOrder order = PageOrder.of(2);
+
+        order.append(1, 2);
+
+        assertFalse(order.modified());
+    }
+
+    @Test
+    @DisplayName("元に戻すと、追加した文書を含んだまま各文書の元の順に並ぶ")
+    void resetKeepsAddedDocuments() {
+        PageOrder order = PageOrder.of(2);
+        order.append(1, 2);
+        order.move(3, 0);
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
+        order.removeAt(1);
+
+        order.reset();
+
+        assertEquals(
+                List.of("0:1", "0:2", "1:1", "1:2"),
+                order.toPageSelections().stream()
+                        .map(page -> page.sourceIndex() + ":" + page.pageNumber())
+                        .toList());
+        assertFalse(order.modified());
+    }
+
+    @Test
     @DisplayName("公開する一覧は毎回同じインスタンスを返す")
     void exposesStableView() {
         PageOrder order = PageOrder.of(2);

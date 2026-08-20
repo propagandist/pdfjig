@@ -3,6 +3,8 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.core.PageRendering;
 import io.github.propagandist.pdfjig.core.PdfBoxPageRendering;
 import io.github.propagandist.pdfjig.core.PdfDocument;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -14,10 +16,16 @@ import javafx.scene.image.Image;
 /**
  * サムネイルを非同期に供給する。
  *
- * <p>描画は専用のスレッド 1 本に直列化する。{@link PdfDocument} はスレッド安全ではなく、
- * 複数スレッドから同時に描画すると壊れるため（{@link PageRendering} の規約）。
- * 直列化はスクロールの応答性も保つ。1 本で足りない速度は、そもそも
- * 可視範囲だけを描画することで確保する。
+ * <p>複数の文書を受け持つ。1 つの編集セッションに複数のファイルのページが混ざるため
+ * （SPEC.md §7.1）、どの文書の何ページ目かでキャッシュを引く。
+ *
+ * <p>描画は<b>文書がいくつあっても専用のスレッド 1 本に直列化する</b>。
+ * {@link PdfDocument} はスレッド安全ではなく、複数スレッドから同時に描画すると壊れるため
+ * （{@link PageRendering} の規約）。文書ごとにスレッドを立てても、直列化を保つ手間が増えるだけで
+ * 速くはならない。1 本で足りない速度は、そもそも可視範囲だけを描画することで確保する。
+ *
+ * <p>保持する枚数の上限も 1 つにまとめる。文書数に比例して膨らませると、
+ * 何枚分のメモリを使うのか読めなくなる。
  *
  * <p>JavaFX Application Thread では、描画済みの {@link Image} を差し込むだけにする
  * （SPEC.md §7.2）。
@@ -33,14 +41,23 @@ public final class ThumbnailSource implements AutoCloseable {
     /** 描画スレッドの停止を待つ上限。 */
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 5L;
 
-    private final PdfDocument document;
+    /** キャッシュの鍵。同じページ番号でも文書が違えば別のサムネイルになる。 */
+    private record PageKey(int sourceIndex, int pageNumber) {
+    }
 
     private final PageRendering rendering = new PdfBoxPageRendering();
 
     private final int edgePixels;
 
+    /**
+     * 受け持っている文書。出どころ番号がこの並びの添字になる。
+     *
+     * <p>描画スレッドと JavaFX スレッドの双方から読むため、追加も読み出しもこれ自身をロックに使う。
+     */
+    private final List<PdfDocument> documents = new ArrayList<>();
+
     /** 描画スレッドと JavaFX スレッドの双方から触るため、これ自身をロックに使う。 */
-    private final LruCache<Integer, Image> cache = new LruCache<>(CACHE_CAPACITY);
+    private final LruCache<PageKey, Image> cache = new LruCache<>(CACHE_CAPACITY);
 
     private final ExecutorService renderer = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "pdfjig-thumbnail");
@@ -50,18 +67,29 @@ public final class ThumbnailSource implements AutoCloseable {
     });
 
     /**
-     * @param document   対象文書。このオブジェクトは文書を閉じない
      * @param edgePixels サムネイルの長辺の画素数
      */
-    public ThumbnailSource(PdfDocument document, int edgePixels) {
-        if (document == null) {
-            throw new IllegalArgumentException("document は null にできません。");
-        }
+    public ThumbnailSource(int edgePixels) {
         if (edgePixels < 1) {
             throw new IllegalArgumentException("edgePixels は 1 以上でなければなりません。");
         }
-        this.document = document;
         this.edgePixels = edgePixels;
+    }
+
+    /**
+     * 文書を受け持たせる。このオブジェクトは文書を閉じない。
+     *
+     * @param document 対象文書
+     * @return 出どころ番号（0 始まり）
+     */
+    public int addSource(PdfDocument document) {
+        if (document == null) {
+            throw new IllegalArgumentException("document は null にできません。");
+        }
+        synchronized (documents) {
+            documents.add(document);
+            return documents.size() - 1;
+        }
     }
 
     /**
@@ -70,12 +98,13 @@ public final class ThumbnailSource implements AutoCloseable {
      * <p>セルが表示された瞬間に呼ぶ。ここで得られれば描画を待たずに済み、
      * スクロールが引っかからない。
      *
-     * @param pageNumber ページ番号（1 始まり）
+     * @param sourceIndex 出どころ番号
+     * @param pageNumber  その文書の中でのページ番号（1 始まり）
      * @return 保持していればそのサムネイル
      */
-    public Optional<Image> cached(int pageNumber) {
+    public Optional<Image> cached(int sourceIndex, int pageNumber) {
         synchronized (cache) {
-            return cache.get(pageNumber);
+            return cache.get(new PageKey(sourceIndex, pageNumber));
         }
     }
 
@@ -87,25 +116,28 @@ public final class ThumbnailSource implements AutoCloseable {
      * {@link Task#cancel(boolean)} を呼ぶこと。まだ始まっていない描画は取り消され、
      * 高速なスクロールで見えないページを描き続けることがなくなる。
      *
-     * @param pageNumber ページ番号（1 始まり）
+     * @param sourceIndex 出どころ番号
+     * @param pageNumber  その文書の中でのページ番号（1 始まり）
      * @return 実行中または待機中の描画
      */
-    public Task<Image> request(int pageNumber) {
+    public Task<Image> request(int sourceIndex, int pageNumber) {
+        PageKey key = new PageKey(sourceIndex, pageNumber);
         Task<Image> task = new Task<>() {
             @Override
             protected Image call() {
                 Optional<Image> hit;
                 synchronized (cache) {
-                    hit = cache.get(pageNumber);
+                    hit = cache.get(key);
                 }
                 if (hit.isPresent()) {
                     return hit.get();
                 }
 
                 Image image = SwingFXUtils.toFXImage(
-                        rendering.renderThumbnail(document, pageNumber, edgePixels), null);
+                        rendering.renderThumbnail(documentAt(sourceIndex), pageNumber, edgePixels),
+                        null);
                 synchronized (cache) {
-                    cache.put(pageNumber, image);
+                    cache.put(key, image);
                 }
                 return image;
             }
@@ -129,6 +161,12 @@ public final class ThumbnailSource implements AutoCloseable {
             renderer.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private PdfDocument documentAt(int sourceIndex) {
+        synchronized (documents) {
+            return documents.get(sourceIndex);
         }
     }
 }

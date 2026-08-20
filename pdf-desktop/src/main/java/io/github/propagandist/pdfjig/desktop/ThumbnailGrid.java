@@ -54,6 +54,9 @@ final class ThumbnailGrid {
     /** 1 行あたりの枚数。 */
     private int columns = 1;
 
+    /** 表示中の編集セッション。ツールチップに出どころのファイル名を出すために持つ。 */
+    private DocumentSession document;
+
     private PageOrder order;
 
     private ThumbnailSource thumbnails;
@@ -109,14 +112,15 @@ final class ThumbnailGrid {
     /**
      * 文書を表示する。
      *
-     * @param pageOrder 編集中のページ並び
-     * @param source    サムネイルの供給元
+     * @param session 表示する編集セッション
      */
-    void show(PageOrder pageOrder, ThumbnailSource source) {
+    void show(DocumentSession session) {
         clear();
 
+        this.document = session;
+        PageOrder pageOrder = session.order();
         this.order = pageOrder;
-        this.thumbnails = source;
+        this.thumbnails = session.thumbnails();
         pageOrder.pages().addListener(pagesListener);
 
         applyColumns(rows.getWidth());
@@ -129,6 +133,7 @@ final class ThumbnailGrid {
         if (order != null) {
             order.pages().removeListener(pagesListener);
         }
+        document = null;
         order = null;
         thumbnails = null;
         selectedIndex.set(-1);
@@ -138,6 +143,24 @@ final class ThumbnailGrid {
     /** サムネイルの供給元。タイルから使う。 */
     ThumbnailSource thumbnails() {
         return thumbnails;
+    }
+
+    /**
+     * ツールチップに出す 1 ページの説明。
+     *
+     * <p>複数のファイルを含むときは、どのファイルから来たページかを必ず出す。
+     * 混ぜて並べ替えた後は、ページ番号だけでは出どころが分からなくなるため。
+     * 1 ファイルだけのときは、言うまでもないので添えない。
+     */
+    String describe(PageSelection selection) {
+        String origin = document != null && document.sourceCount() > 1
+                ? document.sourceName(selection.sourceIndex()) + " の "
+                        + selection.pageNumber() + " ページ目"
+                : "元の " + selection.pageNumber() + " ページ目";
+
+        return selection.rotated()
+                ? origin + "（" + selection.additionalRotation().degrees() + " 度回転）"
+                : origin;
     }
 
     /** 1 行あたりの枚数。行セルから使う。 */
