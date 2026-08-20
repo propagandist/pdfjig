@@ -61,7 +61,8 @@ import javafx.stage.Stage;
  */
 public final class MainWindow {
 
-    private static final String TITLE = "pdfjig";
+    /** 画面上の表示名。コマンド名・パッケージ名の {@code pdfjig} とは別に、こちらで統一する。 */
+    private static final String TITLE = "PDFjig";
 
     /** 分割の出力ファイル名。pdf-core の分割と同じ形にそろえる。 */
     private static final String SPLIT_NAME_FORMAT = "%s_%03d.pdf";
