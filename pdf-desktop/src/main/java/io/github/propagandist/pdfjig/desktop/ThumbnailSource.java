@@ -122,6 +122,10 @@ public final class ThumbnailSource implements AutoCloseable {
      */
     public Task<Image> request(int sourceIndex, int pageNumber) {
         PageKey key = new PageKey(sourceIndex, pageNumber);
+        // 依頼した時点の文書を捕まえておく。描画のときに番号から引くと、その間に
+        // 文書が外されて番号が繰り下がっていた場合、別の文書を描いてしまう。
+        PdfDocument document = documentAt(sourceIndex);
+
         Task<Image> task = new Task<>() {
             @Override
             protected Image call() {
@@ -134,8 +138,7 @@ public final class ThumbnailSource implements AutoCloseable {
                 }
 
                 Image image = SwingFXUtils.toFXImage(
-                        rendering.renderThumbnail(documentAt(sourceIndex), pageNumber, edgePixels),
-                        null);
+                        rendering.renderThumbnail(document, pageNumber, edgePixels), null);
                 synchronized (cache) {
                     cache.put(key, image);
                 }
@@ -144,6 +147,22 @@ public final class ThumbnailSource implements AutoCloseable {
         };
         renderer.execute(task);
         return task;
+    }
+
+    /**
+     * 受け持っている文書を 1 つ外す。このオブジェクトは文書を閉じない。
+     *
+     * <p><b>キャッシュは丸ごと捨てる。</b> 鍵は (出どころ, ページ番号) であり、
+     * 外したぶん後ろの番号が繰り下がると鍵の意味が変わる。付け替えるより捨てるほうが確実で、
+     * 描き直す費用は可視範囲だけに収まる。
+     *
+     * @param sourceIndex 外す出どころ番号
+     */
+    public void removeSource(int sourceIndex) {
+        synchronized (documents) {
+            documents.remove(sourceIndex);
+        }
+        invalidate();
     }
 
     /** 保持しているサムネイルをすべて捨てる。ページを回転したときなどに呼ぶ。 */

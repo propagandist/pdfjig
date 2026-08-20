@@ -84,6 +84,26 @@ public final class DocumentSession implements AutoCloseable {
         adopt(path, PdfDocument.open(path, password));
     }
 
+    /**
+     * 文書を 1 つ外す。そのファイルのページは並びから消える。
+     *
+     * <p>並びを先に直す。取り除くとページが 1 枚も残らない場合はそこで失敗し、
+     * 文書は開いたままで何も壊れない。
+     *
+     * <p>最初のファイルも外せる。外すと {@link #path()} は次のファイルになる。
+     *
+     * @param sourceIndex 外す出どころ番号
+     * @throws PdfjigException 残りが空になる場合は {@link io.github.propagandist.pdfjig.core.ErrorCode#EMPTY_RESULT}
+     */
+    public void remove(int sourceIndex) {
+        order.removeSource(sourceIndex);
+
+        paths.remove(sourceIndex);
+        PdfDocument removed = documents.remove(sourceIndex);
+        thumbnails.removeSource(sourceIndex);
+        removed.close();
+    }
+
     /** 最初に開いたファイル。表題と保存名の既定に使う。 */
     public Path path() {
         return paths.get(0);
