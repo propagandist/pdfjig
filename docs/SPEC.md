@@ -137,7 +137,16 @@ interface PageOperations {
     Path rotate(Path input, Map<Integer, Rotation> rotations, Path output);
     Path extractPages(Path input, PageRange range, Path output);
     Path deletePages(Path input, PageRange range, Path output);
+
+    // 並べ替え・削除・回転を一度の書き出しで確定させる
+    Path assemble(Path input, List<PageSelection> selections, Path output);
 }
+
+// 出力に含める 1 ページの指定
+record PageSelection(
+    int pageNumber,              // 元文書のページ番号（1 始まり）
+    Rotation additionalRotation  // 元の回転角に加える回転。絶対角ではない
+) {}
 
 interface TextExtraction {
     String extractAll(PdfDocument doc);
@@ -163,6 +172,10 @@ interface Exporter {
 }
 // ExportFormat: CSV, JSON, XLSX
 ```
+
+`assemble` は `reorder` / `rotate` / `extractPages` / `deletePages` を置き換えるものではない。単一の操作で済む経路はそれぞれの API を使う。
+
+`assemble` が別に要るのは、UI が並べ替え・削除・回転を続けて行うためである。個別 API の連鎖で実装すると中間ファイルが要るうえ、途中で失敗したときに「並べ替えた状態で回転したら並べ替えが消えた文書が出てくる」ことになり、利用者を誤解させる（§1 の設計思想、`CLAUDE.md` 優先順位 2）。UI 上の編集結果は一度の書き出しで確定させる。
 
 ### 4.3 暗号化の伝播
 
