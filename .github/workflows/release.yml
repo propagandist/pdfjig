@@ -1,0 +1,122 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "バージョン（例: 0.1.0）。タグを打たずに成果物を確かめたいときに使う。"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    # windows-latest には固定しない。jpackage (JDK 21) が要求する WiX は 3.x であり、
+    # ランナーイメージが更新されて内容が変わると黙って壊れる。
+    # WiX 自体もイメージのプリインストールに頼らず、下で明示的に用意する。
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: バージョンを決める
+        id: version
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            # タグ v0.1.0 から先頭の v を落とす。
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          # MSI の ProductVersion は数値のみ。ここで弾いておかないと jpackage まで気づけない。
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "バージョンが major.minor.build の形ではない: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "バージョン: $version"
+
+      - name: WiX 3.14 を用意する
+        run: |
+          if (Get-Command candle.exe -ErrorAction SilentlyContinue) {
+            "WiX は既に PATH にある"
+            exit 0
+          }
+          $dir = "$env:RUNNER_TEMP\wix314"
+          $zip = "$env:RUNNER_TEMP\wix314-binaries.zip"
+          Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          if (-not (Test-Path "$dir\candle.exe")) { throw "WiX の展開に失敗した" }
+          $dir >> $env:GITHUB_PATH
+
+      # ここで落ちたらリリースしない。-Werror とテストを通ったものだけを配る。
+      - name: Build
+        run: ./gradlew build --stacktrace
+
+      - name: Package
+        run: ./gradlew :pdf-desktop:packageAll -Pversion=${{ steps.version.outputs.version }} --stacktrace
+
+      - name: 成果物を検める
+        run: |
+          $runtime = "pdf-desktop\build\jpackage\runtime\bin\java.exe"
+          $modules = & $runtime --list-modules
+          foreach ($required in @("javafx.controls", "javafx.swing", "jdk.localedata")) {
+            if (-not ($modules -match "^$([regex]::Escape($required))@")) {
+              throw "ランタイムイメージに $required が入っていない"
+            }
+          }
+
+          $version = "${{ steps.version.outputs.version }}"
+          $expected = @(
+            "dist\PDFjig-$version.msi",
+            "dist\PDFjig-$version.exe",
+            "dist\PDFjig-$version-win-x64.zip"
+          )
+          foreach ($file in $expected) {
+            if (-not (Test-Path $file)) { throw "$file が無い" }
+            $size = (Get-Item $file).Length
+            # JRE 同梱で 60MB 前後になる。極端に小さいものはランタイムの取り込みに失敗している。
+            if ($size -lt 30MB) { throw "$file が小さすぎる: $size バイト" }
+            "{0}  {1:N1} MB" -f $file, ($size / 1MB)
+          }
+
+          # GUI の実起動は Monocle 等が要るためここでは行わない。実機での確認で担保する。
+
+      - name: チェックサムを作る
+        run: |
+          Get-ChildItem dist -File |
+            Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } |
+            Set-Content -Path dist\SHA256SUMS.txt -Encoding ascii
+          Get-Content dist\SHA256SUMS.txt
+
+      # draft で作る。実機で MSI / EXE / ZIP を触ってから公開したい。
+      # 壊れた成果物を公開すると、取り下げても既に取得された可能性が残る。
+      - name: ドラフトリリースを作る
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: PDFjig ${{ steps.version.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          body_path: docs/RELEASE_NOTES.md
+          files: |
+            dist/PDFjig-${{ steps.version.outputs.version }}.msi
+            dist/PDFjig-${{ steps.version.outputs.version }}.exe
+            dist/PDFjig-${{ steps.version.outputs.version }}-win-x64.zip
+            dist/SHA256SUMS.txt
