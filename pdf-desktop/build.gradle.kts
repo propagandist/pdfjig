@@ -148,6 +148,21 @@ val licenseFile = rootProject.layout.projectDirectory.file("LICENSE")
 
 val iconFile = layout.projectDirectory.file("packaging/pdfjig.ico")
 
+/**
+ * 出力先を空にする。
+ *
+ * <p>jlink も jpackage も出力先が残っていると失敗する。消せなかったことを黙って見過ごすと、
+ * 前回の成果物が残ったまま「既に存在します」で落ち、原因が読めなくなる。
+ * 手元では起動中のアプリがファイルを掴んでいることが実際にある。
+ */
+fun clearDirectory(target: File) {
+    if (target.exists() && !target.deleteRecursively()) {
+        throw GradleException(
+            "出力先を消せませんでした: $target"
+                + "（このディレクトリのファイルを掴んでいるプロセスがないか確認すること）")
+    }
+}
+
 val unpackJavafxJmods = tasks.register<Sync>("unpackJavafxJmods") {
     description = "JavaFX の jmods を展開する。"
     group = "distribution"
@@ -188,7 +203,7 @@ val jlinkRuntime = tasks.register<Exec>("jlinkRuntime") {
 
     doFirst {
         // jlink は出力先が既にあると失敗する。
-        runtimeDir.get().asFile.deleteRecursively()
+        clearDirectory(runtimeDir.get().asFile)
 
         val modulePath = listOf(
             toolchainHome.get().dir("jmods").asFile.absolutePath,
@@ -224,7 +239,7 @@ val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
     val mainClassName = application.mainClass
 
     doFirst {
-        imageDir.get().asFile.deleteRecursively()
+        clearDirectory(imageDir.get().asFile)
 
         commandLine(
             jdkTool("jpackage"),
