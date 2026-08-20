@@ -24,7 +24,9 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.concurrent.Task;
@@ -40,6 +42,7 @@ import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Separator;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
@@ -86,8 +89,11 @@ public final class MainWindow {
 
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
 
+    /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
+    private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
+
     /** ページ並びが変わるたびに表示を更新する。 */
-    private final ListChangeListener<PageSelection> orderListener = change -> onOrderChanged();
+    private final ListChangeListener<PageEntry> orderListener = change -> onOrderChanged();
 
     private DocumentSession session;
 
@@ -103,6 +109,7 @@ public final class MainWindow {
      */
     public Parent build() {
         thumbnails.setOnDelete(this::deleteSelected);
+        legend.setOnRemove(this::removeSource);
 
         Actions actions = buildActions();
 
@@ -157,6 +164,9 @@ public final class MainWindow {
             Action rotateRight,
             Action rotateLeft,
             Action keepRange,
+            Action toggleBreak,
+            Action breakEveryN,
+            Action clearBreaks,
             Action reset,
             Action add,
             Action split) {
@@ -165,6 +175,13 @@ public final class MainWindow {
     private Actions buildActions() {
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
         ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
+
+        // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
+        ObservableValue<Boolean> breakUnavailable = documentOpen.not()
+                .or(busy)
+                .or(thumbnails.selectedIndexProperty().lessThan(1));
+
+        ObservableValue<Boolean> noBreaks = documentOpen.not().or(busy).or(breakCount.isEqualTo(0));
 
         return new Actions(
                 new Action("開く…", "開く", ToolIcons.OPEN,
@@ -186,7 +203,14 @@ public final class MainWindow {
                         () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90), needsDocument),
                 new Action("範囲を指定して残す…", "範囲", ToolIcons.RANGE,
                         null, this::keepRange, needsDocument),
-                new Action("並びと向きを元に戻す", "元に戻す", ToolIcons.RESET,
+                new Action("ここで区切る / 区切りを外す", "区切り", ToolIcons.BREAK,
+                        new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
+                        this::toggleBreak, breakUnavailable),
+                new Action("N ページごとに区切る…", null, null,
+                        null, this::breakEveryNPages, needsDocument),
+                new Action("区切りをすべて外す", null, null,
+                        null, this::clearBreaks, noBreaks),
+                new Action("編集を元に戻す", "元に戻す", ToolIcons.RESET,
                         null, this::resetOrder, needsDocument),
                 new Action("PDF を追加…", "追加", ToolIcons.ADD,
                         null, this::addDocuments, needsDocument),
@@ -202,7 +226,12 @@ public final class MainWindow {
                 new Menu("ページ", null,
                         menuItem(actions.delete()),
                         menuItem(actions.rotateRight()), menuItem(actions.rotateLeft()),
-                        menuItem(actions.keepRange()), menuItem(actions.reset())),
+                        menuItem(actions.keepRange()),
+                        new SeparatorMenuItem(),
+                        menuItem(actions.toggleBreak()), menuItem(actions.breakEveryN()),
+                        menuItem(actions.clearBreaks()),
+                        new SeparatorMenuItem(),
+                        menuItem(actions.reset())),
                 new Menu("ツール", null,
                         menuItem(actions.add()), menuItem(actions.split())));
     }
@@ -220,7 +249,8 @@ public final class MainWindow {
                 toolButton(actions.delete()),
                 toolButton(actions.rotateLeft()), toolButton(actions.rotateRight()),
                 new Separator(),
-                toolButton(actions.keepRange()), toolButton(actions.reset()),
+                toolButton(actions.keepRange()), toolButton(actions.toggleBreak()),
+                toolButton(actions.reset()),
                 new Separator(),
                 toolButton(actions.add()), toolButton(actions.split()));
     }
@@ -429,6 +459,41 @@ public final class MainWindow {
         }
     }
 
+    /**
+     * ファイル一覧から 1 つ外す。
+     *
+     * <p>取り消せない。そのファイルに対して行った並べ替えや回転も一緒に消えるため、
+     * 何ページ消えるのかを見せて確認を取る。
+     */
+    private void removeSource(int sourceIndex) {
+        if (session == null || sourceIndex >= session.sourceCount()) {
+            return;
+        }
+        String name = session.sourceName(sourceIndex);
+        long pageCount = session.order().pages().stream()
+                .filter(entry -> entry.selection().sourceIndex() == sourceIndex)
+                .count();
+
+        Alert alert = new Alert(
+                AlertType.CONFIRMATION,
+                name + " の " + pageCount + " ページを取り除きます。",
+                ButtonType.OK,
+                ButtonType.CANCEL);
+        alert.setHeaderText("このファイルに対して行った並べ替えや回転も消えます。");
+        alert.initOwner(stage);
+        if (alert.showAndWait().filter(ButtonType.OK::equals).isEmpty()) {
+            return;
+        }
+
+        try {
+            session.remove(sourceIndex);
+        } catch (PdfjigException e) {
+            showFailure(e);
+            return;
+        }
+        afterOrderChanged();
+    }
+
     /** 含んでいるファイルが増えると、表題も一覧も状態表示も変わる。 */
     private void afterOrderChanged() {
         updateTitle();
@@ -437,6 +502,7 @@ public final class MainWindow {
 
     /** 並びが変わると、枚数の内訳も変わる。 */
     private void onOrderChanged() {
+        breakCount.set(session == null ? 0 : session.order().breakCount());
         legend.update(session);
         updateStatus();
     }
@@ -448,13 +514,25 @@ public final class MainWindow {
      * するためここでは使わない。並べ替えや削除をした後で分割したとき、それが
      * 反映されない結果を渡すほうが利用者を惑わせる。
      */
+    /**
+     * 区切りに従って分割する。
+     *
+     * <p>区切りが 1 つも無いときは何もしない。全ページを 1 ファイルに書き出しても
+     * 分割にならず、黙ってそうするより、区切りが要ることを伝えるほうが正直である。
+     */
     private void splitDocument() {
         if (session == null) {
             return;
         }
-        Optional<Integer> chunk = PageCountPrompt.ask(
-                stage, session.order().size(), baseNameOf(session.path()));
-        if (chunk.isEmpty()) {
+        PageOrder order = session.order();
+        if (order.breakCount() == 0) {
+            show(
+                    AlertType.INFORMATION,
+                    "区切りが指定されていません。"
+                            + System.lineSeparator()
+                            + "新しいファイルの先頭にするページを選び、「ここで区切る」を押してください。"
+                            + System.lineSeparator()
+                            + "枚数で機械的に区切るなら「N ページごとに区切る…」を使います。");
             return;
         }
 
@@ -466,14 +544,37 @@ public final class MainWindow {
         }
 
         List<Path> sources = session.paths();
-        List<PageSelection> pages = session.order().toPageSelections();
+        List<List<PageSelection>> segments = order.toSegments();
         String baseName = baseNameOf(session.path());
-        int pagesPerFile = chunk.get();
         Path outputDir = directory.toPath();
 
         runAsync(
-                () -> splitInto(sources, pages, pagesPerFile, outputDir, baseName),
+                () -> splitInto(sources, segments, outputDir, baseName),
                 this::showSplitResult);
+    }
+
+    /** 選択中のページの区切りを付け外しする。 */
+    private void toggleBreak() {
+        int index = thumbnails.selectedIndex();
+        if (session == null || index <= 0) {
+            return;
+        }
+        session.order().toggleBreakAt(index);
+    }
+
+    /** 枚数で機械的に区切り直す。書き出しはせず、画面で確かめてから分割する。 */
+    private void breakEveryNPages() {
+        if (session == null) {
+            return;
+        }
+        PageCountPrompt.ask(stage, session.order().size(), baseNameOf(session.path()))
+                .ifPresent(session.order()::applyEveryNPages);
+    }
+
+    private void clearBreaks() {
+        if (session != null) {
+            session.order().clearBreaks();
+        }
     }
 
     private void resetOrder() {
@@ -535,15 +636,13 @@ public final class MainWindow {
 
     private static SplitResult splitInto(
             List<Path> sources,
-            List<PageSelection> pages,
-            int pagesPerFile,
+            List<List<PageSelection>> segments,
             Path outputDir,
             String baseName) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        int fileCount = (pages.size() + pagesPerFile - 1) / pagesPerFile;
-        List<Path> outputs = IntStream.rangeClosed(1, fileCount)
+        List<Path> outputs = IntStream.rangeClosed(1, segments.size())
                 .mapToObj(number -> outputDir.resolve(
                         String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)))
                 .toList();
@@ -554,12 +653,10 @@ public final class MainWindow {
                 throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
             }
         }
-        for (int i = 0; i < fileCount; i++) {
-            int from = i * pagesPerFile;
-            int to = Math.min(from + pagesPerFile, pages.size());
-            operations.assemble(sources, pages.subList(from, to), outputs.get(i));
+        for (int i = 0; i < segments.size(); i++) {
+            operations.assemble(sources, segments.get(i), outputs.get(i));
         }
-        return new SplitResult(fileCount, List.copyOf(warnings));
+        return new SplitResult(segments.size(), List.copyOf(warnings));
     }
 
     /** 分割の結果。書き出した数と、その途中で出た警告。 */
@@ -693,6 +790,10 @@ public final class MainWindow {
                     .append(" ページ");
             if (session.sourceCount() > 1) {
                 text.append("（").append(session.sourceCount()).append(" ファイル）");
+            }
+            if (session.order().breakCount() > 0) {
+                text.append("　区切り ").append(session.order().breakCount()).append(" か所 → ")
+                        .append(session.order().segmentCount()).append(" ファイルに分かれます");
             }
             if (session.order().modified()) {
                 text.append("（未保存の変更があります）");

@@ -1,9 +1,10 @@
 package io.github.propagandist.pdfjig.desktop;
 
-import io.github.propagandist.pdfjig.core.PageSelection;
 import java.util.List;
+import java.util.function.IntConsumer;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.Tooltip;
@@ -35,6 +36,9 @@ final class SourceLegend {
      */
     private final FlowPane root = new FlowPane(16, 4);
 
+    /** 「×」で呼ぶ処理。画面側が差す。 */
+    private IntConsumer onRemove = sourceIndex -> { };
+
     SourceLegend() {
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
@@ -44,6 +48,11 @@ final class SourceLegend {
     /** 画面に置くための節点。 */
     Node node() {
         return root;
+    }
+
+    /** ファイルを外すときに呼ぶ処理を差す。 */
+    void setOnRemove(IntConsumer action) {
+        this.onRemove = action;
     }
 
     /**
@@ -78,14 +87,14 @@ final class SourceLegend {
 
     private static int[] countsPerSource(DocumentSession session) {
         int[] counts = new int[session.sourceCount()];
-        List<PageSelection> pages = session.order().pages();
-        for (PageSelection page : pages) {
-            counts[page.sourceIndex()]++;
+        List<PageEntry> pages = session.order().pages();
+        for (PageEntry page : pages) {
+            counts[page.selection().sourceIndex()]++;
         }
         return counts;
     }
 
-    private static Node chip(int sourceIndex, String name, int pageCount) {
+    private Node chip(int sourceIndex, String name, int pageCount) {
         Region swatch = new Region();
         swatch.getStyleClass().add("source-swatch");
         swatch.setMinSize(CHIP_SIZE, CHIP_SIZE);
@@ -104,7 +113,14 @@ final class SourceLegend {
         Label count = new Label(pageCount + " ページ");
         count.getStyleClass().add("source-count");
 
-        HBox chip = new HBox(6, swatch, label, count);
+        Button remove = new Button();
+        remove.getStyleClass().add("source-remove");
+        remove.setGraphic(ToolIcons.of(ToolIcons.REMOVE));
+        remove.setFocusTraversable(false);
+        remove.setTooltip(new Tooltip(name + " をこの編集から外す"));
+        remove.setOnAction(event -> onRemove.accept(sourceIndex));
+
+        HBox chip = new HBox(6, swatch, label, count, remove);
         chip.setAlignment(Pos.CENTER_LEFT);
         return chip;
     }

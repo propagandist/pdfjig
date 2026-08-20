@@ -47,12 +47,17 @@ final class ThumbnailTile {
     /** 出どころを示す帯の高さ。 */
     private static final double ACCENT_HEIGHT = 3;
 
+    /** 区切りの縦線の幅。 */
+    private static final double BREAK_WIDTH = 3;
+
     /** 画像が届くまでの枠の形。A4 縦を仮に置く。 */
     private static final double PLACEHOLDER_RATIO = 1 / Math.sqrt(2);
 
     private static final PseudoClass SELECTED = PseudoClass.getPseudoClass("selected");
 
     private static final PseudoClass DROP_TARGET = PseudoClass.getPseudoClass("drop-target");
+
+    private static final PseudoClass BREAK = PseudoClass.getPseudoClass("break");
 
     private final ThumbnailGrid grid;
 
@@ -72,7 +77,17 @@ final class ThumbnailTile {
 
     private final Label caption = new Label();
 
-    private final VBox root = new VBox(5, page, caption);
+    /**
+     * 区切りの縦線。
+     *
+     * <p>タイルに重ねて描く。枠線として持たせるとタイルの内側の余白が変わり、
+     * 区切りのあるページだけ中身がずれる。
+     */
+    private final Region breakMark = new Region();
+
+    private final VBox body = new VBox(5, page, caption);
+
+    private final StackPane root = new StackPane(body, breakMark);
 
     /** 表示中のページの、並びの中での位置。空きタイルのときは -1。 */
     private int index = -1;
@@ -103,10 +118,17 @@ final class ThumbnailTile {
 
         page.setAlignment(Pos.BOTTOM_CENTER);
 
+        breakMark.getStyleClass().add("thumbnail-break");
+        breakMark.setMaxWidth(BREAK_WIDTH);
+        breakMark.setMouseTransparent(true);
+        StackPane.setAlignment(breakMark, Pos.CENTER_LEFT);
+
+        body.getStyleClass().add("thumbnail-body");
+        body.setAlignment(Pos.BOTTOM_CENTER);
+
         caption.getStyleClass().add("thumbnail-caption");
 
         root.getStyleClass().add("thumbnail-tile");
-        root.setAlignment(Pos.BOTTOM_CENTER);
         root.setMinSize(TILE_WIDTH, TILE_HEIGHT);
         root.setPrefSize(TILE_WIDTH, TILE_HEIGHT);
         root.setMaxSize(TILE_WIDTH, TILE_HEIGHT);
@@ -132,7 +154,8 @@ final class ThumbnailTile {
      * @param selection 表示するページ
      * @param selected  選択中か
      */
-    void show(int pageIndex, PageSelection selection, boolean selected) {
+    void show(int pageIndex, PageEntry entry, boolean selected) {
+        PageSelection selection = entry.selection();
         boolean samePage = index == pageIndex
                 && imageView.getImage() != null
                 && Objects.equals(shown, selection);
@@ -143,6 +166,8 @@ final class ThumbnailTile {
         // 帯の有無は並びの中身ではなく、いくつのファイルを含んでいるかで決まる。
         // 同じページを出し続けている間にファイルが増えることがあるので、毎回当て直す。
         applyAccent(selection.sourceIndex());
+        // 区切りも並びの中身とは別に動く。先頭に来たページの区切りは効かないので出さない。
+        applyBreak(pageIndex > 0 && entry.startsNewFile());
 
         if (samePage) {
             return;
@@ -186,6 +211,11 @@ final class ThumbnailTile {
         pending = task;
     }
 
+    /** 区切りの縦線を当てる。「このページから新しいファイルが始まる」ことを示す。 */
+    private void applyBreak(boolean present) {
+        breakMark.setVisible(present);
+    }
+
     /** 出どころの帯を当てる。1 ファイルだけのときは出さない。 */
     private void applyAccent(int sourceIndex) {
         boolean show = grid.showsSources();
@@ -212,6 +242,7 @@ final class ThumbnailTile {
         root.setVisible(false);
         root.setManaged(true);
         root.pseudoClassStateChanged(SELECTED, false);
+        applyBreak(false);
         markDropTarget(false);
     }
 

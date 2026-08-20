@@ -44,12 +44,12 @@ final class ThumbnailGrid {
     /** 縦スクロールバーの見込み幅。桁数を決めるときに引いておく。 */
     private static final double SCROLLBAR_ALLOWANCE = 18;
 
-    private final ListView<List<PageSelection>> rows = new ListView<>();
+    private final ListView<List<PageEntry>> rows = new ListView<>();
 
     private final SimpleIntegerProperty selectedIndex = new SimpleIntegerProperty(-1);
 
     /** ページ並びが変わったら行を組み直す。 */
-    private final ListChangeListener<PageSelection> pagesListener = change -> rebuild();
+    private final ListChangeListener<PageEntry> pagesListener = change -> rebuild();
 
     /** 1 行あたりの枚数。 */
     private int columns = 1;
@@ -223,8 +223,8 @@ final class ThumbnailGrid {
             return;
         }
 
-        List<PageSelection> pages = order.pages();
-        List<List<PageSelection>> next = new ArrayList<>();
+        List<PageEntry> pages = order.pages();
+        List<List<PageEntry>> next = new ArrayList<>();
         for (int from = 0; from < pages.size(); from += columns) {
             next.add(List.copyOf(pages.subList(from, Math.min(from + columns, pages.size()))));
         }
@@ -321,7 +321,7 @@ final class ThumbnailGrid {
      *
      * <p>タイルは行あたり固定本数を作って使い回す。桁数が変わったときだけ作り足す。
      */
-    private static final class RowCell extends ListCell<List<PageSelection>> {
+    private static final class RowCell extends ListCell<List<PageEntry>> {
 
         private final ThumbnailGrid grid;
 
@@ -336,7 +336,7 @@ final class ThumbnailGrid {
         }
 
         @Override
-        protected void updateItem(List<PageSelection> pages, boolean empty) {
+        protected void updateItem(List<PageEntry> pages, boolean empty) {
             super.updateItem(pages, empty);
 
             if (empty || pages == null) {

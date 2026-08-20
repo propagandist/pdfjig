@@ -76,6 +76,26 @@
     -fx-background-radius: 3;
 }
 
+/* このファイルを編集から外す。控えめに置き、hover で初めて色が付く。 */
+.source-remove {
+    -fx-background-color: transparent;
+    -fx-background-radius: 4;
+    -fx-padding: 2;
+}
+
+.source-remove:hover {
+    -fx-background-color: #f0d7d7;
+}
+
+.source-remove .tool-icon {
+    -fx-stroke: #8a939c;
+    -fx-stroke-width: 1.6;
+}
+
+.source-remove:hover .tool-icon {
+    -fx-stroke: #b03a3a;
+}
+
 /* ── 一覧 ───────────────────────────────────────────────────────── */
 
 .thumbnail-list {
@@ -102,9 +122,13 @@
 /* ── タイル ─────────────────────────────────────────────────────── */
 
 .thumbnail-tile {
-    -fx-padding: 10 8 8 8;
     -fx-background-radius: 6;
     -fx-background-color: transparent;
+}
+
+/* 余白はタイルではなく中身に持たせる。区切りの線をタイルの端に置くため。 */
+.thumbnail-body {
+    -fx-padding: 10 8 8 8;
 }
 
 .thumbnail-tile:hover {
@@ -129,6 +153,15 @@
 }
 
 /* ドロップ先。選択と別の色にして、どちらの状態か取り違えないようにする。 */
+/*
+ * 区切り。「このページから新しいファイルが始まる」ことを示す。
+ * 出どころの帯（ページの下）とは向きも位置も違うので取り違えない。
+ */
+.thumbnail-break {
+    -fx-background-color: #46525f;
+    -fx-background-radius: 2;
+}
+
 .thumbnail-tile:drop-target .thumbnail-frame {
     -fx-border-color: #e8a33d;
     -fx-border-width: 2;

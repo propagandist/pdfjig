@@ -49,6 +49,13 @@ final class ToolIcons {
             "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
                     + "M14 2v6h6M12 18v-6M9 15h6";
 
+    /** ファイル一覧から外す。× 印。 */
+    static final String REMOVE = "M7 7l10 10M17 7l-10 10";
+
+    /** ここで区切る。2 枚の紙の間に破線。 */
+    static final String BREAK =
+            "M4 4h5v16H4zM15 4h5v16h-5zM12 3v3M12 10.5v3M12 18v3";
+
     /** 分割。切り離された 2 枚。 */
     static final String SPLIT =
             "M4 4h6v16H4zM14 4h6v16h-6z";
