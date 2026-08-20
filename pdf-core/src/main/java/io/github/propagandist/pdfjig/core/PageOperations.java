@@ -63,6 +63,26 @@ public interface PageOperations {
     Path reorder(Path input, List<Integer> newOrder, Path output);
 
     /**
+     * 指定したページを、指定した順と向きで並べた文書を書き出す。
+     *
+     * <p>{@link #reorder} と {@link #extractPages} と {@link #deletePages} と
+     * {@link #rotate} を一度に表現できる。UI 上でこれらを続けて行った結果は、
+     * 一度の書き出しで確定させなければならない。個別の操作に分けると、並べ替えた
+     * 状態で回転を実行した利用者に、並べ替えの消えた文書を渡すことになる。
+     *
+     * <p>同じページを複数回含めてよい。禁止する理由がなく、
+     * {@link SplitStrategy.ByRanges} が範囲の重なりを許していることとも揃う。
+     *
+     * @param input  入力ファイル
+     * @param pages  出力に含めるページ。この順に並ぶ
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     * @throws PdfjigException 指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
+     *                         範囲外のページを含む場合は {@link ErrorCode#PAGE_OUT_OF_RANGE}
+     */
+    Path assemble(Path input, List<PageSelection> pages, Path output);
+
+    /**
      * ページを回転する。
      *
      * <p><b>指定は現在の回転角への追加である。</b> {@link Rotation#CLOCKWISE_90} を指定すると、

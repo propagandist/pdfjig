@@ -42,6 +42,9 @@ public enum ErrorCode {
     /** テキストを抽出できない。 */
     TEXT_EXTRACTION_FAILED("テキストを抽出できませんでした。"),
 
+    /** ページを画像に描画できない。 */
+    RENDERING_FAILED("ページを表示用の画像に変換できませんでした。"),
+
     /** 出力先に同名のファイルが既に存在する。 */
     OUTPUT_ALREADY_EXISTS("出力先に同名のファイルが既に存在します。"),
 

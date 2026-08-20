@@ -2,11 +2,10 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.ai.NoOpProvider;
+import java.nio.file.Path;
+import java.util.List;
 import javafx.application.Application;
-import javafx.geometry.Insets;
 import javafx.scene.Scene;
-import javafx.scene.control.Label;
-import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
 /**
@@ -18,6 +17,10 @@ import javafx.stage.Stage;
  */
 public final class PdfjigApplication extends Application {
 
+    private static final int INITIAL_WIDTH = 960;
+
+    private static final int INITIAL_HEIGHT = 720;
+
     /**
      * 既定は {@link NoOpProvider}。API キー未設定でもここで例外にならないことが
      * CLAUDE.md INV-3 の起点になる。
@@ -26,17 +29,21 @@ public final class PdfjigApplication extends Application {
 
     @Override
     public void start(Stage stage) {
-        Label title = new Label("pdfjig");
-        Label status = new Label(aiProvider.isAvailable()
-                ? "AI 機能: 利用可能"
-                : "AI 機能: 無効（AI なしで全機能が利用できます）");
+        MainWindow window = new MainWindow(stage, aiProvider);
 
-        VBox root = new VBox(8, title, status);
-        root.setPadding(new Insets(16));
+        Scene scene = new Scene(window.build(), INITIAL_WIDTH, INITIAL_HEIGHT);
+        scene.getStylesheets().add(
+                PdfjigApplication.class.getResource("pdfjig.css").toExternalForm());
 
-        stage.setTitle("pdfjig");
-        stage.setScene(new Scene(root, 480, 240));
+        stage.setScene(scene);
+        stage.setOnHidden(event -> window.dispose());
         stage.show();
+
+        // 起動引数でファイルを渡せる。ファイルの関連付けから開かれる経路でもある。
+        List<String> arguments = getParameters().getRaw();
+        if (!arguments.isEmpty()) {
+            window.open(Path.of(arguments.get(0)));
+        }
     }
 
     public static void main(String[] args) {
