@@ -2,7 +2,6 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
-import io.github.propagandist.pdfjig.core.MergeOptions;
 import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
@@ -156,7 +155,7 @@ public final class MainWindow {
             Action rotateLeft,
             Action keepRange,
             Action reset,
-            Action merge,
+            Action add,
             Action split) {
     }
 
@@ -186,8 +185,8 @@ public final class MainWindow {
                         null, this::keepRange, needsDocument),
                 new Action("並びと向きを元に戻す", "元に戻す", ToolIcons.RESET,
                         null, this::resetOrder, needsDocument),
-                new Action("複数の PDF を結合…", "結合", ToolIcons.MERGE,
-                        null, this::mergeDocuments, busy),
+                new Action("PDF を追加…", "追加", ToolIcons.ADD,
+                        null, this::addDocuments, needsDocument),
                 new Action("この文書を分割…", "分割", ToolIcons.SPLIT,
                         null, this::splitDocument, needsDocument));
     }
@@ -202,7 +201,7 @@ public final class MainWindow {
                         menuItem(actions.rotateRight()), menuItem(actions.rotateLeft()),
                         menuItem(actions.keepRange()), menuItem(actions.reset())),
                 new Menu("ツール", null,
-                        menuItem(actions.merge()), menuItem(actions.split())));
+                        menuItem(actions.add()), menuItem(actions.split())));
     }
 
     /**
@@ -220,7 +219,7 @@ public final class MainWindow {
                 new Separator(),
                 toolButton(actions.keepRange()), toolButton(actions.reset()),
                 new Separator(),
-                toolButton(actions.merge()), toolButton(actions.split()));
+                toolButton(actions.add()), toolButton(actions.split()));
     }
 
     private MenuItem menuItem(Action action) {
@@ -326,10 +325,10 @@ public final class MainWindow {
             return;
         }
 
-        Path source = session.path();
+        List<Path> sources = session.paths();
         List<PageSelection> pages = session.order().toPageSelections();
         Path output = chosen.toPath();
-        runAsync(() -> assemble(source, pages, output), this::showWarnings);
+        runAsync(() -> assemble(sources, pages, output), this::showWarnings);
     }
 
     private void deleteSelected() {
@@ -361,44 +360,76 @@ public final class MainWindow {
     }
 
     /**
-     * 複数の PDF を 1 つに結合する。
+     * 開いている文書に、他の PDF のページを足す。
      *
-     * <p>選んだ順序はダイアログの実装と環境に左右されるため当てにできない。
-     * 名前順に並べたうえで、その順序を見せて承認を求める。
+     * <p>足したページは並びの末尾に付き、以後は元からあったページと区別なく
+     * 並べ替え・回転・削除ができる。ファイルが書き出されるのは「名前を付けて保存」のときだけで、
+     * 他の操作と同じ流れになる。
+     *
+     * <p>並べる順序は名前順にする。ファイル選択ダイアログが返す順序は環境によって変わり、
+     * 選んだ順に並ぶと思い込ませてしまうため。順序が違えばサムネイルの上でドラッグして
+     * 直せるので、確認は求めない。
      */
-    private void mergeDocuments() {
+    private void addDocuments() {
+        if (session == null) {
+            return;
+        }
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("結合する PDF を選ぶ");
+        chooser.setTitle("追加する PDF を選ぶ");
         chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
 
         List<File> chosen = chooser.showOpenMultipleDialog(stage);
         if (chosen == null) {
             return;
         }
-        if (chosen.size() < 2) {
-            show(AlertType.INFORMATION, "結合するには 2 つ以上のファイルを選んでください。");
-            return;
-        }
 
-        List<Path> inputs = chosen.stream()
+        chosen.stream()
                 .map(File::toPath)
                 .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                .toList();
-        if (!confirmMergeOrder(inputs)) {
+                .forEach(this::addDocument);
+    }
+
+    /**
+     * 1 つのファイルを足す。
+     *
+     * <p>読み込みは短く、足した結果は画面にすぐ出したい。ここは同期で行う。
+     * ページの描画は今までどおりサムネイル側が非同期で受け持つ。
+     */
+    private void addDocument(Path path) {
+        try {
+            session.add(path);
+        } catch (PdfjigException e) {
+            if (e.errorCode() == ErrorCode.PASSWORD_REQUIRED) {
+                addWithPassword(path, false);
+            } else {
+                showFailure(e);
+            }
+        }
+        afterOrderChanged();
+    }
+
+    /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
+    private void addWithPassword(Path path, boolean retry) {
+        Optional<char[]> entered = PasswordPrompt.ask(stage, path, retry);
+        if (entered.isEmpty()) {
             return;
         }
-
-        FileChooser target = new FileChooser();
-        target.setTitle("結合したファイルの保存先");
-        target.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
-        target.setInitialFileName("merged.pdf");
-
-        File saveTo = target.showSaveDialog(stage);
-        if (saveTo == null) {
-            return;
+        try {
+            // この配列は DocumentSession.add の中でゼロ埋めされる。
+            session.add(path, entered.get());
+        } catch (PdfjigException e) {
+            if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
+                addWithPassword(path, true);
+            } else {
+                showFailure(e);
+            }
         }
-        Path output = saveTo.toPath();
-        runAsync(() -> mergeInto(inputs, output), this::showWarnings);
+    }
+
+    /** 含んでいるファイルが増えると、表題と状態表示の両方が変わる。 */
+    private void afterOrderChanged() {
+        updateTitle();
+        updateStatus();
     }
 
     /**
@@ -412,7 +443,8 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        Optional<Integer> chunk = PageCountPrompt.ask(stage, session.order().size());
+        Optional<Integer> chunk = PageCountPrompt.ask(
+                stage, session.order().size(), baseNameOf(session.path()));
         if (chunk.isEmpty()) {
             return;
         }
@@ -424,30 +456,15 @@ public final class MainWindow {
             return;
         }
 
-        Path source = session.path();
+        List<Path> sources = session.paths();
         List<PageSelection> pages = session.order().toPageSelections();
         String baseName = baseNameOf(session.path());
         int pagesPerFile = chunk.get();
         Path outputDir = directory.toPath();
 
         runAsync(
-                () -> splitInto(source, pages, pagesPerFile, outputDir, baseName),
+                () -> splitInto(sources, pages, pagesPerFile, outputDir, baseName),
                 this::showSplitResult);
-    }
-
-    private boolean confirmMergeOrder(List<Path> inputs) {
-        String order = IntStream.range(0, inputs.size())
-                .mapToObj(i -> (i + 1) + ". " + inputs.get(i).getFileName())
-                .collect(Collectors.joining(System.lineSeparator()));
-
-        Alert alert = new Alert(
-                AlertType.CONFIRMATION,
-                "この順に結合します。" + System.lineSeparator() + System.lineSeparator() + order,
-                ButtonType.OK,
-                ButtonType.CANCEL);
-        alert.setHeaderText("選んだ順序は環境によって変わるため、名前順に並べています。");
-        alert.initOwner(stage);
-        return alert.showAndWait().filter(ButtonType.OK::equals).isPresent();
     }
 
     private void resetOrder() {
@@ -460,7 +477,7 @@ public final class MainWindow {
         closeSession();
         session = opened;
 
-        thumbnails.show(opened.order(), opened.thumbnails());
+        thumbnails.show(opened);
         opened.order().pages().addListener(orderListener);
 
         documentOpen.set(true);
@@ -492,27 +509,14 @@ public final class MainWindow {
      * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
      * 元のファイルはそのまま残る。
      */
-    private static List<Warning> assemble(Path source, List<PageSelection> pages, Path output) {
+    private static List<Warning> assemble(
+            List<Path> sources, List<PageSelection> pages, Path output) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
         Path temporary = temporaryNextTo(output);
         try {
-            operations.assemble(source, pages, temporary);
-            move(temporary, output);
-        } finally {
-            deleteQuietly(temporary);
-        }
-        return List.copyOf(warnings);
-    }
-
-    private static List<Warning> mergeInto(List<Path> inputs, Path output) {
-        List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
-        PageOperations operations = new PdfBoxPageOperations(warnings::add);
-
-        Path temporary = temporaryNextTo(output);
-        try {
-            operations.merge(inputs, temporary, MergeOptions.defaults());
+            operations.assemble(sources, pages, temporary);
             move(temporary, output);
         } finally {
             deleteQuietly(temporary);
@@ -521,7 +525,7 @@ public final class MainWindow {
     }
 
     private static SplitResult splitInto(
-            Path source,
+            List<Path> sources,
             List<PageSelection> pages,
             int pagesPerFile,
             Path outputDir,
@@ -544,7 +548,7 @@ public final class MainWindow {
         for (int i = 0; i < fileCount; i++) {
             int from = i * pagesPerFile;
             int to = Math.min(from + pagesPerFile, pages.size());
-            operations.assemble(source, pages.subList(from, to), outputs.get(i));
+            operations.assemble(sources, pages.subList(from, to), outputs.get(i));
         }
         return new SplitResult(fileCount, List.copyOf(warnings));
     }
@@ -656,9 +660,17 @@ public final class MainWindow {
     }
 
     private void updateTitle() {
-        stage.setTitle(session == null
-                ? TITLE
-                : TITLE + " — " + session.path().getFileName());
+        if (session == null) {
+            stage.setTitle(TITLE);
+            return;
+        }
+        // 何を編集しているのかは最初に開いたファイルで示し、足したぶんは数で添える。
+        // 全部のファイル名を並べると表題に収まらない。
+        String title = TITLE + " — " + session.path().getFileName();
+        if (session.sourceCount() > 1) {
+            title += " ほか " + (session.sourceCount() - 1) + " ファイル";
+        }
+        stage.setTitle(title);
     }
 
     private void updateStatus() {
@@ -670,6 +682,9 @@ public final class MainWindow {
                     .append(" / ")
                     .append(session.sourcePageCount())
                     .append(" ページ");
+            if (session.sourceCount() > 1) {
+                text.append("（").append(session.sourceCount()).append(" ファイル）");
+            }
             if (session.order().modified()) {
                 text.append("（未保存の変更があります）");
             }

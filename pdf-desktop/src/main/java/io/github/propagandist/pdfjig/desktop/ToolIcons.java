@@ -44,9 +44,10 @@ final class ToolIcons {
     static final String ROTATE_RIGHT =
             "M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10";
 
-    /** 結合。重なった紙。 */
-    static final String MERGE =
-            "M12 2L2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5";
+    /** PDF を追加。紙にプラス。 */
+    static final String ADD =
+            "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                    + "M14 2v6h6M12 18v-6M9 15h6";
 
     /** 分割。切り離された 2 枚。 */
     static final String SPLIT =

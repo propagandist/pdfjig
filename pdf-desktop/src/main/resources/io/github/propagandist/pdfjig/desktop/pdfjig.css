@@ -132,3 +132,8 @@
 .status-bar .label {
     -fx-text-fill: #4a5560;
 }
+
+/* ダイアログで、指定の結果として何が起きるかを添える行。 */
+.prompt-summary {
+    -fx-text-fill: #4a5560;
+}
