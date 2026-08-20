@@ -200,6 +200,61 @@ class PdfBoxPageOperationsTest {
     }
 
     @Nested
+    class Assemble {
+
+        @Test
+        @DisplayName("指定したページを指定した順に並べる")
+        void keepsGivenSelectionAndOrder() throws Exception {
+            Path input = TestPdfs.withText(
+                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
+
+            Path output = operations.assemble(
+                    input, List.of(4, 1), tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("P4", "P1"), textsOf(output));
+        }
+
+        @Test
+        @DisplayName("同じページを複数回含められる")
+        void allowsRepeatedPages() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
+
+            Path output = operations.assemble(
+                    input, List.of(2, 2, 1), tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("P2", "P2", "P1"), textsOf(output));
+        }
+
+        @Test
+        @DisplayName("空の指定は EMPTY_RESULT")
+        void rejectsEmptySelection() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 2);
+
+            assertEquals(
+                    ErrorCode.EMPTY_RESULT,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            input, List.of(), tempDir.resolve("assembled.pdf")))
+                            .errorCode());
+        }
+
+        @Test
+        @DisplayName("範囲外のページを含むと PAGE_OUT_OF_RANGE")
+        void rejectsPageOutOfRange() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 2);
+
+            assertEquals(
+                    ErrorCode.PAGE_OUT_OF_RANGE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            input, List.of(1, 3), tempDir.resolve("assembled.pdf")))
+                            .errorCode());
+        }
+    }
+
+    @Nested
     class Rotate {
 
         @Test

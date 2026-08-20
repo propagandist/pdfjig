@@ -63,6 +63,25 @@ public interface PageOperations {
     Path reorder(Path input, List<Integer> newOrder, Path output);
 
     /**
+     * 指定したページだけを、指定した順に並べた文書を書き出す。
+     *
+     * <p>{@link #reorder} と {@link #extractPages} と {@link #deletePages} を
+     * 一度に表現できる。UI 上で並べ替えと削除を続けて行った結果を 1 回の保存で
+     * 書き出すために必要であり、中間ファイルを経由せずに済ませるために置いている。
+     *
+     * <p>同じページを複数回含めてよい。禁止する理由がなく、
+     * {@link SplitStrategy.ByRanges} が範囲の重なりを許していることとも揃う。
+     *
+     * @param input       入力ファイル
+     * @param pageNumbers 出力に含めるページ。この順に並ぶ
+     * @param output      出力ファイル。既存であってはならない
+     * @return {@code output}
+     * @throws PdfjigException 指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
+     *                         範囲外のページを含む場合は {@link ErrorCode#PAGE_OUT_OF_RANGE}
+     */
+    Path assemble(Path input, List<Integer> pageNumbers, Path output);
+
+    /**
      * ページを回転する。
      *
      * <p><b>指定は現在の回転角への追加である。</b> {@link Rotation#CLOCKWISE_90} を指定すると、

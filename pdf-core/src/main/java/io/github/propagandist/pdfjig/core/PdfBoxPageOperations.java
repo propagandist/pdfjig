@@ -89,6 +89,16 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
+    public Path assemble(Path input, List<Integer> pageNumbers, Path output) {
+        requireAbsent(output);
+        try (PdfDocument source = open(input)) {
+            requireSelectable(pageNumbers, source.pageCount());
+            writePages(source, pageNumbers, output);
+        }
+        return output;
+    }
+
+    @Override
     public Path rotate(Path input, Map<Integer, Rotation> rotations, Path output) {
         if (rotations == null) {
             throw new IllegalArgumentException("rotations は null にできません。");
@@ -236,6 +246,17 @@ public final class PdfBoxPageOperations implements PageOperations {
                     || pageNumber > pageCount
                     || !seen.add(pageNumber)) {
                 throw new PdfjigException(ErrorCode.INVALID_PAGE_ORDER);
+            }
+        }
+    }
+
+    private static void requireSelectable(List<Integer> pageNumbers, int pageCount) {
+        if (pageNumbers == null || pageNumbers.isEmpty()) {
+            throw new PdfjigException(ErrorCode.EMPTY_RESULT);
+        }
+        for (Integer pageNumber : pageNumbers) {
+            if (pageNumber == null || pageNumber < 1 || pageNumber > pageCount) {
+                throw new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE);
             }
         }
     }
