@@ -2,6 +2,9 @@ package io.github.propagandist.pdfjig.core;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -66,6 +69,23 @@ final class TestPdfs {
         return target;
     }
 
+    /**
+     * 指定した回転角を持つページからなる PDF を作る。
+     *
+     * <p>PDF 仕様に反する角度もそのまま書き込める。壊れた入力に対する挙動を試すため。
+     */
+    static Path rotated(Path target, int... rotations) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            for (int rotation : rotations) {
+                PDPage page = new PDPage();
+                page.setRotation(rotation);
+                document.addPage(page);
+            }
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
     /** AES-256 で暗号化した 1 ページの PDF を作る。 */
     static Path encrypted(Path target, String userPassword) throws IOException {
         try (PDDocument document = new PDDocument()) {
@@ -80,5 +100,41 @@ final class TestPdfs {
             document.save(target.toFile());
         }
         return target;
+    }
+
+    /**
+     * オーナーパスワードだけを設定した PDF を作る。
+     *
+     * <p>ユーザーパスワードが空なので誰でも開けるが、暗号化はされている。
+     * 「開けるのに保護されている」という、伝播の判定が効く状態を作るために使う。
+     */
+    static Path ownerProtected(Path target, String ownerPassword, int pageCount)
+            throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            for (int i = 0; i < pageCount; i++) {
+                document.addPage(new PDPage());
+            }
+
+            AccessPermission permissions = new AccessPermission();
+            permissions.setCanPrint(false);
+            StandardProtectionPolicy policy =
+                    new StandardProtectionPolicy(ownerPassword, "", permissions);
+            policy.setEncryptionKeyLength(256);
+            document.protect(policy);
+
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /** 各ページの回転角を先頭から順に返す。 */
+    static List<Integer> rotationsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            List<Integer> rotations = new ArrayList<>();
+            for (PDPage page : document.getPages()) {
+                rotations.add(page.getRotation());
+            }
+            return rotations;
+        }
     }
 }

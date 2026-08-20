@@ -75,8 +75,10 @@ public interface PageOperations {
      * @param rotations ページ番号から追加回転への対応
      * @param output    出力ファイル。既存であってはならない
      * @return {@code output}
-     * @throws PdfjigException ページが範囲外、または入力のページが 90 度の倍数でない
-     *                         回転角を持つ場合（{@link ErrorCode#MALFORMED_PAGE_ROTATION}）
+     * <p>PDF 仕様に反する回転角（90 度の倍数でない値）を持つ入力のページは、
+     * PDFBox の解釈に従い 0 度として扱う。
+     *
+     * @throws PdfjigException ページが範囲外の場合
      */
     Path rotate(Path input, Map<Integer, Rotation> rotations, Path output);
 

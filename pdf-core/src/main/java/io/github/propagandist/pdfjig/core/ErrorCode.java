@@ -33,9 +33,6 @@ public enum ErrorCode {
     /** 操作の結果、ページが 1 枚も残らない。 */
     EMPTY_RESULT("この操作を行うとページが 1 枚も残りません。"),
 
-    /** ページの回転角が 90 度の倍数でない。 */
-    MALFORMED_PAGE_ROTATION("ページの回転角が PDF 仕様に反しています。"),
-
     /** 対応していない暗号化方式。 */
     UNSUPPORTED_ENCRYPTION("この暗号化方式には対応していません。"),
 
