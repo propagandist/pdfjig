@@ -17,7 +17,10 @@ val javafxVersion = libs.versions.javafx.get()
 
 javafx {
     version = javafxVersion
-    modules = listOf("javafx.controls", "javafx.graphics")
+    // javafx.swing は SwingFXUtils のためだけに要る。pdf-core は PDFBox の型を外に
+    // 出せないため、描画結果を JDK 標準の BufferedImage で受け取り、ここで JavaFX の
+    // Image に変換する。
+    modules = listOf("javafx.controls", "javafx.graphics", "javafx.swing")
 }
 
 application {
