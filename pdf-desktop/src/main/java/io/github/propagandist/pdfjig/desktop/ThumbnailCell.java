@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.PageSelection;
 import java.util.Optional;
 import javafx.concurrent.Task;
 import javafx.geometry.Pos;
@@ -26,12 +27,12 @@ import javafx.scene.layout.VBox;
  * <p>並べ替えは同じ一覧の中でだけ受け付ける。文書間のページ移動は実装しない
  * （SPEC.md §7.1）。
  */
-final class ThumbnailCell extends ListCell<Integer> {
+final class ThumbnailCell extends ListCell<PageSelection> {
 
     /** プレースホルダの一辺。実際のサムネイルと同じ枠を保ち、表示が跳ねないようにする。 */
     private static final double PLACEHOLDER_SIZE = DocumentSession.THUMBNAIL_EDGE_PIXELS;
 
-    private final ListView<Integer> owner;
+    private final ListView<PageSelection> owner;
 
     private final PageOrder order;
 
@@ -48,7 +49,7 @@ final class ThumbnailCell extends ListCell<Integer> {
     /** 進行中の描画。セルが別のページに使い回されたら取り消す。 */
     private Task<Image> pending;
 
-    ThumbnailCell(ListView<Integer> owner, PageOrder order, ThumbnailSource thumbnails) {
+    ThumbnailCell(ListView<PageSelection> owner, PageOrder order, ThumbnailSource thumbnails) {
         this.owner = owner;
         this.order = order;
         this.thumbnails = thumbnails;
@@ -68,11 +69,11 @@ final class ThumbnailCell extends ListCell<Integer> {
     }
 
     @Override
-    protected void updateItem(Integer pageNumber, boolean empty) {
-        super.updateItem(pageNumber, empty);
+    protected void updateItem(PageSelection selection, boolean empty) {
+        super.updateItem(selection, empty);
         cancelPending();
 
-        if (empty || pageNumber == null) {
+        if (empty || selection == null) {
             setGraphic(null);
             setTooltip(null);
             return;
@@ -80,9 +81,13 @@ final class ThumbnailCell extends ListCell<Integer> {
 
         // 表示するのは並びの中での位置。元のページ番号は補助情報にとどめる。
         caption.setText(String.valueOf(getIndex() + 1));
-        setTooltip(new Tooltip("元の " + pageNumber + " ページ目"));
+        setTooltip(new Tooltip(describe(selection)));
         setGraphic(content);
 
+        // 描くのは元の向きのページなので、加えた回転は表示側で当てる。
+        imageView.setRotate(selection.additionalRotation().degrees());
+
+        int pageNumber = selection.pageNumber();
         Optional<Image> cached = thumbnails.cached(pageNumber);
         if (cached.isPresent()) {
             imageView.setImage(cached.get());
@@ -93,17 +98,28 @@ final class ThumbnailCell extends ListCell<Integer> {
         Task<Image> task = thumbnails.request(pageNumber);
         task.setOnSucceeded(event -> {
             // 描画が終わる前にセルが別のページへ回されていることがある。
-            if (pageNumber.equals(getItem())) {
+            if (isStillShowing(pageNumber)) {
                 imageView.setImage(task.getValue());
             }
         });
         task.setOnFailed(event -> {
             // 絵が出ないだけで操作は続けられる。黙って枠のままにせず、理由を添える。
-            if (pageNumber.equals(getItem())) {
+            if (isStillShowing(pageNumber)) {
                 setTooltip(new Tooltip("元の " + pageNumber + " ページ目（表示できません）"));
             }
         });
         pending = task;
+    }
+
+    private boolean isStillShowing(int pageNumber) {
+        return getItem() != null && getItem().pageNumber() == pageNumber;
+    }
+
+    private static String describe(PageSelection selection) {
+        String origin = "元の " + selection.pageNumber() + " ページ目";
+        return selection.rotated()
+                ? origin + "（" + selection.additionalRotation().degrees() + " 度回転）"
+                : origin;
     }
 
     private void cancelPending() {

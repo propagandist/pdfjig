@@ -1,7 +1,9 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Rotation;
 import java.util.List;
 import java.util.stream.IntStream;
 import javafx.collections.FXCollections;
@@ -10,8 +12,11 @@ import javafx.collections.ObservableList;
 /**
  * 編集中のページ並び。
  *
- * <p>並べ替えと削除はこの一覧の上でだけ起きる。<b>ファイルには一切触れない。</b>
- * 「保存」で初めて元ページ番号の列として pdf-core に渡る（HANDOVER.md 3-2）。
+ * <p>並べ替え・削除・回転はこの一覧の上でだけ起きる。<b>ファイルには一切触れない。</b>
+ * 「保存」で初めてページ列として pdf-core に渡る（HANDOVER.md 3-2）。
+ *
+ * <p>三つの操作をひとつの状態にまとめているのは、別々に適用すると
+ * 「並べ替えた状態で回転したら並べ替えが消えた文書が出てくる」ことになるためである。
  *
  * <p>JavaFX Application Thread からのみ操作すること。
  */
@@ -20,8 +25,8 @@ public final class PageOrder {
     /** 元文書のページ数。並びを戻すときの基準になる。 */
     private final int sourcePageCount;
 
-    /** 表示順に並んだ元ページ番号（1 始まり）。 */
-    private final ObservableList<Integer> pages;
+    /** 表示順に並んだページ指定。 */
+    private final ObservableList<PageSelection> pages;
 
     private PageOrder(int sourcePageCount) {
         this.sourcePageCount = sourcePageCount;
@@ -42,14 +47,14 @@ public final class PageOrder {
     }
 
     /**
-     * 表示順に並んだ元ページ番号。
+     * 表示順に並んだページ指定。
      *
-     * <p>UI にそのまま束ねられる読み取り専用ビューであり、この一覧への変更は
-     * {@link #move} と {@link #removeAt} を通してのみ行う。
+     * <p>UI にそのまま束ねられる読み取り専用ビューであり、変更は
+     * {@link #move} / {@link #removeAt} / {@link #rotateAt} を通してのみ行う。
      *
      * @return 変更できないビュー
      */
-    public ObservableList<Integer> pages() {
+    public ObservableList<PageSelection> pages() {
         return FXCollections.unmodifiableObservableList(pages);
     }
 
@@ -61,9 +66,9 @@ public final class PageOrder {
     /**
      * 保存時に pdf-core へ渡すページ列。
      *
-     * @return 表示順の元ページ番号
+     * @return 表示順のページ指定
      */
-    public List<Integer> toPageNumbers() {
+    public List<PageSelection> toPageSelections() {
         return List.copyOf(pages);
     }
 
@@ -77,8 +82,8 @@ public final class PageOrder {
      * @param toIndex   差し込む位置（0 始まり）
      */
     public void move(int fromIndex, int toIndex) {
-        requireIndex(fromIndex, pages.size());
-        requireIndex(toIndex, pages.size());
+        requireIndex(fromIndex);
+        requireIndex(toIndex);
         if (fromIndex == toIndex) {
             return;
         }
@@ -95,29 +100,43 @@ public final class PageOrder {
      * @throws PdfjigException 残り 1 枚の場合は {@link ErrorCode#EMPTY_RESULT}
      */
     public void removeAt(int index) {
-        requireIndex(index, pages.size());
+        requireIndex(index);
         if (pages.size() == 1) {
             throw new PdfjigException(ErrorCode.EMPTY_RESULT);
         }
         pages.remove(index);
     }
 
-    /** 元の並びから変わっているか。 */
+    /**
+     * ページに回転を加える。
+     *
+     * <p>指定は現在の向きへの加算である。同じページが複数回並んでいても、
+     * 回すのは指定した位置のものだけになる。
+     *
+     * @param index      回すページの位置（0 始まり）
+     * @param additional 加える回転
+     */
+    public void rotateAt(int index, Rotation additional) {
+        requireIndex(index);
+        pages.set(index, pages.get(index).rotatedBy(additional));
+    }
+
+    /** 元の並びと向きから変わっているか。 */
     public boolean modified() {
         return !pages.equals(identityOrder(sourcePageCount));
     }
 
-    /** 元の並びに戻す。 */
+    /** 元の並びと向きに戻す。 */
     public void reset() {
         pages.setAll(identityOrder(sourcePageCount));
     }
 
-    private static List<Integer> identityOrder(int pageCount) {
-        return IntStream.rangeClosed(1, pageCount).boxed().toList();
+    private static List<PageSelection> identityOrder(int pageCount) {
+        return IntStream.rangeClosed(1, pageCount).mapToObj(PageSelection::of).toList();
     }
 
-    private static void requireIndex(int index, int size) {
-        if (index < 0 || index >= size) {
+    private void requireIndex(int index) {
+        if (index < 0 || index >= pages.size()) {
             throw new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE);
         }
     }

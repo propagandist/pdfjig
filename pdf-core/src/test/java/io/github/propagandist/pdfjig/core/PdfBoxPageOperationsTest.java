@@ -209,7 +209,9 @@ class PdfBoxPageOperationsTest {
                     tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
 
             Path output = operations.assemble(
-                    input, List.of(4, 1), tempDir.resolve("assembled.pdf"));
+                    input,
+                    List.of(PageSelection.of(4), PageSelection.of(1)),
+                    tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of("P4", "P1"), textsOf(output));
         }
@@ -220,9 +222,59 @@ class PdfBoxPageOperationsTest {
             Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
 
             Path output = operations.assemble(
-                    input, List.of(2, 2, 1), tempDir.resolve("assembled.pdf"));
+                    input,
+                    List.of(PageSelection.of(2), PageSelection.of(2), PageSelection.of(1)),
+                    tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of("P2", "P2", "P1"), textsOf(output));
+        }
+
+        @Test
+        @DisplayName("並べ替えと回転を一度に確定できる")
+        void appliesOrderAndRotationTogether() throws Exception {
+            Path input = TestPdfs.rotated(tempDir.resolve("doc.pdf"), 0, 90, 180);
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(
+                            new PageSelection(3, Rotation.NONE),
+                            new PageSelection(2, Rotation.CLOCKWISE_90),
+                            new PageSelection(1, Rotation.HALF_TURN)),
+                    tempDir.resolve("assembled.pdf"));
+
+            // 元の向きに加算される。3 ページ目は 180 のまま、2 ページ目は 90+90、
+            // 1 ページ目は 0+180。
+            assertEquals(List.of(180, 180, 180), TestPdfs.rotationsOf(output));
+        }
+
+        @Test
+        @DisplayName("同じページを別々の向きで含められる")
+        void rotatesRepeatedPagesIndependently() throws Exception {
+            Path input = TestPdfs.rotated(tempDir.resolve("doc.pdf"), 0);
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(
+                            PageSelection.of(1),
+                            new PageSelection(1, Rotation.CLOCKWISE_90)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of(0, 90), TestPdfs.rotationsOf(output));
+        }
+
+        @Test
+        @DisplayName("回転しても入力は変わらない")
+        void leavesInputUntouched() throws Exception {
+            Path input = TestPdfs.rotated(tempDir.resolve("doc.pdf"), 0, 90);
+
+            operations.assemble(
+                    input,
+                    List.of(
+                            new PageSelection(1, Rotation.CLOCKWISE_90),
+                            new PageSelection(2, Rotation.CLOCKWISE_90)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of(0, 90), TestPdfs.rotationsOf(input));
         }
 
         @Test
@@ -249,7 +301,9 @@ class PdfBoxPageOperationsTest {
                     assertThrows(
                                     PdfjigException.class,
                                     () -> operations.assemble(
-                                            input, List.of(1, 3), tempDir.resolve("assembled.pdf")))
+                                            input,
+                                            List.of(PageSelection.of(1), PageSelection.of(3)),
+                                            tempDir.resolve("assembled.pdf")))
                             .errorCode());
         }
     }

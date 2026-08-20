@@ -89,11 +89,11 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path assemble(Path input, List<Integer> pageNumbers, Path output) {
+    public Path assemble(Path input, List<PageSelection> pages, Path output) {
         requireAbsent(output);
         try (PdfDocument source = open(input)) {
-            requireSelectable(pageNumbers, source.pageCount());
-            writePages(source, pageNumbers, output);
+            requireSelectable(pages, source.pageCount());
+            writeSelections(source, pages, output);
         }
         return output;
     }
@@ -211,9 +211,21 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     private static void writePages(PdfDocument source, List<Integer> pageNumbers, Path output) {
+        writeSelections(source, pageNumbers.stream().map(PageSelection::of).toList(), output);
+    }
+
+    private static void writeSelections(
+            PdfDocument source, List<PageSelection> pages, Path output) {
         try (PDDocument target = new PDDocument()) {
-            for (int pageNumber : pageNumbers) {
-                target.importPage(source.delegate().getPage(pageNumber - 1));
+            for (PageSelection selection : pages) {
+                // importPage が返すのは元のページ辞書の複製である。ここで向きを変えても
+                // 元の文書には及ばず、同じページを二度含めてそれぞれ別の向きにもできる。
+                PDPage imported =
+                        target.importPage(source.delegate().getPage(selection.pageNumber() - 1));
+                if (selection.rotated()) {
+                    imported.setRotation(
+                            rotationOf(imported).plus(selection.additionalRotation()).degrees());
+                }
             }
             save(target, output);
         } catch (IOException e) {
@@ -250,12 +262,12 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
     }
 
-    private static void requireSelectable(List<Integer> pageNumbers, int pageCount) {
-        if (pageNumbers == null || pageNumbers.isEmpty()) {
+    private static void requireSelectable(List<PageSelection> pages, int pageCount) {
+        if (pages == null || pages.isEmpty()) {
             throw new PdfjigException(ErrorCode.EMPTY_RESULT);
         }
-        for (Integer pageNumber : pageNumbers) {
-            if (pageNumber == null || pageNumber < 1 || pageNumber > pageCount) {
+        for (PageSelection selection : pages) {
+            if (selection == null || selection.pageNumber() > pageCount) {
                 throw new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE);
             }
         }

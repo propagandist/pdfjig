@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Rotation;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,7 +20,7 @@ class PageOrderTest {
     void startsUnmodified() {
         PageOrder order = PageOrder.of(3);
 
-        assertEquals(List.of(1, 2, 3), order.toPageNumbers());
+        assertEquals(List.of(1, 2, 3), pageNumbersOf(order));
         assertFalse(order.modified());
     }
 
@@ -29,7 +31,7 @@ class PageOrderTest {
 
         order.move(0, 2);
 
-        assertEquals(List.of(2, 3, 1), order.toPageNumbers());
+        assertEquals(List.of(2, 3, 1), pageNumbersOf(order));
         assertTrue(order.modified());
     }
 
@@ -40,7 +42,7 @@ class PageOrderTest {
 
         order.move(2, 0);
 
-        assertEquals(List.of(3, 1, 2), order.toPageNumbers());
+        assertEquals(List.of(3, 1, 2), pageNumbersOf(order));
     }
 
     @Test
@@ -50,7 +52,7 @@ class PageOrderTest {
 
         order.move(1, 1);
 
-        assertEquals(List.of(1, 2, 3), order.toPageNumbers());
+        assertEquals(List.of(1, 2, 3), pageNumbersOf(order));
         assertFalse(order.modified());
     }
 
@@ -61,7 +63,7 @@ class PageOrderTest {
 
         order.removeAt(1);
 
-        assertEquals(List.of(1, 3), order.toPageNumbers());
+        assertEquals(List.of(1, 3), pageNumbersOf(order));
         assertTrue(order.modified());
     }
 
@@ -75,7 +77,34 @@ class PageOrderTest {
         assertEquals(
                 ErrorCode.EMPTY_RESULT,
                 assertThrows(PdfjigException.class, () -> order.removeAt(0)).errorCode());
-        assertEquals(List.of(2), order.toPageNumbers());
+        assertEquals(List.of(2), pageNumbersOf(order));
+    }
+
+    @Test
+    @DisplayName("回転は現在の向きに加算される")
+    void addsRotation() {
+        PageOrder order = PageOrder.of(2);
+
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
+
+        assertEquals(Rotation.HALF_TURN, order.toPageSelections().get(0).additionalRotation());
+        assertEquals(Rotation.NONE, order.toPageSelections().get(1).additionalRotation());
+        assertTrue(order.modified());
+    }
+
+    @Test
+    @DisplayName("回転は指定した位置のページだけに効く")
+    void rotatesOnlyTheGivenPosition() {
+        PageOrder order = PageOrder.of(3);
+        order.move(2, 0);
+
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
+
+        assertEquals(List.of(3, 1, 2), pageNumbersOf(order));
+        assertEquals(
+                List.of(Rotation.CLOCKWISE_90, Rotation.NONE, Rotation.NONE),
+                order.toPageSelections().stream().map(PageSelection::additionalRotation).toList());
     }
 
     @Test
@@ -89,18 +118,25 @@ class PageOrderTest {
         assertEquals(
                 ErrorCode.PAGE_OUT_OF_RANGE,
                 assertThrows(PdfjigException.class, () -> order.removeAt(-1)).errorCode());
+        assertEquals(
+                ErrorCode.PAGE_OUT_OF_RANGE,
+                assertThrows(
+                                PdfjigException.class,
+                                () -> order.rotateAt(5, Rotation.CLOCKWISE_90))
+                        .errorCode());
     }
 
     @Test
-    @DisplayName("元の並びに戻せる")
-    void resetsToOriginalOrder() {
+    @DisplayName("並びも向きも元に戻せる")
+    void resetsToOriginalState() {
         PageOrder order = PageOrder.of(3);
         order.move(0, 2);
         order.removeAt(0);
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
 
         order.reset();
 
-        assertEquals(List.of(1, 2, 3), order.toPageNumbers());
+        assertEquals(List.of(1, 2, 3), pageNumbersOf(order));
         assertFalse(order.modified());
     }
 
@@ -109,6 +145,12 @@ class PageOrderTest {
     void exposesReadOnlyView() {
         PageOrder order = PageOrder.of(2);
 
-        assertThrows(UnsupportedOperationException.class, () -> order.pages().add(3));
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> order.pages().add(PageSelection.of(3)));
+    }
+
+    private static List<Integer> pageNumbersOf(PageOrder order) {
+        return order.toPageSelections().stream().map(PageSelection::pageNumber).toList();
     }
 }

@@ -4,7 +4,9 @@ import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
+import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.io.File;
 import java.io.IOException;
@@ -60,7 +62,7 @@ public final class MainWindow {
 
     private final AiProvider aiProvider;
 
-    private final ListView<Integer> thumbnails = new ListView<>();
+    private final ListView<PageSelection> thumbnails = new ListView<>();
 
     private final Label status = new Label();
 
@@ -70,7 +72,7 @@ public final class MainWindow {
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
 
     /** ページ並びが変わるたびに表示を更新する。 */
-    private final ListChangeListener<Integer> orderListener = change -> updateStatus();
+    private final ListChangeListener<PageSelection> orderListener = change -> updateStatus();
 
     private DocumentSession session;
 
@@ -134,13 +136,25 @@ public final class MainWindow {
         delete.setOnAction(event -> deleteSelected());
         delete.disableProperty().bind(documentOpen.not().or(busy));
 
-        MenuItem reset = new MenuItem("並びを元に戻す");
+        MenuItem rotateRight = new MenuItem("右に 90 度回転");
+        rotateRight.setAccelerator(
+                new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN));
+        rotateRight.setOnAction(event -> rotateSelected(Rotation.CLOCKWISE_90));
+        rotateRight.disableProperty().bind(documentOpen.not().or(busy));
+
+        MenuItem rotateLeft = new MenuItem("左に 90 度回転");
+        rotateLeft.setAccelerator(
+                new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN));
+        rotateLeft.setOnAction(event -> rotateSelected(Rotation.COUNTERCLOCKWISE_90));
+        rotateLeft.disableProperty().bind(documentOpen.not().or(busy));
+
+        MenuItem reset = new MenuItem("並びと向きを元に戻す");
         reset.setOnAction(event -> resetOrder());
         reset.disableProperty().bind(documentOpen.not().or(busy));
 
         return new MenuBar(
                 new Menu("ファイル", null, open, save, close, quit),
-                new Menu("ページ", null, delete, reset));
+                new Menu("ページ", null, delete, rotateRight, rotateLeft, reset));
     }
 
     /**
@@ -214,7 +228,7 @@ public final class MainWindow {
         }
 
         Path source = session.path();
-        List<Integer> pages = session.order().toPageNumbers();
+        List<PageSelection> pages = session.order().toPageSelections();
         Path output = chosen.toPath();
         runAsync(() -> assemble(source, pages, output), this::showWarnings);
     }
@@ -229,6 +243,14 @@ public final class MainWindow {
         } catch (PdfjigException e) {
             showFailure(e);
         }
+    }
+
+    private void rotateSelected(Rotation additional) {
+        int index = thumbnails.getSelectionModel().getSelectedIndex();
+        if (session == null || index < 0) {
+            return;
+        }
+        session.order().rotateAt(index, additional);
     }
 
     private void resetOrder() {
@@ -275,7 +297,7 @@ public final class MainWindow {
      * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
      * 元のファイルはそのまま残る。
      */
-    private static List<Warning> assemble(Path source, List<Integer> pages, Path output) {
+    private static List<Warning> assemble(Path source, List<PageSelection> pages, Path output) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
