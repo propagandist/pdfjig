@@ -54,6 +54,9 @@ final class ThumbnailGrid {
     /** 1 行あたりの枚数。 */
     private int columns = 1;
 
+    /** 直前に出どころの帯を出していたか。含むファイルが 1 つと複数の間で切り替わると変わる。 */
+    private boolean accentsShown;
+
     /** 表示中の編集セッション。ツールチップに出どころのファイル名を出すために持つ。 */
     private DocumentSession document;
 
@@ -145,6 +148,11 @@ final class ThumbnailGrid {
         return thumbnails;
     }
 
+    /** 出どころを見分ける手がかりを出すか。複数のファイルを含むときだけ意味がある。 */
+    boolean showsSources() {
+        return document != null && document.sourceCount() > 1;
+    }
+
     /**
      * ツールチップに出す 1 ページの説明。
      *
@@ -153,7 +161,7 @@ final class ThumbnailGrid {
      * 1 ファイルだけのときは、言うまでもないので添えない。
      */
     String describe(PageSelection selection) {
-        String origin = document != null && document.sourceCount() > 1
+        String origin = showsSources()
                 ? document.sourceName(selection.sourceIndex()) + " の "
                         + selection.pageNumber() + " ページ目"
                 : "元の " + selection.pageNumber() + " ページ目";
@@ -221,6 +229,13 @@ final class ThumbnailGrid {
             next.add(List.copyOf(pages.subList(from, Math.min(from + columns, pages.size()))));
         }
         rows.getItems().setAll(next);
+
+        // 出どころの帯が出るようになった（あるいは消えた）ときは、中身の変わっていない
+        // ページも描き直す必要がある。ListView は同じ内容のセルを更新しない。
+        if (accentsShown != showsSources()) {
+            accentsShown = showsSources();
+            rows.refresh();
+        }
 
         // ページが減ると選択が並びの外に出る。
         if (selectedIndex.get() >= pages.size()) {

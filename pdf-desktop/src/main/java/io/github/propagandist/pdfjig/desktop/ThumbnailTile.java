@@ -16,6 +16,7 @@ import javafx.scene.input.DragEvent;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.TransferMode;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
@@ -43,6 +44,9 @@ final class ThumbnailTile {
 
     static final double TILE_HEIGHT = 206;
 
+    /** 出どころを示す帯の高さ。 */
+    private static final double ACCENT_HEIGHT = 3;
+
     /** 画像が届くまでの枠の形。A4 縦を仮に置く。 */
     private static final double PLACEHOLDER_RATIO = 1 / Math.sqrt(2);
 
@@ -56,9 +60,19 @@ final class ThumbnailTile {
 
     private final StackPane frame = new StackPane(imageView);
 
+    /**
+     * 出どころを示す帯。ページの真下に、ページと同じ幅で敷く。
+     *
+     * <p>複数のファイルを混ぜているときだけ出す。1 つしか開いていないなら意味がない。
+     */
+    private final Region accent = new Region();
+
+    /** ページと帯。間を空けず、帯がページに付いているように見せる。 */
+    private final VBox page = new VBox(0, frame, accent);
+
     private final Label caption = new Label();
 
-    private final VBox root = new VBox(6, frame, caption);
+    private final VBox root = new VBox(5, page, caption);
 
     /** 表示中のページの、並びの中での位置。空きタイルのときは -1。 */
     private int index = -1;
@@ -78,6 +92,16 @@ final class ThumbnailTile {
         frame.getStyleClass().add("thumbnail-frame");
         frame.setMinSize(StackPane.USE_PREF_SIZE, StackPane.USE_PREF_SIZE);
         frame.setMaxSize(StackPane.USE_PREF_SIZE, StackPane.USE_PREF_SIZE);
+
+        accent.getStyleClass().add("thumbnail-accent");
+        accent.setMinHeight(ACCENT_HEIGHT);
+        accent.setPrefHeight(ACCENT_HEIGHT);
+        accent.setMaxHeight(ACCENT_HEIGHT);
+        // 帯はページの形に追従させる。回転して横長になれば帯も伸びる。
+        accent.prefWidthProperty().bind(frame.prefWidthProperty());
+        accent.setMaxWidth(Region.USE_PREF_SIZE);
+
+        page.setAlignment(Pos.BOTTOM_CENTER);
 
         caption.getStyleClass().add("thumbnail-caption");
 
@@ -116,6 +140,9 @@ final class ThumbnailTile {
         root.setVisible(true);
         root.setManaged(true);
         root.pseudoClassStateChanged(SELECTED, selected);
+        // 帯の有無は並びの中身ではなく、いくつのファイルを含んでいるかで決まる。
+        // 同じページを出し続けている間にファイルが増えることがあるので、毎回当て直す。
+        applyAccent(selection.sourceIndex());
 
         if (samePage) {
             return;
@@ -157,6 +184,16 @@ final class ThumbnailTile {
             }
         });
         pending = task;
+    }
+
+    /** 出どころの帯を当てる。1 ファイルだけのときは出さない。 */
+    private void applyAccent(int sourceIndex) {
+        boolean show = grid.showsSources();
+        accent.setVisible(show);
+        accent.setManaged(show);
+        if (show) {
+            accent.setStyle("-fx-background-color: " + SourceColors.of(sourceIndex) + ";");
+        }
     }
 
     /** そのページをまだ表示しているか。同じページ番号でも文書が違えば別物である。 */

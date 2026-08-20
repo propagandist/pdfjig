@@ -76,6 +76,9 @@ public final class MainWindow {
 
     private final ThumbnailGrid thumbnails = new ThumbnailGrid();
 
+    /** いま含んでいるファイルの一覧。1 ファイルのときは出ない。 */
+    private final SourceLegend legend = new SourceLegend();
+
     private final Label status = new Label();
 
     /** 進行中の操作がある間は true。操作の重ね掛けを防ぐ。 */
@@ -84,7 +87,7 @@ public final class MainWindow {
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
 
     /** ページ並びが変わるたびに表示を更新する。 */
-    private final ListChangeListener<PageSelection> orderListener = change -> updateStatus();
+    private final ListChangeListener<PageSelection> orderListener = change -> onOrderChanged();
 
     private DocumentSession session;
 
@@ -108,7 +111,7 @@ public final class MainWindow {
         statusBar.setPadding(new Insets(6, 12, 6, 12));
 
         BorderPane root = new BorderPane();
-        root.setTop(new VBox(buildMenuBar(actions), buildToolBar(actions)));
+        root.setTop(new VBox(buildMenuBar(actions), buildToolBar(actions), legend.node()));
         root.setCenter(thumbnails.node());
         root.setBottom(statusBar);
 
@@ -426,9 +429,15 @@ public final class MainWindow {
         }
     }
 
-    /** 含んでいるファイルが増えると、表題と状態表示の両方が変わる。 */
+    /** 含んでいるファイルが増えると、表題も一覧も状態表示も変わる。 */
     private void afterOrderChanged() {
         updateTitle();
+        onOrderChanged();
+    }
+
+    /** 並びが変わると、枚数の内訳も変わる。 */
+    private void onOrderChanged() {
+        legend.update(session);
         updateStatus();
     }
 

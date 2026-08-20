@@ -53,6 +53,29 @@
     -fx-stroke-line-join: round;
 }
 
+/* ── 含んでいるファイルの一覧 ───────────────────────────────────── */
+
+.source-legend {
+    -fx-background-color: white;
+    -fx-border-color: #d8dde3;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 6 12 6 12;
+}
+
+.source-legend .label {
+    -fx-text-fill: #3d4a57;
+    -fx-font-size: 11px;
+}
+
+.source-legend .source-count {
+    -fx-text-fill: #7b8794;
+}
+
+/* 色そのものは出どころごとに決まるため、ここでは形だけを持つ。 */
+.source-swatch {
+    -fx-background-radius: 3;
+}
+
 /* ── 一覧 ───────────────────────────────────────────────────────── */
 
 .thumbnail-list {
