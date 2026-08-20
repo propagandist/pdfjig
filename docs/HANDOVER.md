@@ -340,6 +340,11 @@ NoOp を最初に作ることで INV-3 が構造的に守られる。
 - [ ] POI は v0.1.0 では一切使われないが依存に残してある（約 14MB）。M1 の XLSX 出力で
       要るものであり、外して戻すほうが build を余計に触ることになる
 - [ ] `dist/` を出力先にした。`.gitignore` が `/dist/` と `*.msi` / `*.exe` を除外済み
+- [ ] ランタイムイメージからコンソールで動かすと
+      `ERROR Log4j API could not find a logging provider.` が stderr に出る。
+      commons-logging（PDFBox）が classpath 上の log4j-api を見つけ、その実装が無いため。
+      GUI アプリの stderr はどこにも出ないので利用者には見えない。ロギング方針を決める
+      M1 まで、実装を足して黙らせることはしない
 
 ---
 
