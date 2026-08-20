@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,7 +11,9 @@ import io.github.propagandist.pdfjig.core.PageRange;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
+import java.util.ArrayList;
 import java.util.List;
+import javafx.collections.ListChangeListener;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -183,6 +186,34 @@ class PageOrderTest {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> order.pages().add(PageSelection.of(3)));
+    }
+
+    @Test
+    @DisplayName("公開する一覧は毎回同じインスタンスを返す")
+    void exposesStableView() {
+        PageOrder order = PageOrder.of(2);
+
+        assertSame(order.pages(), order.pages());
+    }
+
+    @Test
+    @DisplayName("公開する一覧に付けた変更リスナは、参照を手放しても呼ばれ続ける")
+    void keepsNotifyingAfterGarbageCollection() {
+        PageOrder order = PageOrder.of(3);
+
+        List<String> seen = new ArrayList<>();
+        ListChangeListener<PageSelection> listener = change -> seen.add("changed");
+        order.pages().addListener(listener);
+
+        // unmodifiableObservableList のラッパーを呼び出しごとに作っていると、
+        // 誰も参照しないラッパーが回収された時点で通知が黙って止まる。
+        // 画面が開いた直後だけ正しく、しばらくすると更新されなくなる壊れ方をした。
+        System.gc();
+        System.gc();
+
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
+
+        assertEquals(List.of("changed"), seen);
     }
 
     private static List<Integer> pageNumbersOf(PageOrder order) {

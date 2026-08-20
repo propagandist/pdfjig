@@ -29,9 +29,21 @@ public final class PageOrder {
     /** 表示順に並んだページ指定。 */
     private final ObservableList<PageSelection> pages;
 
+    /**
+     * {@link #pages()} が返す読み取り専用ビュー。
+     *
+     * <p><b>使い回すこと。呼ばれるたびに作ってはならない。</b>
+     * {@code unmodifiableObservableList} が返すラッパーは元の一覧を弱参照で監視する。
+     * 呼び出しごとに作ると、呼び出し側がラッパーへの参照を持たない限り GC で回収され、
+     * そこに登録した変更リスナが黙って呼ばれなくなる。
+     * 画面は開いた直後だけ正しく、しばらくすると更新が止まる、という追いにくい壊れ方をする。
+     */
+    private final ObservableList<PageSelection> view;
+
     private PageOrder(int sourcePageCount) {
         this.sourcePageCount = sourcePageCount;
         this.pages = FXCollections.observableArrayList(identityOrder(sourcePageCount));
+        this.view = FXCollections.unmodifiableObservableList(pages);
     }
 
     /**
@@ -53,10 +65,12 @@ public final class PageOrder {
      * <p>UI にそのまま束ねられる読み取り専用ビューであり、変更は
      * {@link #move} / {@link #removeAt} / {@link #rotateAt} を通してのみ行う。
      *
+     * <p>常に同じインスタンスを返す。呼び出しごとに作らない理由は {@code view} の説明にある。
+     *
      * @return 変更できないビュー
      */
     public ObservableList<PageSelection> pages() {
-        return FXCollections.unmodifiableObservableList(pages);
+        return view;
     }
 
     /** 現在の枚数。 */
