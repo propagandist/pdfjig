@@ -14,6 +14,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -151,7 +152,39 @@ public final class MainWindow {
      * @param path 開くファイル
      */
     public void open(Path path) {
-        runAsync(() -> DocumentSession.open(path), this::adopt);
+        runAsync(() -> DocumentSession.open(path), this::adopt, failure -> {
+            if (errorCodeOf(failure) == ErrorCode.PASSWORD_REQUIRED) {
+                askPasswordAndOpen(path, false);
+            } else {
+                showFailure(failure);
+            }
+        });
+    }
+
+    /**
+     * パスワードを尋ねてから開く。
+     *
+     * <p>入力が誤っていれば、誤りである旨を添えてもう一度尋ねる。打ち間違いは
+     * 起きるものであり、開き直しからやらせる理由がない。取り消せば終わる。
+     */
+    private void askPasswordAndOpen(Path path, boolean retry) {
+        Optional<char[]> entered = PasswordPrompt.ask(stage, path, retry);
+        if (entered.isEmpty()) {
+            return;
+        }
+        // この配列は DocumentSession.open の中でゼロ埋めされる。
+        char[] password = entered.get();
+        runAsync(() -> DocumentSession.open(path, password), this::adopt, failure -> {
+            if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
+                askPasswordAndOpen(path, true);
+            } else {
+                showFailure(failure);
+            }
+        });
+    }
+
+    private static ErrorCode errorCodeOf(Throwable failure) {
+        return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode() : null;
     }
 
     private void openDocument() {
@@ -292,6 +325,11 @@ public final class MainWindow {
     }
 
     private <T> void runAsync(Supplier<T> work, Consumer<T> onSucceeded) {
+        runAsync(work, onSucceeded, this::showFailure);
+    }
+
+    private <T> void runAsync(
+            Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
         Task<T> task = new Task<>() {
             @Override
             protected T call() {
@@ -304,7 +342,7 @@ public final class MainWindow {
         });
         task.setOnFailed(event -> {
             busy.set(false);
-            showFailure(task.getException());
+            onFailed.accept(task.getException());
         });
 
         busy.set(true);
