@@ -26,22 +26,29 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Separator;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
@@ -95,12 +102,14 @@ public final class MainWindow {
     public Parent build() {
         thumbnails.setOnDelete(this::deleteSelected);
 
+        Actions actions = buildActions();
+
         HBox statusBar = new HBox(status);
         statusBar.getStyleClass().add("status-bar");
         statusBar.setPadding(new Insets(6, 12, 6, 12));
 
         BorderPane root = new BorderPane();
-        root.setTop(buildMenuBar());
+        root.setTop(new VBox(buildMenuBar(actions), buildToolBar(actions)));
         root.setCenter(thumbnails.node());
         root.setBottom(statusBar);
 
@@ -114,61 +123,137 @@ public final class MainWindow {
         closeSession();
     }
 
-    private MenuBar buildMenuBar() {
-        MenuItem open = new MenuItem("開く…");
-        open.setAccelerator(new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN));
-        open.setOnAction(event -> openDocument());
-        open.disableProperty().bind(busy);
+    /**
+     * メニューとツールバーに出す 1 つの操作。
+     *
+     * <p>文言・ショートカット・有効条件・処理をここにまとめてある。メニューとツールバーで
+     * 別々に書くと、片方だけ直したときに挙動がずれる。
+     *
+     * @param menuText     メニューに出す文言
+     * @param toolText     ツールバーに出す文言。{@code null} ならツールバーには出さない
+     * @param icon         ツールバーのアイコン（{@link ToolIcons} の SVG パス）
+     * @param accelerator  ショートカット。{@code null} なら割り当てない
+     * @param handler      実行する処理
+     * @param disabled     無効にする条件
+     */
+    private record Action(
+            String menuText,
+            String toolText,
+            String icon,
+            KeyCombination accelerator,
+            Runnable handler,
+            ObservableValue<Boolean> disabled) {
+    }
 
-        MenuItem save = new MenuItem("名前を付けて保存…");
-        save.setAccelerator(new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN));
-        save.setOnAction(event -> saveAs());
-        save.disableProperty().bind(documentOpen.not().or(busy));
+    /** 画面が持つ操作一式。メニューとツールバーの双方がここから作られる。 */
+    private record Actions(
+            Action open,
+            Action save,
+            Action close,
+            Action quit,
+            Action delete,
+            Action rotateRight,
+            Action rotateLeft,
+            Action keepRange,
+            Action reset,
+            Action merge,
+            Action split) {
+    }
 
-        MenuItem close = new MenuItem("閉じる");
-        close.setOnAction(event -> closeSession());
-        close.disableProperty().bind(documentOpen.not().or(busy));
+    private Actions buildActions() {
+        // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
+        ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
 
-        MenuItem quit = new MenuItem("終了");
-        quit.setOnAction(event -> stage.close());
+        return new Actions(
+                new Action("開く…", "開く", ToolIcons.OPEN,
+                        new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN),
+                        this::openDocument, busy),
+                new Action("名前を付けて保存…", "保存", ToolIcons.SAVE,
+                        new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
+                        this::saveAs, needsDocument),
+                new Action("閉じる", null, null, null, this::closeSession, needsDocument),
+                new Action("終了", null, null, null, stage::close, null),
+                new Action("選択したページを削除", "削除", ToolIcons.DELETE,
+                        new KeyCodeCombination(KeyCode.DELETE),
+                        this::deleteSelected, needsDocument),
+                new Action("右に 90 度回転", "右に回転", ToolIcons.ROTATE_RIGHT,
+                        new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
+                        () -> rotateSelected(Rotation.CLOCKWISE_90), needsDocument),
+                new Action("左に 90 度回転", "左に回転", ToolIcons.ROTATE_LEFT,
+                        new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
+                        () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90), needsDocument),
+                new Action("範囲を指定して残す…", "範囲", ToolIcons.RANGE,
+                        null, this::keepRange, needsDocument),
+                new Action("並びと向きを元に戻す", "元に戻す", ToolIcons.RESET,
+                        null, this::resetOrder, needsDocument),
+                new Action("複数の PDF を結合…", "結合", ToolIcons.MERGE,
+                        null, this::mergeDocuments, busy),
+                new Action("この文書を分割…", "分割", ToolIcons.SPLIT,
+                        null, this::splitDocument, needsDocument));
+    }
 
-        MenuItem delete = new MenuItem("選択したページを削除");
-        delete.setAccelerator(new KeyCodeCombination(KeyCode.DELETE));
-        delete.setOnAction(event -> deleteSelected());
-        delete.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem rotateRight = new MenuItem("右に 90 度回転");
-        rotateRight.setAccelerator(
-                new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN));
-        rotateRight.setOnAction(event -> rotateSelected(Rotation.CLOCKWISE_90));
-        rotateRight.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem rotateLeft = new MenuItem("左に 90 度回転");
-        rotateLeft.setAccelerator(
-                new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN));
-        rotateLeft.setOnAction(event -> rotateSelected(Rotation.COUNTERCLOCKWISE_90));
-        rotateLeft.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem keepRange = new MenuItem("範囲を指定して残す…");
-        keepRange.setOnAction(event -> keepRange());
-        keepRange.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem reset = new MenuItem("並びと向きを元に戻す");
-        reset.setOnAction(event -> resetOrder());
-        reset.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem merge = new MenuItem("複数の PDF を結合…");
-        merge.setOnAction(event -> mergeDocuments());
-        merge.disableProperty().bind(busy);
-
-        MenuItem split = new MenuItem("この文書を分割…");
-        split.setOnAction(event -> splitDocument());
-        split.disableProperty().bind(documentOpen.not().or(busy));
-
+    private MenuBar buildMenuBar(Actions actions) {
         return new MenuBar(
-                new Menu("ファイル", null, open, save, close, quit),
-                new Menu("ページ", null, delete, rotateRight, rotateLeft, keepRange, reset),
-                new Menu("ツール", null, merge, split));
+                new Menu("ファイル", null,
+                        menuItem(actions.open()), menuItem(actions.save()),
+                        menuItem(actions.close()), menuItem(actions.quit())),
+                new Menu("ページ", null,
+                        menuItem(actions.delete()),
+                        menuItem(actions.rotateRight()), menuItem(actions.rotateLeft()),
+                        menuItem(actions.keepRange()), menuItem(actions.reset())),
+                new Menu("ツール", null,
+                        menuItem(actions.merge()), menuItem(actions.split())));
+    }
+
+    /**
+     * ツールバーを組む。
+     *
+     * <p>置くのは繰り返し使う操作だけで、メニューは全部を持ったまま残す。
+     * 区切りは「ファイル」「ページ」「文書」の 3 つのまとまりに対応させてある。
+     */
+    private ToolBar buildToolBar(Actions actions) {
+        return new ToolBar(
+                toolButton(actions.open()), toolButton(actions.save()),
+                new Separator(),
+                toolButton(actions.delete()),
+                toolButton(actions.rotateLeft()), toolButton(actions.rotateRight()),
+                new Separator(),
+                toolButton(actions.keepRange()), toolButton(actions.reset()),
+                new Separator(),
+                toolButton(actions.merge()), toolButton(actions.split()));
+    }
+
+    private MenuItem menuItem(Action action) {
+        MenuItem item = new MenuItem(action.menuText());
+        item.setOnAction(event -> action.handler().run());
+        if (action.accelerator() != null) {
+            item.setAccelerator(action.accelerator());
+        }
+        if (action.disabled() != null) {
+            item.disableProperty().bind(action.disabled());
+        }
+        return item;
+    }
+
+    private Button toolButton(Action action) {
+        Button button = new Button(action.toolText(), ToolIcons.of(action.icon()));
+        button.getStyleClass().add("tool-button");
+        button.setContentDisplay(ContentDisplay.TOP);
+        // Tab の巡回はサムネイル一覧に集める。操作の対象はページであって、ボタンではない。
+        button.setFocusTraversable(false);
+        button.setOnAction(event -> action.handler().run());
+        button.setTooltip(new Tooltip(tooltipText(action)));
+        if (action.disabled() != null) {
+            button.disableProperty().bind(action.disabled());
+        }
+        return button;
+    }
+
+    /** ツールチップにはメニューと同じ文言を出す。短縮した表示名だけでは意味が伝わらないため。 */
+    private static String tooltipText(Action action) {
+        return action.accelerator() == null
+                ? action.menuText()
+                : action.menuText() + "（" + action.accelerator().getDisplayText() + "）";
     }
 
     /**

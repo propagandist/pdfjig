@@ -9,6 +9,50 @@
     -fx-font-family: "Yu Gothic UI", "Meiryo UI", "Segoe UI", sans-serif;
 }
 
+/* ── ツールバー ─────────────────────────────────────────────────── */
+
+.tool-bar {
+    -fx-background-color: white;
+    -fx-border-color: #d8dde3;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 5 8 5 8;
+    -fx-spacing: 2;
+}
+
+.tool-bar .separator:vertical .line {
+    -fx-border-color: transparent #e0e4e9 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.tool-button {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-padding: 5 9 4 9;
+    -fx-font-size: 11px;
+    -fx-text-fill: #3d4a57;
+    -fx-graphic-text-gap: 3;
+}
+
+.tool-button:hover {
+    -fx-background-color: #e6ebf1;
+}
+
+.tool-button:pressed {
+    -fx-background-color: #d6dee7;
+}
+
+/*
+ * アイコンは線だけで描く。塗りを使わないので -fx-fill は透明にする。
+ * 無効なボタンは JavaFX が全体を薄くするため、無効時の色はここに持たない。
+ */
+.tool-icon {
+    -fx-fill: transparent;
+    -fx-stroke: #46525f;
+    -fx-stroke-width: 1.7;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+
 /* ── 一覧 ───────────────────────────────────────────────────────── */
 
 .thumbnail-list {
