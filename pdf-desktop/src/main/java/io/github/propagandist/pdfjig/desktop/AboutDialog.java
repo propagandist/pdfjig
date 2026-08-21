@@ -39,12 +39,16 @@ final class AboutDialog {
      *
      * @param owner        親ウィンドウ
      * @param hostServices リンクを既定のブラウザに渡すために使う
+     * @param aiAvailable  AI プロバイダが使える状態か。{@code AiProvider} をそのまま受けないのは、
+     *                     この画面が要るのは可否だけであり、提案の仕組みまで知る必要がないため
      */
-    static void show(Stage owner, HostServices hostServices) {
+    static void show(Stage owner, HostServices hostServices, boolean aiAvailable) {
         Label name = new Label(AppInfo.NAME);
         name.getStyleClass().add("about-title");
 
         Label version = new Label("バージョン " + AppInfo.version());
+
+        Label ai = detail(AppInfo.aiStatus(aiAvailable));
 
         Label copyright = new Label(AppInfo.COPYRIGHT);
         copyright.getStyleClass().add("about-detail");
@@ -64,6 +68,7 @@ final class AboutDialog {
                 2,
                 name,
                 version,
+                ai,
                 copyright,
                 license,
                 repository,
@@ -71,6 +76,7 @@ final class AboutDialog {
                 detail(AppInfo.javafxRuntime()),
                 detail(AppInfo.operatingSystem()));
         // 「名前と版数」「配布元とライセンス」「実行環境」の 3 つのまとまりに見せる。
+        // AI の有無は版数の補足なので、1 つ目のまとまりに入れる。
         VBox.setMargin(copyright, new Insets(10, 0, 0, 0));
         VBox.setMargin(java, new Insets(10, 0, 0, 0));
 

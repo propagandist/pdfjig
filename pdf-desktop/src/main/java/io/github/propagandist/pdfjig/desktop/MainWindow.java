@@ -742,7 +742,7 @@ public final class MainWindow {
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
     private void showAbout() {
-        AboutDialog.show(stage, hostServices);
+        AboutDialog.show(stage, hostServices, aiProvider.isAvailable());
     }
 
     private void showWarnings(List<Warning> warnings) {
@@ -814,8 +814,8 @@ public final class MainWindow {
                 text.append("（暗号化されています）");
             }
         }
-        // AI が無いことを隠さない。無いままで全機能が使えるのが前提である（INV-3）。
-        text.append("　　AI 機能: ").append(aiProvider.isAvailable() ? "利用可能" : "無効");
+        // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、
+        // 版の性格を混ぜると読み分けられない。出す先はバージョン情報（AppInfo#aiStatus）。
         status.setText(text.toString());
     }
 }
