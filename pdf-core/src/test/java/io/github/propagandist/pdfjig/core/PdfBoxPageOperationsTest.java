@@ -17,6 +17,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -209,6 +210,32 @@ class PdfBoxPageOperationsTest {
                                     () -> operations.split(input, SplitStrategy.everyNPages(1), outputDir))
                             .errorCode());
             assertFalse(Files.exists(outputDir.resolve("doc_001.pdf")));
+        }
+
+        @Test
+        @DisplayName("書き出しの途中で失敗したら、それまでに書いたものも残さない")
+        void removesPartialOutputOnFailure() throws Exception {
+            // 出力先が既にある場合は書き出しに入る前に弾かれるため、この経路は通らない。
+            // 実際に途中で落ちるのはディスクが尽きた・権限を失ったといった場合であり、
+            // それは環境に依らせて起こせない。警告の通知を故意に失敗させて代わりにする。
+            //
+            // ページどうしがリンクで繋がった文書を 1 ページずつに切ると、宛先を失った
+            // 参照の警告が出力ごとに 1 度ずつ出る。その 2 度目で落とせば、
+            // 1 つ目を書き終えて 2 つ目を書く前という狙った位置で失敗する。
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            Path outputDir = tempDir.resolve("out");
+
+            AtomicInteger notified = new AtomicInteger();
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                if (notified.incrementAndGet() == 2) {
+                    throw new IllegalStateException("書き出しの途中で失敗させる");
+                }
+            });
+
+            assertThrows(
+                    IllegalStateException.class, () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir));
+
+            assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
         }
     }
 
@@ -1004,6 +1031,16 @@ class PdfBoxPageOperationsTest {
             for (int i = 0; i < array.size(); i++) {
                 collect(array.get(i), seen, collected);
             }
+        }
+    }
+
+    /** そのディレクトリにあるファイル名。ディレクトリが無ければ空。 */
+    private static List<String> listFilesIn(Path directory) throws IOException {
+        if (!Files.isDirectory(directory)) {
+            return List.of();
+        }
+        try (var entries = Files.list(directory)) {
+            return entries.map(path -> path.getFileName().toString()).sorted().toList();
         }
     }
 

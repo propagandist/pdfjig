@@ -91,12 +91,23 @@ public final class PdfBoxPageOperations implements PageOperations {
         outputs.forEach(PdfBoxPageOperations::requireAbsent);
 
         createDirectories(outputDir);
-        for (int i = 0; i < ranges.size(); i++) {
-            // 出力ごとに開き直す。書き出しは元の文書からページを取り除いていくため、
-            // 同じ文書を次の範囲に使い回すことはできない。
-            try (PdfDocument source = openQuietly(input)) {
-                writeRange(source, ranges.get(i), outputs.get(i));
+        // 途中で失敗したら、それまでに書いたものを消す。9 個中 4 個だけ残った状態を
+        // 黙って失敗として返すと、利用者は何が出来上がったのか確かめる術がない。
+        // requireAbsent を通しているため、ここで消してよいのはこの呼び出しが作ったものだけである。
+        List<Path> written = new ArrayList<>(outputs.size());
+        try {
+            for (int i = 0; i < ranges.size(); i++) {
+                // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
+                written.add(outputs.get(i));
+                // 出力ごとに開き直す。書き出しは元の文書からページを取り除いていくため、
+                // 同じ文書を次の範囲に使い回すことはできない。
+                try (PdfDocument source = openQuietly(input)) {
+                    writeRange(source, ranges.get(i), outputs.get(i));
+                }
             }
+        } catch (RuntimeException e) {
+            written.forEach(PdfBoxPageOperations::deleteQuietly);
+            throw e;
         }
         return List.copyOf(outputs);
     }
@@ -584,6 +595,20 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
         if (Files.exists(output)) {
             throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
+        }
+    }
+
+    /**
+     * 後始末で消す。消せなくても黙っている。
+     *
+     * <p>ここに来ている時点で、既に何かが失敗している。その失敗のほうが利用者にとって
+     * 重要であり、後始末できなかったことを重ねて伝えても混乱するだけである。
+     */
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            // 消せなくても、元の失敗は元の失敗のまま伝わる。
         }
     }
 

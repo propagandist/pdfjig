@@ -782,8 +782,19 @@ public final class MainWindow {
                 throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
             }
         }
-        for (int i = 0; i < segments.size(); i++) {
-            operations.assemble(sources, segments.get(i), outputs.get(i));
+        // 途中で失敗したら、それまでに書いたものを消す。何個できたのか分からないまま
+        // 失敗だけを伝えると、利用者は出力先を自分で見に行くしかない。
+        // 上で存在を確かめているため、消してよいのはここで作ったものだけである。
+        List<Path> written = new ArrayList<>(outputs.size());
+        try {
+            for (int i = 0; i < segments.size(); i++) {
+                // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
+                written.add(outputs.get(i));
+                operations.assemble(sources, segments.get(i), outputs.get(i));
+            }
+        } catch (RuntimeException e) {
+            written.forEach(MainWindow::deleteQuietly);
+            throw e;
         }
         return new SplitResult(segments.size(), List.copyOf(warnings));
     }
