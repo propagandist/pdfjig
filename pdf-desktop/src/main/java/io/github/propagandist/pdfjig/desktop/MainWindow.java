@@ -941,6 +941,10 @@ public final class MainWindow {
             if (session.encrypted()) {
                 text.append("（暗号化されています）");
             }
+            if (session.signed()) {
+                // 編集を始める前に知らせる。保存後の警告では遅い。
+                text.append("（電子署名があります）");
+            }
         }
         // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、
         // 版の性格を混ぜると読み分けられない。出す先はバージョン情報（AppInfo#aiStatus）。

@@ -149,6 +149,15 @@ public final class DocumentSession implements AutoCloseable {
         return documents.stream().anyMatch(PdfDocument::encrypted);
     }
 
+    /**
+     * 含んでいるファイルのいずれかに電子署名があるか。
+     *
+     * <p>署名の正当性は見ない。在ることだけが分かればよい。書き出せば必ず無効になる。
+     */
+    public boolean signed() {
+        return documents.stream().anyMatch(PdfDocument::signed);
+    }
+
     @Override
     public void close() {
         // 描画が文書を触っている間に閉じると壊れる。必ずこの順で閉じる。

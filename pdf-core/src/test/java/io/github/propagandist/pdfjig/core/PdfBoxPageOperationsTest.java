@@ -790,6 +790,56 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * 電子署名は保てない。保てないことを黙っていない、という担保。
+     *
+     * <p>署名はページの並びに紐づくため、並べ替えれば必ず壊れる。pdfjig は署名を作らず
+     * 検証もしないが、既にあるものを黙って壊すのは別の話である。
+     */
+    @Nested
+    class SignatureWarning {
+
+        @Test
+        @DisplayName("電子署名のある入力を扱うと、署名が無効になることを伝える")
+        void warnsForSignedInput() throws Exception {
+            Path input = TestPdfs.signed(tempDir.resolve("signed.pdf"), 3);
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertTrue(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+
+        @Test
+        @DisplayName("回転でも署名は壊れるため、同じように伝える")
+        void warnsOnRotate() throws Exception {
+            Path input = TestPdfs.signed(tempDir.resolve("signed.pdf"), 2);
+
+            operations.rotate(input, Map.of(1, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf"));
+
+            assertTrue(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+
+        @Test
+        @DisplayName("署名欄があるだけの入力では警告しない")
+        void doesNotWarnForEmptySignatureField() throws Exception {
+            Path input = TestPdfs.withEmptySignatureField(tempDir.resolve("field.pdf"), 2);
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertFalse(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+
+        @Test
+        @DisplayName("署名のない入力では警告しない")
+        void doesNotWarnForPlainInput() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("plain.pdf"), 2);
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertFalse(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+    }
+
     /** しおりの表題を、木を上から辿った順に並べる。 */
     private static List<String> outlineTitlesOf(Path pdf) throws IOException {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {

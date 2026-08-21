@@ -423,11 +423,14 @@ public final class PdfBoxPageOperations implements PageOperations {
         return merger;
     }
 
-    /** 入力を開き、暗号化されていれば警告する。 */
+    /** 入力を開き、暗号化や電子署名があれば警告する。 */
     private PdfDocument open(Path input) {
         PdfDocument document = PdfDocument.open(input);
         if (document.encrypted()) {
             warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+        }
+        if (document.signed()) {
+            warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
         }
         return document;
     }

@@ -2,9 +2,12 @@ package io.github.propagandist.pdfjig.core;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
 import org.apache.pdfbox.Loader;
@@ -28,9 +31,12 @@ import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 
 /**
  * テスト用の PDF をその場で生成する。
@@ -76,6 +82,9 @@ public final class TestPdfs {
 
     /** {@link #withNestedOutline} の子項目の表題。3 ページ目を指す。 */
     public static final String NESTED_CHILD_TITLE = "Child";
+
+    /** {@link #signed} が署名辞書に書く名前。 */
+    public static final String SIGNER_NAME = "pdfjig test";
 
     private TestPdfs() {}
 
@@ -322,6 +331,54 @@ public final class TestPdfs {
             replacement.add(middle);
             root.setItem(COSName.KIDS, replacement);
             root.setInt(COSName.COUNT, pageCount);
+
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * 電子署名の辞書を持つ PDF を作る。
+     *
+     * <p>署名そのものは中身が空であり、検証には通らない。pdfjig が見るのは
+     * <b>署名が在るか</b> だけなので、辞書があれば足りる。本物の署名を作るには
+     * 証明書と BouncyCastle が要るが、それはここで確かめたいことではない。
+     */
+    public static Path signed(Path target, int pageCount) throws IOException {
+        Path unsigned = target.resolveSibling(target.getFileName() + ".unsigned");
+        plain(unsigned, pageCount);
+
+        try (PDDocument document = Loader.loadPDF(unsigned.toFile());
+                OutputStream out = Files.newOutputStream(target)) {
+            PDSignature signature = new PDSignature();
+            signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+            signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
+            signature.setName(SIGNER_NAME);
+            signature.setSignDate(Calendar.getInstance());
+
+            document.addSignature(signature, content -> new byte[0]);
+            document.saveIncremental(out);
+        }
+        Files.delete(unsigned);
+        return target;
+    }
+
+    /**
+     * 署名欄はあるが、まだ署名されていない PDF を作る。
+     *
+     * <p>署名欄があるだけで「署名済み」と扱ってしまわないことを確かめるために使う。
+     */
+    public static Path withEmptySignatureField(Path target, int pageCount) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            for (int i = 0; i < pageCount; i++) {
+                document.addPage(new PDPage());
+            }
+
+            PDAcroForm form = new PDAcroForm(document);
+            PDSignatureField field = new PDSignatureField(form);
+            form.getFields().add(field);
+            document.getPage(0).getAnnotations().add(field.getWidgets().get(0));
+            document.getDocumentCatalog().setAcroForm(form);
 
             document.save(target.toFile());
         }

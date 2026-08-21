@@ -87,6 +87,19 @@ public final class PdfDocument implements AutoCloseable {
     }
 
     /**
+     * 電子署名が付いているか。
+     *
+     * <p>署名が <b>在るか</b> だけを見る。正当性・証明書・失効は一切確かめない。
+     * pdfjig は署名を作らず、検証もしない（SPEC.md 2.2 の Non-goals）。
+     * それでも在ることを知る必要があるのは、ページを並べ替えて書き出せば
+     * 署名が無効になるためである。黙って壊すと、利用者は署名済みのつもりで
+     * 検証に落ちる文書を配ることになる。
+     */
+    public boolean signed() {
+        return !delegate.getSignatureDictionaries().isEmpty();
+    }
+
+    /**
      * PDFBox の文書オブジェクト。
      *
      * <p>パッケージプライベート。pdf-core の内部実装のみが使う。

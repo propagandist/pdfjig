@@ -44,7 +44,7 @@ public final class PdfjigCommand implements Runnable {
     }
 
     /** 文書の基本情報を表示する。 */
-    @Command(name = "info", description = "ページ数と暗号化状態を表示する。")
+    @Command(name = "info", description = "ページ数・暗号化状態・電子署名の有無を表示する。")
     static final class Info implements Callable<Integer> {
 
         @Parameters(index = "0", paramLabel = "<pdf>", description = "対象の PDF ファイル")
@@ -55,6 +55,8 @@ public final class PdfjigCommand implements Runnable {
             try (PdfDocument document = PdfDocument.open(input)) {
                 System.out.println("pages: " + document.pageCount());
                 System.out.println("encrypted: " + document.encrypted());
+                // 署名の正当性は見ていない。在るかどうかだけである。
+                System.out.println("signed: " + document.signed());
             }
             return 0;
         }
