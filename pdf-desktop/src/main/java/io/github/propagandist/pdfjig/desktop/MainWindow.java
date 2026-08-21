@@ -2,7 +2,6 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
-import io.github.propagandist.pdfjig.core.MergeOptions;
 import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
@@ -24,27 +23,35 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.collections.FXCollections;
+import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListView;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
-import javafx.scene.control.SelectionMode;
+import javafx.scene.control.Separator;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
@@ -61,8 +68,6 @@ import javafx.stage.Stage;
  */
 public final class MainWindow {
 
-    private static final String TITLE = "pdfjig";
-
     /** 分割の出力ファイル名。pdf-core の分割と同じ形にそろえる。 */
     private static final String SPLIT_NAME_FORMAT = "%s_%03d.pdf";
 
@@ -70,7 +75,13 @@ public final class MainWindow {
 
     private final AiProvider aiProvider;
 
-    private final ListView<PageSelection> thumbnails = new ListView<>();
+    /** リンクを既定のブラウザに渡すために使う。バージョン情報のダイアログで使う。 */
+    private final HostServices hostServices;
+
+    private final ThumbnailGrid thumbnails = new ThumbnailGrid();
+
+    /** いま含んでいるファイルの一覧。1 ファイルのときは出ない。 */
+    private final SourceLegend legend = new SourceLegend();
 
     private final Label status = new Label();
 
@@ -79,14 +90,18 @@ public final class MainWindow {
 
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
 
+    /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
+    private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
+
     /** ページ並びが変わるたびに表示を更新する。 */
-    private final ListChangeListener<PageSelection> orderListener = change -> updateStatus();
+    private final ListChangeListener<PageEntry> orderListener = change -> onOrderChanged();
 
     private DocumentSession session;
 
-    public MainWindow(Stage stage, AiProvider aiProvider) {
+    public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
         this.stage = stage;
         this.aiProvider = aiProvider;
+        this.hostServices = hostServices;
     }
 
     /**
@@ -95,20 +110,18 @@ public final class MainWindow {
      * @return 画面の根
      */
     public Parent build() {
-        thumbnails.setPlaceholder(new Label("PDF を開いてください。"));
-        thumbnails.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
-        thumbnails.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.DELETE) {
-                deleteSelected();
-            }
-        });
+        thumbnails.setOnDelete(this::deleteSelected);
+        legend.setOnRemove(this::removeSource);
+
+        Actions actions = buildActions();
 
         HBox statusBar = new HBox(status);
+        statusBar.getStyleClass().add("status-bar");
         statusBar.setPadding(new Insets(6, 12, 6, 12));
 
         BorderPane root = new BorderPane();
-        root.setTop(buildMenuBar());
-        root.setCenter(thumbnails);
+        root.setTop(new VBox(buildMenuBar(actions), buildToolBar(actions), legend.node()));
+        root.setCenter(thumbnails.node());
         root.setBottom(statusBar);
 
         updateTitle();
@@ -121,61 +134,165 @@ public final class MainWindow {
         closeSession();
     }
 
-    private MenuBar buildMenuBar() {
-        MenuItem open = new MenuItem("開く…");
-        open.setAccelerator(new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN));
-        open.setOnAction(event -> openDocument());
-        open.disableProperty().bind(busy);
+    /**
+     * メニューとツールバーに出す 1 つの操作。
+     *
+     * <p>文言・ショートカット・有効条件・処理をここにまとめてある。メニューとツールバーで
+     * 別々に書くと、片方だけ直したときに挙動がずれる。
+     *
+     * @param menuText     メニューに出す文言
+     * @param toolText     ツールバーに出す文言。{@code null} ならツールバーには出さない
+     * @param icon         ツールバーのアイコン（{@link ToolIcons} の SVG パス）
+     * @param accelerator  ショートカット。{@code null} なら割り当てない
+     * @param handler      実行する処理
+     * @param disabled     無効にする条件
+     */
+    private record Action(
+            String menuText,
+            String toolText,
+            String icon,
+            KeyCombination accelerator,
+            Runnable handler,
+            ObservableValue<Boolean> disabled) {
+    }
 
-        MenuItem save = new MenuItem("名前を付けて保存…");
-        save.setAccelerator(new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN));
-        save.setOnAction(event -> saveAs());
-        save.disableProperty().bind(documentOpen.not().or(busy));
+    /** 画面が持つ操作一式。メニューとツールバーの双方がここから作られる。 */
+    private record Actions(
+            Action open,
+            Action save,
+            Action close,
+            Action quit,
+            Action delete,
+            Action rotateRight,
+            Action rotateLeft,
+            Action keepRange,
+            Action toggleBreak,
+            Action breakEveryN,
+            Action clearBreaks,
+            Action reset,
+            Action add,
+            Action split,
+            Action about) {
+    }
 
-        MenuItem close = new MenuItem("閉じる");
-        close.setOnAction(event -> closeSession());
-        close.disableProperty().bind(documentOpen.not().or(busy));
+    private Actions buildActions() {
+        // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
+        ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
 
-        MenuItem quit = new MenuItem("終了");
-        quit.setOnAction(event -> stage.close());
+        // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
+        ObservableValue<Boolean> breakUnavailable = documentOpen.not()
+                .or(busy)
+                .or(thumbnails.selectedIndexProperty().lessThan(1));
 
-        MenuItem delete = new MenuItem("選択したページを削除");
-        delete.setAccelerator(new KeyCodeCombination(KeyCode.DELETE));
-        delete.setOnAction(event -> deleteSelected());
-        delete.disableProperty().bind(documentOpen.not().or(busy));
+        ObservableValue<Boolean> noBreaks = documentOpen.not().or(busy).or(breakCount.isEqualTo(0));
 
-        MenuItem rotateRight = new MenuItem("右に 90 度回転");
-        rotateRight.setAccelerator(
-                new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN));
-        rotateRight.setOnAction(event -> rotateSelected(Rotation.CLOCKWISE_90));
-        rotateRight.disableProperty().bind(documentOpen.not().or(busy));
+        return new Actions(
+                new Action("開く…", "開く", ToolIcons.OPEN,
+                        new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN),
+                        this::openDocument, busy),
+                new Action("名前を付けて保存…", "保存", ToolIcons.SAVE,
+                        new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
+                        this::saveAs, needsDocument),
+                new Action("閉じる", null, null, null, this::closeSession, needsDocument),
+                new Action("終了", null, null, null, stage::close, null),
+                new Action("選択したページを削除", "削除", ToolIcons.DELETE,
+                        new KeyCodeCombination(KeyCode.DELETE),
+                        this::deleteSelected, needsDocument),
+                new Action("右に 90 度回転", "右に回転", ToolIcons.ROTATE_RIGHT,
+                        new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
+                        () -> rotateSelected(Rotation.CLOCKWISE_90), needsDocument),
+                new Action("左に 90 度回転", "左に回転", ToolIcons.ROTATE_LEFT,
+                        new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
+                        () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90), needsDocument),
+                new Action("範囲を指定して残す…", "範囲", ToolIcons.RANGE,
+                        null, this::keepRange, needsDocument),
+                new Action("ここで区切る / 区切りを外す", "区切り", ToolIcons.BREAK,
+                        new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
+                        this::toggleBreak, breakUnavailable),
+                new Action("N ページごとに区切る…", null, null,
+                        null, this::breakEveryNPages, needsDocument),
+                new Action("区切りをすべて外す", null, null,
+                        null, this::clearBreaks, noBreaks),
+                new Action("編集を元に戻す", "元に戻す", ToolIcons.RESET,
+                        null, this::resetOrder, needsDocument),
+                new Action("PDF を追加…", "追加", ToolIcons.ADD,
+                        null, this::addDocuments, needsDocument),
+                new Action("この文書を分割…", "分割", ToolIcons.SPLIT,
+                        null, this::splitDocument, needsDocument),
+                // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
+                new Action(AppInfo.NAME + " について", null, null,
+                        null, this::showAbout, null));
+    }
 
-        MenuItem rotateLeft = new MenuItem("左に 90 度回転");
-        rotateLeft.setAccelerator(
-                new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN));
-        rotateLeft.setOnAction(event -> rotateSelected(Rotation.COUNTERCLOCKWISE_90));
-        rotateLeft.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem keepRange = new MenuItem("範囲を指定して残す…");
-        keepRange.setOnAction(event -> keepRange());
-        keepRange.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem reset = new MenuItem("並びと向きを元に戻す");
-        reset.setOnAction(event -> resetOrder());
-        reset.disableProperty().bind(documentOpen.not().or(busy));
-
-        MenuItem merge = new MenuItem("複数の PDF を結合…");
-        merge.setOnAction(event -> mergeDocuments());
-        merge.disableProperty().bind(busy);
-
-        MenuItem split = new MenuItem("この文書を分割…");
-        split.setOnAction(event -> splitDocument());
-        split.disableProperty().bind(documentOpen.not().or(busy));
-
+    private MenuBar buildMenuBar(Actions actions) {
         return new MenuBar(
-                new Menu("ファイル", null, open, save, close, quit),
-                new Menu("ページ", null, delete, rotateRight, rotateLeft, keepRange, reset),
-                new Menu("ツール", null, merge, split));
+                new Menu("ファイル", null,
+                        menuItem(actions.open()), menuItem(actions.save()),
+                        menuItem(actions.close()), menuItem(actions.quit())),
+                new Menu("ページ", null,
+                        menuItem(actions.delete()),
+                        menuItem(actions.rotateRight()), menuItem(actions.rotateLeft()),
+                        menuItem(actions.keepRange()),
+                        new SeparatorMenuItem(),
+                        menuItem(actions.toggleBreak()), menuItem(actions.breakEveryN()),
+                        menuItem(actions.clearBreaks()),
+                        new SeparatorMenuItem(),
+                        menuItem(actions.reset())),
+                new Menu("ツール", null,
+                        menuItem(actions.add()), menuItem(actions.split())),
+                new Menu("ヘルプ", null, menuItem(actions.about())));
+    }
+
+    /**
+     * ツールバーを組む。
+     *
+     * <p>置くのは繰り返し使う操作だけで、メニューは全部を持ったまま残す。
+     * 区切りは「ファイル」「ページ」「文書」の 3 つのまとまりに対応させてある。
+     */
+    private ToolBar buildToolBar(Actions actions) {
+        return new ToolBar(
+                toolButton(actions.open()), toolButton(actions.save()),
+                new Separator(),
+                toolButton(actions.delete()),
+                toolButton(actions.rotateLeft()), toolButton(actions.rotateRight()),
+                new Separator(),
+                toolButton(actions.keepRange()), toolButton(actions.toggleBreak()),
+                toolButton(actions.reset()),
+                new Separator(),
+                toolButton(actions.add()), toolButton(actions.split()));
+    }
+
+    private MenuItem menuItem(Action action) {
+        MenuItem item = new MenuItem(action.menuText());
+        item.setOnAction(event -> action.handler().run());
+        if (action.accelerator() != null) {
+            item.setAccelerator(action.accelerator());
+        }
+        if (action.disabled() != null) {
+            item.disableProperty().bind(action.disabled());
+        }
+        return item;
+    }
+
+    private Button toolButton(Action action) {
+        Button button = new Button(action.toolText(), ToolIcons.of(action.icon()));
+        button.getStyleClass().add("tool-button");
+        button.setContentDisplay(ContentDisplay.TOP);
+        // Tab の巡回はサムネイル一覧に集める。操作の対象はページであって、ボタンではない。
+        button.setFocusTraversable(false);
+        button.setOnAction(event -> action.handler().run());
+        button.setTooltip(new Tooltip(tooltipText(action)));
+        if (action.disabled() != null) {
+            button.disableProperty().bind(action.disabled());
+        }
+        return button;
+    }
+
+    /** ツールチップにはメニューと同じ文言を出す。短縮した表示名だけでは意味が伝わらないため。 */
+    private static String tooltipText(Action action) {
+        return action.accelerator() == null
+                ? action.menuText()
+                : action.menuText() + "（" + action.accelerator().getDisplayText() + "）";
     }
 
     /**
@@ -248,14 +365,14 @@ public final class MainWindow {
             return;
         }
 
-        Path source = session.path();
+        List<Path> sources = session.paths();
         List<PageSelection> pages = session.order().toPageSelections();
         Path output = chosen.toPath();
-        runAsync(() -> assemble(source, pages, output), this::showWarnings);
+        runAsync(() -> assemble(sources, pages, output), this::showWarnings);
     }
 
     private void deleteSelected() {
-        int index = thumbnails.getSelectionModel().getSelectedIndex();
+        int index = thumbnails.selectedIndex();
         if (session == null || index < 0) {
             return;
         }
@@ -267,7 +384,7 @@ public final class MainWindow {
     }
 
     private void rotateSelected(Rotation additional) {
-        int index = thumbnails.getSelectionModel().getSelectedIndex();
+        int index = thumbnails.selectedIndex();
         if (session == null || index < 0) {
             return;
         }
@@ -283,44 +400,118 @@ public final class MainWindow {
     }
 
     /**
-     * 複数の PDF を 1 つに結合する。
+     * 開いている文書に、他の PDF のページを足す。
      *
-     * <p>選んだ順序はダイアログの実装と環境に左右されるため当てにできない。
-     * 名前順に並べたうえで、その順序を見せて承認を求める。
+     * <p>足したページは並びの末尾に付き、以後は元からあったページと区別なく
+     * 並べ替え・回転・削除ができる。ファイルが書き出されるのは「名前を付けて保存」のときだけで、
+     * 他の操作と同じ流れになる。
+     *
+     * <p>並べる順序は名前順にする。ファイル選択ダイアログが返す順序は環境によって変わり、
+     * 選んだ順に並ぶと思い込ませてしまうため。順序が違えばサムネイルの上でドラッグして
+     * 直せるので、確認は求めない。
      */
-    private void mergeDocuments() {
+    private void addDocuments() {
+        if (session == null) {
+            return;
+        }
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("結合する PDF を選ぶ");
+        chooser.setTitle("追加する PDF を選ぶ");
         chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
 
         List<File> chosen = chooser.showOpenMultipleDialog(stage);
         if (chosen == null) {
             return;
         }
-        if (chosen.size() < 2) {
-            show(AlertType.INFORMATION, "結合するには 2 つ以上のファイルを選んでください。");
-            return;
-        }
 
-        List<Path> inputs = chosen.stream()
+        chosen.stream()
                 .map(File::toPath)
                 .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                .toList();
-        if (!confirmMergeOrder(inputs)) {
+                .forEach(this::addDocument);
+    }
+
+    /**
+     * 1 つのファイルを足す。
+     *
+     * <p>読み込みは短く、足した結果は画面にすぐ出したい。ここは同期で行う。
+     * ページの描画は今までどおりサムネイル側が非同期で受け持つ。
+     */
+    private void addDocument(Path path) {
+        try {
+            session.add(path);
+        } catch (PdfjigException e) {
+            if (e.errorCode() == ErrorCode.PASSWORD_REQUIRED) {
+                addWithPassword(path, false);
+            } else {
+                showFailure(e);
+            }
+        }
+        afterOrderChanged();
+    }
+
+    /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
+    private void addWithPassword(Path path, boolean retry) {
+        Optional<char[]> entered = PasswordPrompt.ask(stage, path, retry);
+        if (entered.isEmpty()) {
+            return;
+        }
+        try {
+            // この配列は DocumentSession.add の中でゼロ埋めされる。
+            session.add(path, entered.get());
+        } catch (PdfjigException e) {
+            if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
+                addWithPassword(path, true);
+            } else {
+                showFailure(e);
+            }
+        }
+    }
+
+    /**
+     * ファイル一覧から 1 つ外す。
+     *
+     * <p>取り消せない。そのファイルに対して行った並べ替えや回転も一緒に消えるため、
+     * 何ページ消えるのかを見せて確認を取る。
+     */
+    private void removeSource(int sourceIndex) {
+        if (session == null || sourceIndex >= session.sourceCount()) {
+            return;
+        }
+        String name = session.sourceName(sourceIndex);
+        long pageCount = session.order().pages().stream()
+                .filter(entry -> entry.selection().sourceIndex() == sourceIndex)
+                .count();
+
+        Alert alert = new Alert(
+                AlertType.CONFIRMATION,
+                name + " の " + pageCount + " ページを取り除きます。",
+                ButtonType.OK,
+                ButtonType.CANCEL);
+        alert.setHeaderText("このファイルに対して行った並べ替えや回転も消えます。");
+        alert.initOwner(stage);
+        if (alert.showAndWait().filter(ButtonType.OK::equals).isEmpty()) {
             return;
         }
 
-        FileChooser target = new FileChooser();
-        target.setTitle("結合したファイルの保存先");
-        target.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
-        target.setInitialFileName("merged.pdf");
-
-        File saveTo = target.showSaveDialog(stage);
-        if (saveTo == null) {
+        try {
+            session.remove(sourceIndex);
+        } catch (PdfjigException e) {
+            showFailure(e);
             return;
         }
-        Path output = saveTo.toPath();
-        runAsync(() -> mergeInto(inputs, output), this::showWarnings);
+        afterOrderChanged();
+    }
+
+    /** 含んでいるファイルが増えると、表題も一覧も状態表示も変わる。 */
+    private void afterOrderChanged() {
+        updateTitle();
+        onOrderChanged();
+    }
+
+    /** 並びが変わると、枚数の内訳も変わる。 */
+    private void onOrderChanged() {
+        breakCount.set(session == null ? 0 : session.order().breakCount());
+        legend.update(session);
+        updateStatus();
     }
 
     /**
@@ -330,12 +521,25 @@ public final class MainWindow {
      * するためここでは使わない。並べ替えや削除をした後で分割したとき、それが
      * 反映されない結果を渡すほうが利用者を惑わせる。
      */
+    /**
+     * 区切りに従って分割する。
+     *
+     * <p>区切りが 1 つも無いときは何もしない。全ページを 1 ファイルに書き出しても
+     * 分割にならず、黙ってそうするより、区切りが要ることを伝えるほうが正直である。
+     */
     private void splitDocument() {
         if (session == null) {
             return;
         }
-        Optional<Integer> chunk = PageCountPrompt.ask(stage, session.order().size());
-        if (chunk.isEmpty()) {
+        PageOrder order = session.order();
+        if (order.breakCount() == 0) {
+            show(
+                    AlertType.INFORMATION,
+                    "区切りが指定されていません。"
+                            + System.lineSeparator()
+                            + "新しいファイルの先頭にするページを選び、「ここで区切る」を押してください。"
+                            + System.lineSeparator()
+                            + "枚数で機械的に区切るなら「N ページごとに区切る…」を使います。");
             return;
         }
 
@@ -346,30 +550,38 @@ public final class MainWindow {
             return;
         }
 
-        Path source = session.path();
-        List<PageSelection> pages = session.order().toPageSelections();
+        List<Path> sources = session.paths();
+        List<List<PageSelection>> segments = order.toSegments();
         String baseName = baseNameOf(session.path());
-        int pagesPerFile = chunk.get();
         Path outputDir = directory.toPath();
 
         runAsync(
-                () -> splitInto(source, pages, pagesPerFile, outputDir, baseName),
+                () -> splitInto(sources, segments, outputDir, baseName),
                 this::showSplitResult);
     }
 
-    private boolean confirmMergeOrder(List<Path> inputs) {
-        String order = IntStream.range(0, inputs.size())
-                .mapToObj(i -> (i + 1) + ". " + inputs.get(i).getFileName())
-                .collect(Collectors.joining(System.lineSeparator()));
+    /** 選択中のページの区切りを付け外しする。 */
+    private void toggleBreak() {
+        int index = thumbnails.selectedIndex();
+        if (session == null || index <= 0) {
+            return;
+        }
+        session.order().toggleBreakAt(index);
+    }
 
-        Alert alert = new Alert(
-                AlertType.CONFIRMATION,
-                "この順に結合します。" + System.lineSeparator() + System.lineSeparator() + order,
-                ButtonType.OK,
-                ButtonType.CANCEL);
-        alert.setHeaderText("選んだ順序は環境によって変わるため、名前順に並べています。");
-        alert.initOwner(stage);
-        return alert.showAndWait().filter(ButtonType.OK::equals).isPresent();
+    /** 枚数で機械的に区切り直す。書き出しはせず、画面で確かめてから分割する。 */
+    private void breakEveryNPages() {
+        if (session == null) {
+            return;
+        }
+        PageCountPrompt.ask(stage, session.order().size(), baseNameOf(session.path()))
+                .ifPresent(session.order()::applyEveryNPages);
+    }
+
+    private void clearBreaks() {
+        if (session != null) {
+            session.order().clearBreaks();
+        }
     }
 
     private void resetOrder() {
@@ -382,9 +594,7 @@ public final class MainWindow {
         closeSession();
         session = opened;
 
-        thumbnails.setCellFactory(
-                view -> new ThumbnailCell(view, opened.order(), opened.thumbnails()));
-        thumbnails.setItems(opened.order().pages());
+        thumbnails.show(opened);
         opened.order().pages().addListener(orderListener);
 
         documentOpen.set(true);
@@ -397,7 +607,7 @@ public final class MainWindow {
             return;
         }
         session.order().pages().removeListener(orderListener);
-        thumbnails.setItems(FXCollections.observableArrayList());
+        thumbnails.clear();
 
         // 描画スレッドの停止を待つ。1 枚分の描画が終わるまでなので、ここでの待ちは短い。
         session.close();
@@ -416,27 +626,14 @@ public final class MainWindow {
      * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
      * 元のファイルはそのまま残る。
      */
-    private static List<Warning> assemble(Path source, List<PageSelection> pages, Path output) {
+    private static List<Warning> assemble(
+            List<Path> sources, List<PageSelection> pages, Path output) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
         Path temporary = temporaryNextTo(output);
         try {
-            operations.assemble(source, pages, temporary);
-            move(temporary, output);
-        } finally {
-            deleteQuietly(temporary);
-        }
-        return List.copyOf(warnings);
-    }
-
-    private static List<Warning> mergeInto(List<Path> inputs, Path output) {
-        List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
-        PageOperations operations = new PdfBoxPageOperations(warnings::add);
-
-        Path temporary = temporaryNextTo(output);
-        try {
-            operations.merge(inputs, temporary, MergeOptions.defaults());
+            operations.assemble(sources, pages, temporary);
             move(temporary, output);
         } finally {
             deleteQuietly(temporary);
@@ -445,16 +642,14 @@ public final class MainWindow {
     }
 
     private static SplitResult splitInto(
-            Path source,
-            List<PageSelection> pages,
-            int pagesPerFile,
+            List<Path> sources,
+            List<List<PageSelection>> segments,
             Path outputDir,
             String baseName) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        int fileCount = (pages.size() + pagesPerFile - 1) / pagesPerFile;
-        List<Path> outputs = IntStream.rangeClosed(1, fileCount)
+        List<Path> outputs = IntStream.rangeClosed(1, segments.size())
                 .mapToObj(number -> outputDir.resolve(
                         String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)))
                 .toList();
@@ -465,12 +660,10 @@ public final class MainWindow {
                 throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
             }
         }
-        for (int i = 0; i < fileCount; i++) {
-            int from = i * pagesPerFile;
-            int to = Math.min(from + pagesPerFile, pages.size());
-            operations.assemble(source, pages.subList(from, to), outputs.get(i));
+        for (int i = 0; i < segments.size(); i++) {
+            operations.assemble(sources, segments.get(i), outputs.get(i));
         }
-        return new SplitResult(fileCount, List.copyOf(warnings));
+        return new SplitResult(segments.size(), List.copyOf(warnings));
     }
 
     /** 分割の結果。書き出した数と、その途中で出た警告。 */
@@ -547,6 +740,11 @@ public final class MainWindow {
         worker.start();
     }
 
+    /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
+    private void showAbout() {
+        AboutDialog.show(stage, hostServices);
+    }
+
     private void showWarnings(List<Warning> warnings) {
         if (warnings.isEmpty()) {
             return;
@@ -580,9 +778,17 @@ public final class MainWindow {
     }
 
     private void updateTitle() {
-        stage.setTitle(session == null
-                ? TITLE
-                : TITLE + " — " + session.path().getFileName());
+        if (session == null) {
+            stage.setTitle(AppInfo.NAME);
+            return;
+        }
+        // 何を編集しているのかは最初に開いたファイルで示し、足したぶんは数で添える。
+        // 全部のファイル名を並べると表題に収まらない。
+        String title = AppInfo.NAME + " — " + session.path().getFileName();
+        if (session.sourceCount() > 1) {
+            title += " ほか " + (session.sourceCount() - 1) + " ファイル";
+        }
+        stage.setTitle(title);
     }
 
     private void updateStatus() {
@@ -594,6 +800,13 @@ public final class MainWindow {
                     .append(" / ")
                     .append(session.sourcePageCount())
                     .append(" ページ");
+            if (session.sourceCount() > 1) {
+                text.append("（").append(session.sourceCount()).append(" ファイル）");
+            }
+            if (session.order().breakCount() > 0) {
+                text.append("　区切り ").append(session.order().breakCount()).append(" か所 → ")
+                        .append(session.order().segmentCount()).append(" ファイルに分かれます");
+            }
             if (session.order().modified()) {
                 text.append("（未保存の変更があります）");
             }

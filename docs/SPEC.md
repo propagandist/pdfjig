@@ -137,7 +137,20 @@ interface PageOperations {
     Path rotate(Path input, Map<Integer, Rotation> rotations, Path output);
     Path extractPages(Path input, PageRange range, Path output);
     Path deletePages(Path input, PageRange range, Path output);
+
+    // 並べ替え・削除・回転を一度の書き出しで確定させる
+    Path assemble(Path input, List<PageSelection> selections, Path output);
+
+    // 複数のファイルにまたがって集める。sourceIndex が inputs の並びを指す
+    Path assemble(List<Path> inputs, List<PageSelection> selections, Path output);
 }
+
+// 出力に含める 1 ページの指定
+record PageSelection(
+    int sourceIndex,             // 出どころ。inputs の添字（0 始まり）
+    int pageNumber,              // その文書の中でのページ番号（1 始まり）
+    Rotation additionalRotation  // 元の回転角に加える回転。絶対角ではない
+) {}
 
 interface TextExtraction {
     String extractAll(PdfDocument doc);
@@ -163,6 +176,12 @@ interface Exporter {
 }
 // ExportFormat: CSV, JSON, XLSX
 ```
+
+`assemble` は `reorder` / `rotate` / `extractPages` / `deletePages` を置き換えるものではない。単一の操作で済む経路はそれぞれの API を使う。
+
+`assemble` が別に要るのは、UI が並べ替え・削除・回転を続けて行うためである。個別 API の連鎖で実装すると中間ファイルが要るうえ、途中で失敗したときに「並べ替えた状態で回転したら並べ替えが消えた文書が出てくる」ことになり、利用者を誤解させる（§1 の設計思想、`CLAUDE.md` 優先順位 2）。UI 上の編集結果は一度の書き出しで確定させる。
+
+複数入力を取る `assemble` は、UI が開いている文書に他のファイルを足せるようにするためのものである（§7.1）。`merge` との違いはページ単位で順序と向きを指定できる点にあり、`merge` はファイル単位でつなぐ操作として残る。
 
 ### 4.3 暗号化の伝播
 
@@ -276,7 +295,12 @@ PDF には役割の異なる 2 つのパスワードがある。
 | 固定サイズのサムネイル一覧 | ズーム |
 | スクロール時の遅延レンダリング | ページ拡大プレビュー |
 | サムネイルの LRU キャッシュ | 複数文書の同時タブ |
-| 単一文書内のドラッグ&ドロップ並べ替え | 文書間のページ移動 |
+| ドラッグ&ドロップ並べ替え | 開いている文書どうしのページ交換 |
+| 1 つの編集セッションに複数ファイルのページを含めること | |
+
+**「PDF を追加」で足したページは、元からあったページと区別なく扱う。** 当初は「文書間のページ移動」も実装しないとしていたが、それだと結合が「開いている文書とは無関係にファイルを選んで書き出す」一発勝負の操作にしかならず、他の操作と流れが揃わない。綴じる道具としての中心的な操作であり、方針を改めた。
+
+区別しているのは、複数の文書を**別々に開いて**行き来することである。タブや複数ウィンドウは持たない。あくまで 1 つの編集セッションが複数ファイルのページを含み、出力も 1 つになる。
 
 ### 7.2 スレッド規約
 

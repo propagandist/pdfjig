@@ -4,7 +4,14 @@ plugins {
 
 allprojects {
     group = "io.github.propagandist"
-    version = "0.1.0-SNAPSHOT"
+
+    // 版数はここだけを正とする。画面と CLI が出す版数もここから焼き込まれる（pdf-core の BuildInfo）。
+    //
+    // 無条件に代入してはならない。CI はタグから -Pversion=0.2.0 のように渡しており、
+    // 代入で上書きすると、タグが何であろうとここに書いた版数のインストーラができる。
+    if (version == Project.DEFAULT_VERSION) {
+        version = "0.1.0-SNAPSHOT"
+    }
 }
 
 subprojects {

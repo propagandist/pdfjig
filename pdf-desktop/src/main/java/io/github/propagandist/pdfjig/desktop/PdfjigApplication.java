@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.List;
 import javafx.application.Application;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
 
 /**
@@ -29,11 +30,14 @@ public final class PdfjigApplication extends Application {
 
     @Override
     public void start(Stage stage) {
-        MainWindow window = new MainWindow(stage, aiProvider);
+        MainWindow window = new MainWindow(stage, aiProvider, getHostServices());
 
         Scene scene = new Scene(window.build(), INITIAL_WIDTH, INITIAL_HEIGHT);
         scene.getStylesheets().add(
                 PdfjigApplication.class.getResource("pdfjig.css").toExternalForm());
+
+        stage.getIcons().add(new Image(
+                PdfjigApplication.class.getResourceAsStream("pdfjig-256.png")));
 
         stage.setScene(scene);
         stage.setOnHidden(event -> window.dispose());

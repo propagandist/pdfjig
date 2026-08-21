@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.cli;
 
+import io.github.propagandist.pdfjig.core.BuildInfo;
 import io.github.propagandist.pdfjig.core.PdfDocument;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
@@ -18,7 +19,7 @@ import picocli.CommandLine.Parameters;
 @Command(
         name = "pdfjig",
         mixinStandardHelpOptions = true,
-        version = "pdfjig 0.1.0",
+        versionProvider = PdfjigCommand.VersionProvider.class,
         description = "PDF を綴じ、解き、取り出すためのユーティリティ。",
         subcommands = {PdfjigCommand.Info.class})
 public final class PdfjigCommand implements Runnable {
@@ -26,6 +27,20 @@ public final class PdfjigCommand implements Runnable {
     @Override
     public void run() {
         CommandLine.usage(this, System.out);
+    }
+
+    /**
+     * {@code --version} が出す文言。
+     *
+     * <p>版数は {@link BuildInfo} から取る。{@code @Command} に直接書くと、
+     * ビルドが付ける版数と黙って食い違う。
+     */
+    static final class VersionProvider implements CommandLine.IVersionProvider {
+
+        @Override
+        public String[] getVersion() {
+            return new String[] {"pdfjig " + BuildInfo.version()};
+        }
     }
 
     /** 文書の基本情報を表示する。 */

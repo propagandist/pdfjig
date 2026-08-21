@@ -237,9 +237,9 @@ class PdfBoxPageOperationsTest {
             Path output = operations.assemble(
                     input,
                     List.of(
-                            new PageSelection(3, Rotation.NONE),
-                            new PageSelection(2, Rotation.CLOCKWISE_90),
-                            new PageSelection(1, Rotation.HALF_TURN)),
+                            new PageSelection(0, 3, Rotation.NONE),
+                            new PageSelection(0, 2, Rotation.CLOCKWISE_90),
+                            new PageSelection(0, 1, Rotation.HALF_TURN)),
                     tempDir.resolve("assembled.pdf"));
 
             // 元の向きに加算される。3 ページ目は 180 のまま、2 ページ目は 90+90、
@@ -256,7 +256,7 @@ class PdfBoxPageOperationsTest {
                     input,
                     List.of(
                             PageSelection.of(1),
-                            new PageSelection(1, Rotation.CLOCKWISE_90)),
+                            new PageSelection(0, 1, Rotation.CLOCKWISE_90)),
                     tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of(0, 90), TestPdfs.rotationsOf(output));
@@ -270,8 +270,8 @@ class PdfBoxPageOperationsTest {
             operations.assemble(
                     input,
                     List.of(
-                            new PageSelection(1, Rotation.CLOCKWISE_90),
-                            new PageSelection(2, Rotation.CLOCKWISE_90)),
+                            new PageSelection(0, 1, Rotation.CLOCKWISE_90),
+                            new PageSelection(0, 2, Rotation.CLOCKWISE_90)),
                     tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of(0, 90), TestPdfs.rotationsOf(input));
@@ -305,6 +305,126 @@ class PdfBoxPageOperationsTest {
                                             List.of(PageSelection.of(1), PageSelection.of(3)),
                                             tempDir.resolve("assembled.pdf")))
                             .errorCode());
+        }
+    }
+
+    @Nested
+    class AssembleAcrossInputs {
+
+        @Test
+        @DisplayName("複数の入力からページを混ぜて並べられる")
+        void mixesPagesFromSeveralInputs() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("second.pdf"), "B1", "B2", "B3");
+
+            Path output = operations.assemble(
+                    List.of(first, second),
+                    List.of(
+                            PageSelection.of(1, 3),
+                            PageSelection.of(0, 1),
+                            PageSelection.of(1, 1)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("B3", "A1", "B1"), textsOf(output));
+        }
+
+        @Test
+        @DisplayName("出どころごとに向きを加えられる")
+        void rotatesPerSource() throws Exception {
+            Path first = TestPdfs.rotated(tempDir.resolve("first.pdf"), 0);
+            Path second = TestPdfs.rotated(tempDir.resolve("second.pdf"), 90);
+
+            Path output = operations.assemble(
+                    List.of(first, second),
+                    List.of(
+                            new PageSelection(0, 1, Rotation.CLOCKWISE_90),
+                            new PageSelection(1, 1, Rotation.CLOCKWISE_90)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of(90, 180), TestPdfs.rotationsOf(output));
+        }
+
+        @Test
+        @DisplayName("混ぜても入力は変わらない")
+        void leavesInputsUntouched() throws Exception {
+            Path first = TestPdfs.rotated(tempDir.resolve("first.pdf"), 0);
+            Path second = TestPdfs.rotated(tempDir.resolve("second.pdf"), 90);
+
+            operations.assemble(
+                    List.of(first, second),
+                    List.of(
+                            new PageSelection(1, 1, Rotation.HALF_TURN),
+                            new PageSelection(0, 1, Rotation.HALF_TURN)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of(0), TestPdfs.rotationsOf(first));
+            assertEquals(List.of(90), TestPdfs.rotationsOf(second));
+        }
+
+        @Test
+        @DisplayName("範囲外の出どころを指すと PAGE_OUT_OF_RANGE")
+        void rejectsSourceOutOfRange() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 2);
+
+            assertEquals(
+                    ErrorCode.PAGE_OUT_OF_RANGE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            List.of(input),
+                                            List.of(PageSelection.of(1, 1)),
+                                            tempDir.resolve("assembled.pdf")))
+                            .errorCode());
+        }
+
+        @Test
+        @DisplayName("ページ番号は出どころごとに数える")
+        void countsPagesPerSource() throws Exception {
+            Path first = TestPdfs.plain(tempDir.resolve("first.pdf"), 5);
+            Path second = TestPdfs.plain(tempDir.resolve("second.pdf"), 1);
+
+            // 2 つ目は 1 ページしかない。合計で数えていれば通ってしまう指定。
+            assertEquals(
+                    ErrorCode.PAGE_OUT_OF_RANGE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            List.of(first, second),
+                                            List.of(PageSelection.of(1, 2)),
+                                            tempDir.resolve("assembled.pdf")))
+                            .errorCode());
+        }
+
+        @Test
+        @DisplayName("入力が空だと NO_INPUT")
+        void rejectsEmptyInputs() {
+            assertEquals(
+                    ErrorCode.NO_INPUT,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            List.of(),
+                                            List.of(PageSelection.of(1)),
+                                            tempDir.resolve("assembled.pdf")))
+                            .errorCode());
+        }
+
+        @Test
+        @DisplayName("暗号化された入力が混ざれば、その分だけ警告が出る")
+        void warnsForEachEncryptedInput() throws Exception {
+            Path plain = TestPdfs.plain(tempDir.resolve("plain.pdf"), 1);
+            Path protectedByOwner =
+                    TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+
+            List<Warning> collected = new ArrayList<>();
+            PageOperations warned = new PdfBoxPageOperations(collected::add);
+
+            warned.assemble(
+                    List.of(plain, protectedByOwner),
+                    List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of(Warning.ENCRYPTION_NOT_PROPAGATED), collected);
         }
     }
 

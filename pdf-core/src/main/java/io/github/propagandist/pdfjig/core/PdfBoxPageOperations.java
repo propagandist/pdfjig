@@ -90,10 +90,25 @@ public final class PdfBoxPageOperations implements PageOperations {
 
     @Override
     public Path assemble(Path input, List<PageSelection> pages, Path output) {
+        return assemble(List.of(input), pages, output);
+    }
+
+    @Override
+    public Path assemble(List<Path> inputs, List<PageSelection> pages, Path output) {
+        if (inputs == null || inputs.isEmpty()) {
+            throw new PdfjigException(ErrorCode.NO_INPUT);
+        }
         requireAbsent(output);
-        try (PdfDocument source = open(input)) {
-            requireSelectable(pages, source.pageCount());
-            writeSelections(source, pages, output);
+
+        // importPage は元のページ辞書を参照する。保存が終わるまで入力を閉じられないため、
+        // まとめて開いたまま保持する。merge と同じ約束である。
+        try (OpenDocuments sources = new OpenDocuments()) {
+            List<PdfDocument> documents = new ArrayList<>(inputs.size());
+            for (Path input : inputs) {
+                documents.add(sources.open(input));
+            }
+            requireSelectable(pages, documents);
+            writeSelections(documents, pages, output);
         }
         return output;
     }
@@ -211,13 +226,15 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     private static void writePages(PdfDocument source, List<Integer> pageNumbers, Path output) {
-        writeSelections(source, pageNumbers.stream().map(PageSelection::of).toList(), output);
+        writeSelections(
+                List.of(source), pageNumbers.stream().map(PageSelection::of).toList(), output);
     }
 
     private static void writeSelections(
-            PdfDocument source, List<PageSelection> pages, Path output) {
+            List<PdfDocument> sources, List<PageSelection> pages, Path output) {
         try (PDDocument target = new PDDocument()) {
             for (PageSelection selection : pages) {
+                PdfDocument source = sources.get(selection.sourceIndex());
                 // importPage が返すのは元のページ辞書の複製である。ここで向きを変えても
                 // 元の文書には及ばず、同じページを二度含めてそれぞれ別の向きにもできる。
                 PDPage imported =
@@ -262,12 +279,22 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
     }
 
-    private static void requireSelectable(List<PageSelection> pages, int pageCount) {
+    /**
+     * 出どころとページ番号が、開いた入力の範囲に収まっているか確かめる。
+     *
+     * <p>出どころの番号が範囲外でも {@link ErrorCode#PAGE_OUT_OF_RANGE} を使う。
+     * 利用者にとっては「指定されたページが文書の範囲外」であり、内部の添字を
+     * 別の失敗として区別しても意味がない。
+     */
+    private static void requireSelectable(List<PageSelection> pages, List<PdfDocument> sources) {
         if (pages == null || pages.isEmpty()) {
             throw new PdfjigException(ErrorCode.EMPTY_RESULT);
         }
         for (PageSelection selection : pages) {
-            if (selection == null || selection.pageNumber() > pageCount) {
+            if (selection == null || selection.sourceIndex() >= sources.size()) {
+                throw new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE);
+            }
+            if (selection.pageNumber() > sources.get(selection.sourceIndex()).pageCount()) {
                 throw new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE);
             }
         }

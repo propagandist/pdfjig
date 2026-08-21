@@ -83,6 +83,28 @@ public interface PageOperations {
     Path assemble(Path input, List<PageSelection> pages, Path output);
 
     /**
+     * 複数の入力にまたがってページを集め、指定した順と向きで並べた文書を書き出す。
+     *
+     * <p>{@link #assemble(Path, List, Path)} の一般形である。どのページも
+     * {@link PageSelection#sourceIndex()} で {@code inputs} のどれから取るかを示す。
+     *
+     * <p>これがあることで「複数のファイルを 1 つに綴じる」操作を、並べ替え・削除・回転と
+     * 同じ 1 回の書き出しで表せる。{@link #merge} との違いは、ページ単位で順序と向きを
+     * 指定できる点にある。UI は開いている文書に他のファイルを足したうえで、
+     * すべてを混ぜて並べ替えてから一度だけ書き出す（SPEC.md §7.1）。
+     *
+     * @param inputs 入力ファイル。{@link PageSelection#sourceIndex()} がこの並びを指す
+     * @param pages  出力に含めるページ。この順に並ぶ
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     * @throws PdfjigException 入力が空の場合は {@link ErrorCode#NO_INPUT}、
+     *                         指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
+     *                         範囲外の出どころやページを含む場合は
+     *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}
+     */
+    Path assemble(List<Path> inputs, List<PageSelection> pages, Path output);
+
+    /**
      * ページを回転する。
      *
      * <p><b>指定は現在の回転角への追加である。</b> {@link Rotation#CLOCKWISE_90} を指定すると、
