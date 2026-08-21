@@ -5,11 +5,24 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -576,6 +589,102 @@ class PdfBoxPageOperationsTest {
             operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
 
             assertTrue(warnings.isEmpty());
+        }
+    }
+
+    /**
+     * 出力に含めなかったページが、出力ファイルの中に残っていないことを確かめる。
+     *
+     * <p>ページ数や見えている本文を数えるだけでは捕まらない。ページツリーから外れていても、
+     * 生き残ったページの参照から辿れるオブジェクトは保存時に書き出されるため、
+     * 捨てたはずのページが「見えないが在る」状態になりうる。
+     * 目次や相互参照を持つ文書から機密ページを取り除いて渡す、という使い方で実害が出る。
+     */
+    @Nested
+    class NoLeakage {
+
+        @Test
+        @DisplayName("取り出さなかったページの内容が出力に残らない")
+        void extractLeavesNothingBehind() throws Exception {
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "KEEPME", "SECRETA", "SECRETB");
+
+            Path output = operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertEquals(List.of("KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA", "SECRETB");
+        }
+
+        @Test
+        @DisplayName("削除したページの内容が出力に残らない")
+        void deleteLeavesNothingBehind() throws Exception {
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "KEEPME", "SECRETA", "SECRETB");
+
+            Path output = operations.deletePages(input, PageRange.of(2, 3), tempDir.resolve("deleted.pdf"));
+
+            assertEquals(List.of("KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA", "SECRETB");
+        }
+
+        @Test
+        @DisplayName("並べ替えても捨てたページの内容が出力に残らない")
+        void assembleLeavesNothingBehind() throws Exception {
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "KEEPME", "SECRETA", "ALSOKEPT");
+
+            Path output = operations.assemble(
+                    input, List.of(PageSelection.of(3), PageSelection.of(1)), tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("ALSOKEPT", "KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA");
+        }
+    }
+
+    /** 出力から辿り着けるどのストリームにも、与えた文字列が現れないこと。 */
+    private static void assertNotReachable(Path pdf, String... absent) throws IOException {
+        String reachable = reachableStreamsOf(pdf);
+        for (String needle : absent) {
+            assertFalse(reachable.contains(needle), "出力に含めなかったページの内容 '" + needle + "' が出力ファイルに残っている。");
+        }
+    }
+
+    /**
+     * 出力の trailer から辿り着けるストリームをすべて連結して返す。
+     *
+     * <p>{@code COSWriter} が書き出す対象と同じ到達可能性を、こちらでも辿る。
+     * ページツリーに現れないオブジェクトも、参照さえあればここに現れる。
+     */
+    private static String reachableStreamsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            StringBuilder collected = new StringBuilder();
+            collect(document.getDocument().getTrailer(), Collections.newSetFromMap(new IdentityHashMap<>()), collected);
+            return collected.toString();
+        }
+    }
+
+    private static void collect(COSBase base, Set<COSBase> seen, StringBuilder collected) throws IOException {
+        if (base == null) {
+            return;
+        }
+        if (base instanceof COSObject reference) {
+            collect(reference.getObject(), seen, collected);
+            return;
+        }
+        if (!seen.add(base)) {
+            return;
+        }
+        if (base instanceof COSStream stream) {
+            // 復号したうえで見る。圧縮されたままの生バイト列を探しても見つからない。
+            try (InputStream in = stream.createInputStream()) {
+                collected.append(new String(in.readAllBytes(), StandardCharsets.ISO_8859_1));
+            }
+        }
+        if (base instanceof COSDictionary dictionary) {
+            for (COSBase value : dictionary.getValues()) {
+                collect(value, seen, collected);
+            }
+        } else if (base instanceof COSArray array) {
+            for (int i = 0; i < array.size(); i++) {
+                collect(array.get(i), seen, collected);
+            }
         }
     }
 

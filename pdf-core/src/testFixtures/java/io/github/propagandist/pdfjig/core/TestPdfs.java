@@ -8,10 +8,13 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination;
 
 /**
  * テスト用の PDF をその場で生成する。
@@ -123,6 +126,46 @@ public final class TestPdfs {
             StandardProtectionPolicy policy = new StandardProtectionPolicy(ownerPassword, "", permissions);
             policy.setEncryptionKeyLength(256);
             document.protect(policy);
+
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * ページどうしを内部リンクでつないだ PDF を作る。
+     *
+     * <p>各ページに、次のページ（最後のページは先頭）へ飛ぶ {@code Link} 注釈を 1 つ置く。
+     * 目次や相互参照を持つ実務文書を模したものであり、ページを取り除いたときに
+     * 宛先を失う参照がどう扱われるかを試すために使う。
+     *
+     * <p>本文の描き方は {@link #withText} と同じ。したがって {@code pageTexts} は ASCII に限る。
+     */
+    static Path withInternalLinks(Path target, String... pageTexts) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            List<PDPage> pages = new ArrayList<>(pageTexts.length);
+            for (String text : pageTexts) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+                pages.add(page);
+                try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                    content.beginText();
+                    content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), FONT_SIZE);
+                    content.newLineAtOffset(TEXT_LEFT, page.getMediaBox().getHeight() - TEXT_TOP);
+                    content.showText(text);
+                    content.endText();
+                }
+            }
+
+            for (int i = 0; i < pages.size(); i++) {
+                PDPageFitDestination destination = new PDPageFitDestination();
+                destination.setPage(pages.get((i + 1) % pages.size()));
+
+                PDAnnotationLink link = new PDAnnotationLink();
+                link.setDestination(destination);
+                link.setRectangle(new PDRectangle(TEXT_LEFT, TEXT_LEFT, 100f, 20f));
+                pages.get(i).getAnnotations().add(link);
+            }
 
             document.save(target.toFile());
         }
