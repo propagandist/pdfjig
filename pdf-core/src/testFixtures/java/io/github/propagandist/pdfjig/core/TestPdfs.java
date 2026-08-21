@@ -1,20 +1,36 @@
 package io.github.propagandist.pdfjig.core;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
+import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
+import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDPageLabelRange;
+import org.apache.pdfbox.pdmodel.common.PDPageLabels;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 
 /**
  * テスト用の PDF をその場で生成する。
@@ -39,6 +55,27 @@ public final class TestPdfs {
 
     /** {@link #withText} が使う上マージン（pt）。ベースラインまでの距離。 */
     public static final float TEXT_TOP = 72f;
+
+    /** {@link #rich} が付けるしおりの表題。ページ番号を後ろに付ける。 */
+    public static final String OUTLINE_TITLE_PREFIX = "Bookmark ";
+
+    /** {@link #rich} が付ける題名。 */
+    public static final String DOCUMENT_TITLE = "Rich Document";
+
+    /** {@link #rich} が付ける作成者。 */
+    public static final String DOCUMENT_AUTHOR = "pdfjig";
+
+    /** {@link #rich} が添付するファイルの名前。 */
+    public static final String ATTACHMENT_NAME = "note.txt";
+
+    /** {@link #rich} が添付するファイルの中身。 */
+    public static final String ATTACHMENT_BODY = "attached";
+
+    /** {@link #withNestedOutline} の親項目の表題。2 ページ目を指す。 */
+    public static final String NESTED_PARENT_TITLE = "Parent";
+
+    /** {@link #withNestedOutline} の子項目の表題。3 ページ目を指す。 */
+    public static final String NESTED_CHILD_TITLE = "Child";
 
     private TestPdfs() {}
 
@@ -141,7 +178,7 @@ public final class TestPdfs {
      *
      * <p>本文の描き方は {@link #withText} と同じ。したがって {@code pageTexts} は ASCII に限る。
      */
-    static Path withInternalLinks(Path target, String... pageTexts) throws IOException {
+    public static Path withInternalLinks(Path target, String... pageTexts) throws IOException {
         try (PDDocument document = new PDDocument()) {
             List<PDPage> pages = new ArrayList<>(pageTexts.length);
             for (String text : pageTexts) {
@@ -166,6 +203,125 @@ public final class TestPdfs {
                 link.setRectangle(new PDRectangle(TEXT_LEFT, TEXT_LEFT, 100f, 20f));
                 pages.get(i).getAnnotations().add(link);
             }
+
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * 実務の文書が持っているものを一通り備えた PDF を作る。
+     *
+     * <p>しおり（1 ページにつき 1 項目）・文書情報・添付ファイル・ページラベル・
+     * ページどうしの内部リンクを持つ。書き出しでこれらが失われないことを確かめるために使う。
+     *
+     * <p>本文の描き方は {@link #withText} と同じ。{@code pageTexts} は ASCII に限る。
+     */
+    public static Path rich(Path target, String... pageTexts) throws IOException {
+        withInternalLinks(target, pageTexts);
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            PDDocumentCatalog catalog = document.getDocumentCatalog();
+
+            PDDocumentOutline outline = new PDDocumentOutline();
+            catalog.setDocumentOutline(outline);
+            for (int i = 0; i < pageTexts.length; i++) {
+                PDPageFitDestination destination = new PDPageFitDestination();
+                destination.setPage(document.getPage(i));
+
+                PDOutlineItem item = new PDOutlineItem();
+                item.setTitle(OUTLINE_TITLE_PREFIX + (i + 1));
+                item.setDestination(destination);
+                outline.addLast(item);
+            }
+
+            PDDocumentInformation information = new PDDocumentInformation();
+            information.setTitle(DOCUMENT_TITLE);
+            information.setAuthor(DOCUMENT_AUTHOR);
+            document.setDocumentInformation(information);
+
+            PDComplexFileSpecification specification = new PDComplexFileSpecification();
+            specification.setFile(ATTACHMENT_NAME);
+            specification.setEmbeddedFile(new PDEmbeddedFile(
+                    document, new ByteArrayInputStream(ATTACHMENT_BODY.getBytes(StandardCharsets.UTF_8))));
+
+            PDEmbeddedFilesNameTreeNode files = new PDEmbeddedFilesNameTreeNode();
+            files.setNames(Map.of(ATTACHMENT_NAME, specification));
+            PDDocumentNameDictionary names = new PDDocumentNameDictionary(catalog);
+            names.setEmbeddedFiles(files);
+            catalog.setNames(names);
+
+            PDPageLabels labels = new PDPageLabels(document);
+            PDPageLabelRange roman = new PDPageLabelRange();
+            roman.setStyle(PDPageLabelRange.STYLE_ROMAN_LOWER);
+            labels.setLabelItem(0, roman);
+            catalog.setPageLabels(labels);
+
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * 入れ子のしおりを持つ 3 ページの PDF を作る。
+     *
+     * <p>親は 2 ページ目を指し、その子は 3 ページ目を指す。2 ページ目だけを取り除いたときに、
+     * 親が落ちて子が繰り上がることを確かめるために使う。
+     */
+    public static Path withNestedOutline(Path target) throws IOException {
+        withText(target, "P1", "P2", "P3");
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            PDDocumentOutline outline = new PDDocumentOutline();
+            document.getDocumentCatalog().setDocumentOutline(outline);
+
+            PDOutlineItem parent = new PDOutlineItem();
+            parent.setTitle(NESTED_PARENT_TITLE);
+            parent.setDestination(document.getPage(1));
+            outline.addLast(parent);
+
+            PDOutlineItem child = new PDOutlineItem();
+            child.setTitle(NESTED_CHILD_TITLE);
+            child.setDestination(document.getPage(2));
+            parent.addLast(child);
+
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * 中間ノードから寸法を継承するページツリーを持つ PDF を作る。
+     *
+     * <p>各ページ自身は {@code /MediaBox} を持たず、親の {@code /Pages} ノードが持つ。
+     * 並べ替えでページツリーを均すときに寸法が失われないことを確かめるために使う。
+     */
+    public static Path withInheritedMediaBox(Path target, PDRectangle box, int pageCount) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            for (int i = 0; i < pageCount; i++) {
+                document.addPage(new PDPage(box));
+            }
+
+            COSDictionary root = document.getDocumentCatalog().getPages().getCOSObject();
+            COSArray kids = (COSArray) root.getDictionaryObject(COSName.KIDS);
+
+            COSDictionary middle = new COSDictionary();
+            middle.setItem(COSName.TYPE, COSName.PAGES);
+            middle.setItem(COSName.KIDS, kids);
+            middle.setInt(COSName.COUNT, pageCount);
+            middle.setItem(COSName.PARENT, root);
+            middle.setItem(COSName.MEDIA_BOX, box.getCOSArray());
+
+            for (int i = 0; i < kids.size(); i++) {
+                COSDictionary page = (COSDictionary) kids.getObject(i);
+                page.removeItem(COSName.MEDIA_BOX);
+                page.setItem(COSName.PARENT, middle);
+            }
+
+            COSArray replacement = new COSArray();
+            replacement.add(middle);
+            root.setItem(COSName.KIDS, replacement);
+            root.setInt(COSName.COUNT, pageCount);
 
             document.save(target.toFile());
         }

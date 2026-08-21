@@ -23,6 +23,14 @@ import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDPageLabels;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -409,7 +417,12 @@ class PdfBoxPageOperationsTest {
                     List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
                     tempDir.resolve("assembled.pdf"));
 
-            assertEquals(List.of(Warning.ENCRYPTION_NOT_PROPAGATED), collected);
+            // 他の警告も出るが、ここで見たいのは暗号化の警告が入力 1 つにつき 1 度であること。
+            assertEquals(
+                    List.of(Warning.ENCRYPTION_NOT_PROPAGATED),
+                    collected.stream()
+                            .filter(warning -> warning == Warning.ENCRYPTION_NOT_PROPAGATED)
+                            .toList());
         }
     }
 
@@ -635,6 +648,210 @@ class PdfBoxPageOperationsTest {
 
             assertEquals(List.of("ALSOKEPT", "KEEPME"), textsOf(output));
             assertNotReachable(output, "SECRETA");
+        }
+    }
+
+    /**
+     * 書き出しで文書全体の構造が失われないこと。
+     *
+     * <p>ページを新しい文書に詰め替えると、しおり・文書情報・添付ファイル・ページラベルは
+     * ページに属さないためすべて落ちる。出力が入力より劣化する経路を作らないための担保である。
+     */
+    @Nested
+    class StructurePreserved {
+
+        @Test
+        @DisplayName("範囲を取り出しても、しおり・文書情報・添付・ページラベルが残る")
+        void extractKeepsDocumentStructure() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.extractPages(input, PageRange.of(1, 2), tempDir.resolve("extracted.pdf"));
+
+            assertEquals(
+                    List.of(TestPdfs.OUTLINE_TITLE_PREFIX + 1, TestPdfs.OUTLINE_TITLE_PREFIX + 2),
+                    outlineTitlesOf(output));
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertEquals(List.of(TestPdfs.ATTACHMENT_NAME), attachmentNamesOf(output));
+            assertEquals(List.of("i", "ii"), pageLabelsOf(output));
+        }
+
+        @Test
+        @DisplayName("並べ替えても、しおりと文書情報が残る")
+        void assembleKeepsDocumentStructure() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(3), PageSelection.of(1), PageSelection.of(2)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("P3", "P1", "P2"), textsOf(output));
+            // どのページも捨てていないため、しおりは 3 つとも残る。
+            assertEquals(3, outlineTitlesOf(output).size());
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertEquals(List.of(TestPdfs.ATTACHMENT_NAME), attachmentNamesOf(output));
+        }
+
+        @Test
+        @DisplayName("何も変えずに書き出しても構造は残る")
+        void writingUnchangedKeepsDocumentStructure() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(1), PageSelection.of(2), PageSelection.of(3)),
+                    tempDir.resolve("saved.pdf"));
+
+            assertEquals(3, outlineTitlesOf(output).size());
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertEquals(List.of(TestPdfs.ATTACHMENT_NAME), attachmentNamesOf(output));
+            assertEquals(List.of("i", "ii", "iii"), pageLabelsOf(output));
+            assertTrue(warnings.isEmpty(), "何も捨てていないのに警告が出ている。");
+        }
+
+        @Test
+        @DisplayName("並べ替えても、中間ノードから継承していた寸法が失われない")
+        void reorderKeepsInheritedMediaBox() throws Exception {
+            PDRectangle box = new PDRectangle(200f, 400f);
+            Path input = TestPdfs.withInheritedMediaBox(tempDir.resolve("doc.pdf"), box, 3);
+
+            Path output = operations.reorder(input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of(200f, 200f, 200f), widthsOf(output));
+            assertEquals(List.of(400f, 400f, 400f), heightsOf(output));
+        }
+
+        @Test
+        @DisplayName("複数の入力を混ぜると、両方のしおりが残り、文書情報の出どころを断る")
+        void mergingKeepsBothOutlines() throws Exception {
+            Path first = TestPdfs.rich(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.rich(tempDir.resolve("second.pdf"), "B1", "B2");
+
+            Path output = operations.assemble(
+                    List.of(first, second),
+                    List.of(
+                            PageSelection.of(0, 1),
+                            PageSelection.of(1, 1),
+                            PageSelection.of(0, 2),
+                            PageSelection.of(1, 2)),
+                    tempDir.resolve("mixed.pdf"));
+
+            assertEquals(List.of("A1", "B1", "A2", "B2"), textsOf(output));
+            assertEquals(4, outlineTitlesOf(output).size());
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertTrue(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+
+        @Test
+        @DisplayName("1 つの入力しか使わないなら、文書情報の警告は出ない")
+        void doesNotWarnAboutMetadataForSingleInput() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2");
+
+            operations.assemble(input, List.of(PageSelection.of(1), PageSelection.of(1)), tempDir.resolve("twice.pdf"));
+
+            assertFalse(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+    }
+
+    /** 宛先を失った参照の扱い。 */
+    @Nested
+    class DanglingReferences {
+
+        @Test
+        @DisplayName("宛先の消えたしおりは落ち、その子は繰り上がる")
+        void promotesChildrenOfRemovedBookmarks() throws Exception {
+            Path input = TestPdfs.withNestedOutline(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.deletePages(input, PageRange.singlePage(2), tempDir.resolve("deleted.pdf"));
+
+            // 親は消えた 2 ページ目を指していた。子はまだ生きている 3 ページ目を指す。
+            assertEquals(List.of(TestPdfs.NESTED_CHILD_TITLE), outlineTitlesOf(output));
+            assertTrue(warnings.contains(Warning.DANGLING_REFERENCES_REMOVED));
+        }
+
+        @Test
+        @DisplayName("ページを捨てれば、宛先を失った参照を取り除いたことを伝える")
+        void warnsWhenReferencesAreRemoved() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertTrue(warnings.contains(Warning.DANGLING_REFERENCES_REMOVED));
+        }
+
+        @Test
+        @DisplayName("すべてのページを残すなら、何も取り除かない")
+        void keepsEveryReferenceWhenNoPageIsDropped() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            operations.reorder(input, List.of(2, 3, 1), tempDir.resolve("reordered.pdf"));
+
+            assertFalse(warnings.contains(Warning.DANGLING_REFERENCES_REMOVED));
+        }
+    }
+
+    /** しおりの表題を、木を上から辿った順に並べる。 */
+    private static List<String> outlineTitlesOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            PDDocumentOutline outline = document.getDocumentCatalog().getDocumentOutline();
+            List<String> titles = new ArrayList<>();
+            if (outline != null) {
+                collectTitles(outline, titles);
+            }
+            return titles;
+        }
+    }
+
+    private static void collectTitles(PDOutlineNode node, List<String> into) {
+        for (PDOutlineItem item : node.children()) {
+            into.add(item.getTitle());
+            collectTitles(item, into);
+        }
+    }
+
+    private static String titleOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            return document.getDocumentInformation().getTitle();
+        }
+    }
+
+    private static List<String> attachmentNamesOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            PDDocumentNameDictionary names = document.getDocumentCatalog().getNames();
+            if (names == null || names.getEmbeddedFiles() == null) {
+                return List.of();
+            }
+            Map<String, PDComplexFileSpecification> files =
+                    names.getEmbeddedFiles().getNames();
+            return files == null ? List.of() : List.copyOf(files.keySet());
+        }
+    }
+
+    private static List<String> pageLabelsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            PDPageLabels labels = document.getDocumentCatalog().getPageLabels();
+            return labels == null ? List.of() : List.of(labels.getLabelsByPageIndices());
+        }
+    }
+
+    private static List<Float> widthsOf(Path pdf) throws IOException {
+        return mediaBoxSizesOf(pdf, true);
+    }
+
+    private static List<Float> heightsOf(Path pdf) throws IOException {
+        return mediaBoxSizesOf(pdf, false);
+    }
+
+    private static List<Float> mediaBoxSizesOf(Path pdf, boolean width) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            List<Float> sizes = new ArrayList<>(document.getNumberOfPages());
+            for (PDPage page : document.getPages()) {
+                sizes.add(
+                        width
+                                ? page.getMediaBox().getWidth()
+                                : page.getMediaBox().getHeight());
+            }
+            return sizes;
         }
     }
 
