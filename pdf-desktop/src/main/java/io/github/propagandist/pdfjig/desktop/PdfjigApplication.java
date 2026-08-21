@@ -30,7 +30,7 @@ public final class PdfjigApplication extends Application {
 
     @Override
     public void start(Stage stage) {
-        MainWindow window = new MainWindow(stage, aiProvider);
+        MainWindow window = new MainWindow(stage, aiProvider, getHostServices());
 
         Scene scene = new Scene(window.build(), INITIAL_WIDTH, INITIAL_HEIGHT);
         scene.getStylesheets().add(

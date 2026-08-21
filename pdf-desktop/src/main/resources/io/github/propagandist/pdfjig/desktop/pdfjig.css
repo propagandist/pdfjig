@@ -193,3 +193,23 @@
 .prompt-summary {
     -fx-text-fill: #4a5560;
 }
+
+/* ── バージョン情報 ─────────────────────────────────────────────── */
+
+.about-title {
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #2c3742;
+}
+
+/* 補足の行。読めればよく、名前と版数より前に出る必要はない。 */
+.about-detail {
+    -fx-text-fill: #5b6672;
+    -fx-font-size: 11px;
+}
+
+.about-link {
+    -fx-text-fill: #2f6fd0;
+    -fx-font-size: 11px;
+    -fx-border-color: transparent;
+}

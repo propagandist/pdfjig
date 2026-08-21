@@ -23,6 +23,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -67,15 +68,15 @@ import javafx.stage.Stage;
  */
 public final class MainWindow {
 
-    /** 画面上の表示名。コマンド名・パッケージ名の {@code pdfjig} とは別に、こちらで統一する。 */
-    private static final String TITLE = "PDFjig";
-
     /** 分割の出力ファイル名。pdf-core の分割と同じ形にそろえる。 */
     private static final String SPLIT_NAME_FORMAT = "%s_%03d.pdf";
 
     private final Stage stage;
 
     private final AiProvider aiProvider;
+
+    /** リンクを既定のブラウザに渡すために使う。バージョン情報のダイアログで使う。 */
+    private final HostServices hostServices;
 
     private final ThumbnailGrid thumbnails = new ThumbnailGrid();
 
@@ -97,9 +98,10 @@ public final class MainWindow {
 
     private DocumentSession session;
 
-    public MainWindow(Stage stage, AiProvider aiProvider) {
+    public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
         this.stage = stage;
         this.aiProvider = aiProvider;
+        this.hostServices = hostServices;
     }
 
     /**
@@ -169,7 +171,8 @@ public final class MainWindow {
             Action clearBreaks,
             Action reset,
             Action add,
-            Action split) {
+            Action split,
+            Action about) {
     }
 
     private Actions buildActions() {
@@ -215,7 +218,10 @@ public final class MainWindow {
                 new Action("PDF を追加…", "追加", ToolIcons.ADD,
                         null, this::addDocuments, needsDocument),
                 new Action("この文書を分割…", "分割", ToolIcons.SPLIT,
-                        null, this::splitDocument, needsDocument));
+                        null, this::splitDocument, needsDocument),
+                // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
+                new Action(AppInfo.NAME + " について", null, null,
+                        null, this::showAbout, null));
     }
 
     private MenuBar buildMenuBar(Actions actions) {
@@ -233,7 +239,8 @@ public final class MainWindow {
                         new SeparatorMenuItem(),
                         menuItem(actions.reset())),
                 new Menu("ツール", null,
-                        menuItem(actions.add()), menuItem(actions.split())));
+                        menuItem(actions.add()), menuItem(actions.split())),
+                new Menu("ヘルプ", null, menuItem(actions.about())));
     }
 
     /**
@@ -733,6 +740,11 @@ public final class MainWindow {
         worker.start();
     }
 
+    /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
+    private void showAbout() {
+        AboutDialog.show(stage, hostServices);
+    }
+
     private void showWarnings(List<Warning> warnings) {
         if (warnings.isEmpty()) {
             return;
@@ -767,12 +779,12 @@ public final class MainWindow {
 
     private void updateTitle() {
         if (session == null) {
-            stage.setTitle(TITLE);
+            stage.setTitle(AppInfo.NAME);
             return;
         }
         // 何を編集しているのかは最初に開いたファイルで示し、足したぶんは数で添える。
         // 全部のファイル名を並べると表題に収まらない。
-        String title = TITLE + " — " + session.path().getFileName();
+        String title = AppInfo.NAME + " — " + session.path().getFileName();
         if (session.sourceCount() > 1) {
             title += " ほか " + (session.sourceCount() - 1) + " ファイル";
         }
