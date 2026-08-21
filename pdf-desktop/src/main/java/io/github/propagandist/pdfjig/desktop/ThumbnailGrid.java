@@ -47,6 +47,18 @@ final class ThumbnailGrid {
 
     private final ListView<List<PageEntry>> rows = new ListView<>();
 
+    /**
+     * 選択中のページ位置。
+     *
+     * <p>ここに変更リスナを足して {@code ListView#refresh} を呼んではならない。
+     * <b>あれは全セルを作り直す</b>（{@code VirtualFlow} が sheet を空にし、各セルを
+     * {@code updateIndex(-1)} してから組み直す）。ドラッグは MOUSE_PRESSED →
+     * DRAG_DETECTED → DRAG_DROPPED と続く一連のジェスチャで、その間にレイアウトパスが
+     * 挟まるため、作り直すとタイルが別のページを受け持ち、掴んだのと違うページが動く。
+     *
+     * <p>選択が動いたときの見た目は {@link ThumbnailTile} が自分で当てる。
+     * 更新が要るのは旧選択と新選択の 2 枚だけである。
+     */
     private final SimpleIntegerProperty selectedIndex = new SimpleIntegerProperty(-1);
 
     /** ページ並びが変わったら行を組み直す。 */
@@ -85,13 +97,6 @@ final class ThumbnailGrid {
 
         rows.widthProperty().addListener((observable, previous, current) ->
                 applyColumns(current.doubleValue()));
-
-        // 選択が動いたら、見えている行だけ描き直して選択枠を移す。
-        //
-        // ここでスクロールはしない。選択はクリックからも動き、見えているタイルを選んだだけで
-        // 一覧が動くと、位置を決めた利用者の手元で表示が動くことになる。
-        // 画面の外へ出る操作（矢印キーなど）は select ではなく selectAndReveal を呼ぶ。
-        selectedIndex.addListener((observable, previous, current) -> rows.refresh());
     }
 
     /** 画面に置くための節点。 */
@@ -393,13 +398,11 @@ final class ThumbnailGrid {
             ensureTiles(grid.columns());
 
             int base = getIndex() * grid.columns();
-            int selected = grid.selectedIndex();
 
             for (int column = 0; column < tiles.size(); column++) {
                 ThumbnailTile tile = tiles.get(column);
                 if (column < pages.size()) {
-                    int index = base + column;
-                    tile.show(index, pages.get(column), index == selected);
+                    tile.show(base + column, pages.get(column));
                 } else {
                     // 最終行の余りは空にする。桁を保って左詰めの見た目を崩さない。
                     tile.clear();

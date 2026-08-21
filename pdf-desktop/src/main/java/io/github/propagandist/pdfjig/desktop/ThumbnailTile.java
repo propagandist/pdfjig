@@ -133,6 +133,13 @@ final class ThumbnailTile {
         root.setPrefSize(TILE_WIDTH, TILE_HEIGHT);
         root.setMaxSize(TILE_WIDTH, TILE_HEIGHT);
 
+        // 選択枠は自分で当てる。一覧側が ListView#refresh で当て直すこともできるが、
+        // あれは全セルを作り直す（VirtualFlow が sheet を空にし、各セルを updateIndex(-1) する）。
+        // 選択が動いて更新が要るのは旧選択と新選択の 2 枚だけであり、全部を作り直す理由がない。
+        // 作り直すと、ドラッグのジェスチャの最中にタイルが入れ替わって掴んだページを見失う。
+        grid.selectedIndexProperty().addListener((observable, previous, current) ->
+                applySelected(current.intValue()));
+
         root.setOnMousePressed(this::select);
         root.setOnDragDetected(this::startDrag);
         root.setOnDragOver(this::acceptDrag);
@@ -150,11 +157,14 @@ final class ThumbnailTile {
     /**
      * このタイルに 1 ページを表示させる。
      *
+     * <p>選択中かどうかは受け取らない。一覧が持つ選択位置ただ一つを見る
+     * （{@link #applySelected}）。両方から当てられるようにすると、
+     * どちらかを呼び忘れた経路で枠が残る。
+     *
      * @param pageIndex 並びの中での位置（0 始まり）
-     * @param selection 表示するページ
-     * @param selected  選択中か
+     * @param entry     表示するページ
      */
-    void show(int pageIndex, PageEntry entry, boolean selected) {
+    void show(int pageIndex, PageEntry entry) {
         PageSelection selection = entry.selection();
         boolean samePage = index == pageIndex
                 && imageView.getImage() != null
@@ -162,7 +172,8 @@ final class ThumbnailTile {
 
         root.setVisible(true);
         root.setManaged(true);
-        root.pseudoClassStateChanged(SELECTED, selected);
+        // このタイルが受け持つページが変わったので、選択枠を当て直す。
+        applySelected(pageIndex, grid.selectedIndex());
         // 帯の有無は並びの中身ではなく、いくつのファイルを含んでいるかで決まる。
         // 同じページを出し続けている間にファイルが増えることがあるので、毎回当て直す。
         applyAccent(selection.sourceIndex());
@@ -211,6 +222,29 @@ final class ThumbnailTile {
         pending = task;
     }
 
+    /**
+     * 選択枠を当てる。一覧の選択が動いたときに呼ばれる。
+     *
+     * @param selected 一覧が選んでいるページの位置
+     */
+    private void applySelected(int selected) {
+        applySelected(index, selected);
+    }
+
+    /**
+     * 選択枠を当てる。
+     *
+     * <p>受け持つページと選ばれているページを引数で受けるのは、{@link #show} が
+     * {@link #index} を書き換える前に呼ぶためである。空きタイル（{@code -1}）に
+     * 枠が付かないよう、位置が負なら必ず外す。
+     *
+     * @param pageIndex このタイルが受け持つページの位置。空きタイルなら {@code -1}
+     * @param selected  一覧が選んでいるページの位置
+     */
+    private void applySelected(int pageIndex, int selected) {
+        root.pseudoClassStateChanged(SELECTED, pageIndex >= 0 && pageIndex == selected);
+    }
+
     /** 区切りの縦線を当てる。「このページから新しいファイルが始まる」ことを示す。 */
     private void applyBreak(boolean present) {
         breakMark.setVisible(present);
@@ -241,7 +275,7 @@ final class ThumbnailTile {
         imageView.setImage(null);
         root.setVisible(false);
         root.setManaged(true);
-        root.pseudoClassStateChanged(SELECTED, false);
+        applySelected(-1, grid.selectedIndex());
         applyBreak(false);
         markDropTarget(false);
     }
@@ -274,8 +308,9 @@ final class ThumbnailTile {
     }
 
     private void select(MouseEvent event) {
-        if (index >= 0) {
-            grid.select(index);
+        int pressed = index;
+        if (pressed >= 0) {
+            grid.select(pressed);
             root.requestFocus();
         }
         event.consume();
@@ -289,14 +324,21 @@ final class ThumbnailTile {
     }
 
     private void startDrag(MouseEvent event) {
-        if (index < 0) {
+        // 掴んだ位置はここで確定させ、以降フィールドを読まない。
+        //
+        // タイルは行セルに使い回される。ドラッグは MOUSE_PRESSED → DRAG_DETECTED →
+        // DRAG_DROPPED と続く一連のジェスチャで、その間にレイアウトパスが挟まる。
+        // 一覧が作り直されればこのタイルは別のページを受け持ち、フィールドを読むと
+        // 掴んだのと違うページを動かすことになる。
+        int dragged = index;
+        if (dragged < 0) {
             return;
         }
-        grid.select(index);
+        grid.select(dragged);
 
         Dragboard board = root.startDragAndDrop(TransferMode.MOVE);
         ClipboardContent content = new ClipboardContent();
-        content.putString(String.valueOf(index));
+        content.putString(String.valueOf(dragged));
         board.setContent(content);
         if (imageView.getImage() != null) {
             board.setDragView(imageView.getImage());
@@ -313,14 +355,16 @@ final class ThumbnailTile {
 
     private void completeDrag(DragEvent event) {
         markDropTarget(false);
-        if (index < 0 || !isFromThisGrid(event)) {
+        // 落とし先も掴んだ位置と同じ理由でローカルに取る（startDrag のコメント）。
+        int target = index;
+        if (target < 0 || !isFromThisGrid(event)) {
             event.setDropCompleted(false);
             event.consume();
             return;
         }
 
         int from = Integer.parseInt(event.getDragboard().getString());
-        grid.move(from, index);
+        grid.move(from, target);
 
         event.setDropCompleted(true);
         event.consume();
