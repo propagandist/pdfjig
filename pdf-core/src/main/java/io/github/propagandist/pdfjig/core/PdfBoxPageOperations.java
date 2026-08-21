@@ -57,11 +57,17 @@ public final class PdfBoxPageOperations implements PageOperations {
         try (OpenDocuments sources = new OpenDocuments();
                 PDDocument merged = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
+            PDDocumentInformation information = null;
             for (Path input : inputs) {
                 // appendDocument は入力のページを参照でつなぐ。保存が終わるまで
                 // 入力を閉じられないため、まとめて開いたまま保持する。
-                merger.appendDocument(merged, sources.open(input).delegate());
+                PdfDocument source = sources.open(input);
+                if (information == null) {
+                    information = detachedInformationOf(source);
+                }
+                merger.appendDocument(merged, source.delegate());
             }
+            applyInformation(merged, information, inputs.size() > 1);
             save(merged, output);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
@@ -294,14 +300,14 @@ public final class PdfBoxPageOperations implements PageOperations {
             replacePages(target, ordered);
             applyRotations(ordered, pages);
 
-            // 題名や作成者を 1 つに決める根拠がない。先頭の入力のものを引き継ぎ、
-            // そうしたことを黙っておかない。
-            if (information != null) {
-                target.setDocumentInformation(information);
-            }
-            if (pages.stream().mapToInt(PageSelection::sourceIndex).distinct().count() > 1) {
-                warnings.onWarning(Warning.METADATA_FROM_FIRST_INPUT);
-            }
+            applyInformation(
+                    target,
+                    information,
+                    pages.stream()
+                                    .mapToInt(PageSelection::sourceIndex)
+                                    .distinct()
+                                    .count()
+                            > 1);
 
             target.setAllSecurityToBeRemoved(true);
             save(target, output);
@@ -398,6 +404,26 @@ public final class PdfBoxPageOperations implements PageOperations {
                 page.setRotation(
                         rotationOf(page).plus(selection.additionalRotation()).degrees());
             }
+        }
+    }
+
+    /**
+     * 結合先の文書情報を、先頭の入力のものに揃える。
+     *
+     * <p><b>上書きが要る。</b> {@code PDFMergerUtility} は文書情報を入力ごとに埋めていくため、
+     * 放っておくと「題名は 1 つ目、作成者は 2 つ目」という混ざり方をする。
+     * どこから来た値なのかを説明できず、題名と作成者が食い違う文書ができあがる。
+     * 先頭の入力のものに揃えれば、少なくとも一言で説明できる。
+     *
+     * <p>先頭の入力が文書情報を持たないなら、空にする。混ざったものを残すくらいなら
+     * 何も無いほうが正直である。
+     *
+     * @param mixed 出どころが 2 つ以上あるか。あるなら黙っておかない
+     */
+    private void applyInformation(PDDocument merged, PDDocumentInformation information, boolean mixed) {
+        merged.setDocumentInformation(information == null ? new PDDocumentInformation() : information);
+        if (mixed) {
+            warnings.onWarning(Warning.METADATA_FROM_FIRST_INPUT);
         }
     }
 

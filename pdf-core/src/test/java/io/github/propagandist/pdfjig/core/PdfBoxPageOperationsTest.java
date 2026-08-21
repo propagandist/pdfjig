@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +73,42 @@ class PdfBoxPageOperationsTest {
 
             assertEquals(List.of("A1", "A2"), textsOf(first));
             assertEquals(List.of("B1"), textsOf(second));
+        }
+
+        @Test
+        @DisplayName("文書情報は先頭の入力のものが残り、その旨を伝える")
+        void keepsDocumentInformationOfFirstInput() throws Exception {
+            Path first = TestPdfs.rich(tempDir.resolve("a.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
+
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(merged));
+            assertTrue(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+
+        @Test
+        @DisplayName("2 つ目にしか題名が無くても、先頭の入力の文書情報が使われる")
+        void alwaysTakesInformationFromTheFirstInput() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1");
+            Path second = TestPdfs.rich(tempDir.resolve("b.pdf"), "B1");
+
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertNull(titleOf(merged), "先頭の入力に題名が無いのに題名が付いている。");
+        }
+
+        @Test
+        @DisplayName("入力が 1 つなら、文書情報の警告は出ない")
+        void doesNotWarnAboutMetadataForSingleInput() throws Exception {
+            Path only = TestPdfs.rich(tempDir.resolve("a.pdf"), "A1", "A2");
+
+            Path merged = operations.merge(List.of(only), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(merged));
+            assertFalse(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
         }
 
         @Test
@@ -740,6 +777,21 @@ class PdfBoxPageOperationsTest {
             assertEquals(4, outlineTitlesOf(output).size());
             assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
             assertTrue(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+
+        @Test
+        @DisplayName("混ぜても、文書情報は先頭の入力のものだけになる")
+        void takesDocumentInformationFromTheFirstInputOnly() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1");
+            Path second = TestPdfs.rich(tempDir.resolve("second.pdf"), "B1");
+
+            Path output = operations.assemble(
+                    List.of(first, second),
+                    List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                    tempDir.resolve("mixed.pdf"));
+
+            // 先頭に題名が無いのだから、2 つ目のものを拾ってはならない。
+            assertNull(titleOf(output), "先頭の入力に題名が無いのに題名が付いている。");
         }
 
         @Test
