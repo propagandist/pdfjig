@@ -92,8 +92,12 @@ jobs:
       - name: Build
         run: ./gradlew build --stacktrace
 
+      # ★ -P の引数はクォートで囲む。PowerShell から gradlew.bat へ渡る過程で `=` の
+      #   前後がトークンとして割れ、Gradle には -Pversion / 0 / .0.1 の 3 つとして届く。
+      #   Gradle は `.0.1` をタスク名だと解釈して "Task '.0.1' not found" で落ちる。
+      #   ビルドは通ってパッケージだけが落ちるので、リリースのときに初めて分かる形だった。
       - name: Package
-        run: ./gradlew :pdf-desktop:packageAll -Pversion=${{ steps.version.outputs.version }} --stacktrace
+        run: ./gradlew :pdf-desktop:packageAll "-Pversion=${{ steps.version.outputs.version }}" --stacktrace
 
       - name: 成果物を検める
         run: |
