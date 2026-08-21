@@ -156,6 +156,42 @@ JavaFX。サムネイル一覧、範囲選択、AI 提案の差分表示と承�
 
 ---
 
+## CI / ワークフロー
+
+GitHub Actions の無料枠 2,000 分/月は **org 全体で共有**されている。枯らすと全リポジトリの
+CI と本番デプロイが同時に止まる（2026-08-09 に実際に起きた）。
+**ワークフローを増やす・トリガーを変える前に** org の判断規約を読むこと:
+
+```
+gh api repos/propagandist/.github/contents/docs/ci-strategy.md --jq .content | base64 -d
+```
+
+**規約の中身をここへ写さない。** 両方に書けば必ず片方が腐る。
+
+**★ pdfjig が public である限り、標準ランナーの消費は無料で org の枠を食わない。**
+枠を根拠にした判断（起動契機を絞る・ジョブをまとめる）はここでは効かないが、
+`timeout-minutes` / `permissions` の最小化 / action の SHA ピンは枠と無関係に効く。
+**private へ変えた瞬間にこの前提は崩れる。**
+
+---
+
+## セキュリティ
+
+このリポジトリは **分類 D**（実行コードが公開面に出ない＝利用者の手元でしか動かない）。
+**分類 D で読むのは `security-baseline.md` §2 の 2 項目だけ**——秘密を commit しない（INV-6）と、
+依存を放置しない。**加えて、インストーラを配るので §5.3（配る側の供給網）も読む**:
+
+```
+gh api repos/propagandist/.github/contents/docs/security-baseline.md --jq .content | base64 -d
+```
+
+確かめ方は同 `docs/security-verification.md`（手元 / 既存ジョブ / 週次の 3 層）。
+
+**★ 分類が変わるのは、実行コードが公開面に出た日**——サーバを持つ、ブラウザで動かす、
+`pdf-core` をライブラリとして publish する（`SPEC.md` §9）。そのとき読む節が増える。
+
+---
+
 ## 作業の進め方
 
 - 1 コミット 1 関心事。モジュールをまたぐ変更は分割する

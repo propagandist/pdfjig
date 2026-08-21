@@ -1,0 +1,71 @@
+# 依存を追随させる。org の規約は propagandist/.github の docs/security-baseline.md §2.2
+# （分類 D で読む 2 項目のうちの 1 つ）と docs/ci-strategy.md §4。中身はここへ写さない。
+#
+# ★ action の SHA ピンは Dependabot とセットで初めて安全になる。
+#   凍結したまま放置すると、セキュリティ修正が降りてこない分だけ浮動タグより悪い。
+#   **github-actions の entry を消す・止めるなら、同時に SHA ピンもやめること。**
+#
+# ★ cooldown は更新を遅らせる嫌がらせではない。悪意ある版は公開から数時間〜数日で
+#   発見・撤回されるので、その窓の中でマージしてしまう経路を構造的に塞ぐ設定である。
+#   **security updates には効かない**（CVE の修正 PR は即座に来る）。**外さないこと。**
+#
+# ★ pdfjig は public なので、Dependabot の update job も Actions の実行も org の枠を食わない。
+#   private へ変えるなら、ここの頻度は枠の観点で見直す対象になる。
+version: 2
+updates:
+  # ---------------------------------------------------------------- GitHub Actions
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    labels:
+      - enhancement
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      # action の版上げは 1 本にまとめる。個別に見る意味が薄い。
+      actions:
+        patterns:
+          - "*"
+
+  # ---------------------------------------------------------------- Gradle
+  # gradle/libs.versions.toml を見る。ここは「宣言」であって解決済みの依存グラフではないので、
+  # 推移依存の CVE は依存グラフの提出（dependency-submission.yml）の側で拾う。
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels:
+      - enhancement
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      # PDFBox は core の挙動に直結する。まとめると差分が読めなくなるので単独で出す。
+      pdfbox:
+        patterns:
+          - "org.apache.pdfbox:*"
+      # テスト用の依存はまとめてよい。落ちれば分かる。
+      test:
+        patterns:
+          - "org.junit*"
+          - "com.tngtech.archunit:*"
+
+# ★ JavaFX の版は JDK 21 に合わせて 21.x に留める。libs.versions.toml の `javafx` は
+#   openjfx の jmods（org.openjfx.jmods:jmods）の座標にも文字列で入っていて、major が
+#   上がると jpackage が作るランタイムイメージが JDK 21 と噛み合わなくなる。
+#   Dependabot がこの版を拾うかどうかは実走で確かめていないので、ignore は書いていない。
+#   **JavaFX の PR が来たら、まず major が上がっていないかを見ること。**
