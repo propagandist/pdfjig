@@ -11,3 +11,17 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
+
+// 版数はルートの build.gradle.kts の version が唯一の正であり、それを build.properties に焼き込む。
+// 読み出しは BuildInfo が行う。
+val projectVersion = version.toString()
+
+tasks.processResources {
+    // 版数が変わったら作り直させる。入力に挙げないと up-to-date と判定され、古い値が残る。
+    inputs.property("version", projectVersion)
+
+    // expand をリソース全体に掛けない。$ を含む他のリソースやバイナリを壊す。
+    filesMatching("io/github/propagandist/pdfjig/core/build.properties") {
+        expand("version" to projectVersion)
+    }
+}
