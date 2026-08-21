@@ -441,12 +441,33 @@ public final class MainWindow {
             return;
         }
 
-        List<Path> sources = session.paths();
-        List<PageSelection> pages = session.order().toPageSelections();
+        DocumentSession saving = session;
+        List<Path> sources = saving.paths();
+        List<PageSelection> pages = saving.order().toPageSelections();
         Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
-        runAsync(() -> assemble(sources, pages, output), this::showWarnings);
+        runAsync(() -> assemble(sources, pages, output), warnings -> {
+            markSaved(saving, pages);
+            showWarnings(warnings);
+        });
+    }
+
+    /**
+     * 書き出しが済んだので、その並びを基準にする。状態行から「未保存の変更があります」が消える。
+     *
+     * <p>書き出し中に別の文書を開かれていることがある。始めたときと同じ文書のままでなければ、
+     * 基準を動かしてはならない。渡すのは <b>書き出した並び</b> であって今の並びではない。
+     * 書き出している間に並べ替えられていれば、その分はまだ書き出されていない。
+     *
+     * <p>完了は JavaFX スレッドで走るため、比べるだけなら同期は要らない。
+     */
+    private void markSaved(DocumentSession saving, List<PageSelection> pages) {
+        if (session != saving) {
+            return;
+        }
+        session.order().markSaved(pages);
+        updateStatus();
     }
 
     private void deleteSelected() {
