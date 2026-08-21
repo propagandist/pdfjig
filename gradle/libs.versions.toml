@@ -1,5 +1,5 @@
 [versions]
-pdfbox = "3.0.5"
+pdfbox = "3.0.8"
 tabula = "1.0.5"
 poi = "5.4.1"
 picocli = "4.7.7"
