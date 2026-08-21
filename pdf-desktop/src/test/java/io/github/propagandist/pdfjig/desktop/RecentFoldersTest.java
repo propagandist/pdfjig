@@ -1,0 +1,100 @@
+package io.github.propagandist.pdfjig.desktop;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class RecentFoldersTest {
+
+    private final RecentFolders folders = new RecentFolders();
+
+    @Test
+    @DisplayName("何も使っていなければ空")
+    void startsEmpty() {
+        assertTrue(folders.reading().isEmpty());
+        assertTrue(folders.writing().isEmpty());
+    }
+
+    @Test
+    @DisplayName("読んだファイルの置かれていたフォルダを覚える")
+    void remembersFolderOfReadFile(@TempDir Path directory) {
+        folders.rememberReadFile(directory.resolve("scan.pdf"));
+
+        assertEquals(directory, folders.reading().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("書き出したファイルの置き先フォルダを覚える")
+    void remembersFolderOfWrittenFile(@TempDir Path directory) {
+        folders.rememberWrittenFile(directory.resolve("scan-edited.pdf"));
+
+        assertEquals(directory, folders.writing().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("書き出し先に選ばれたフォルダはそのまま覚える")
+    void remembersChosenFolder(@TempDir Path directory) {
+        folders.rememberWrittenFolder(directory);
+
+        assertEquals(directory, folders.writing().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("読む用と書く用は混ざらない")
+    void keepsReadingAndWritingApart(@TempDir Path source, @TempDir Path target) {
+        folders.rememberReadFile(source.resolve("scan.pdf"));
+        folders.rememberWrittenFolder(target);
+
+        // 書き出し先を選んでも、次に PDF を探す場所は変わらない。
+        assertEquals(source, folders.reading().orElseThrow());
+        assertEquals(target, folders.writing().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("後から使ったフォルダで上書きする")
+    void keepsOnlyTheLatest(@TempDir Path first, @TempDir Path second) {
+        folders.rememberReadFile(first.resolve("a.pdf"));
+        folders.rememberReadFile(second.resolve("b.pdf"));
+
+        assertEquals(second, folders.reading().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("覚えたあとに消えたフォルダは返さない")
+    void forgetsFolderThatDisappeared(@TempDir Path parent) throws IOException {
+        // USB を抜く、ネットワークの割り当てが切れる、利用者が片づける。
+        Path removable = Files.createDirectory(parent.resolve("removable"));
+        folders.rememberReadFile(removable.resolve("scan.pdf"));
+        assertEquals(removable, folders.reading().orElseThrow());
+
+        Files.delete(removable);
+
+        assertTrue(folders.reading().isEmpty());
+    }
+
+    @Test
+    @DisplayName("フォルダではなくファイルを指していたら返さない")
+    void ignoresPathThatIsNotAFolder(@TempDir Path parent) throws IOException {
+        Path file = Files.createFile(parent.resolve("not-a-folder"));
+        folders.rememberWrittenFolder(file);
+
+        assertTrue(folders.writing().isEmpty());
+    }
+
+    @Test
+    @DisplayName("親を持たないパスは覚えない")
+    void ignoresPathWithoutParent(@TempDir Path directory) {
+        folders.rememberReadFile(directory.resolve("scan.pdf"));
+
+        // 要素が 1 つの相対パスには親が無い。覚えると次から必ず外れる。
+        folders.rememberReadFile(Path.of("scan.pdf"));
+
+        assertEquals(directory, folders.reading().orElseThrow());
+    }
+}
