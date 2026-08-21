@@ -59,15 +59,31 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "バージョン: $version"
 
-      - name: WiX 3.14 を用意する
+      # ビルド中に外へ取りに行くものは、版とハッシュで固定する。配布物のビルド経路に
+      # 入ってくるものなので、中身が変わったら気づけないと困る。
+      #
+      # ★ プリインストールされた WiX があってもそれは使わない。イメージが更新されて版が
+      #   変わると、同じタグから作った MSI が別の道具で作られることになる。
+      #   GITHUB_PATH は先頭へ足されるので、ここで用意したものが必ず勝つ。
+      #
+      # ★ SHA256 は 2026-08-22 に公式リリース資産を取って測った。同じ URL に同じ値を
+      #   ピンしているプロジェクトが他にもある（tauri-apps/tauri ほか）。
+      #   **URL を変えるときは必ずハッシュも測り直すこと。**
+      - name: WiX 3.14.1 を用意する
+        env:
+          WIX_URL: https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          WIX_SHA256: 6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31
         run: |
-          if (Get-Command candle.exe -ErrorAction SilentlyContinue) {
-            "WiX は既に PATH にある"
-            exit 0
-          }
           $dir = "$env:RUNNER_TEMP\wix314"
           $zip = "$env:RUNNER_TEMP\wix314-binaries.zip"
-          Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile $zip
+          Invoke-WebRequest -Uri $env:WIX_URL -OutFile $zip
+
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:WIX_SHA256) {
+            throw "WiX の SHA256 が一致しない。期待 $env:WIX_SHA256 / 実際 $actual"
+          }
+          "SHA256 一致: $actual"
+
           Expand-Archive -Path $zip -DestinationPath $dir -Force
           if (-not (Test-Path "$dir\candle.exe")) { throw "WiX の展開に失敗した" }
           $dir >> $env:GITHUB_PATH
