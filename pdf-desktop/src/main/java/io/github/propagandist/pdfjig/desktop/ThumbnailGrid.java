@@ -14,6 +14,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
@@ -46,6 +47,18 @@ final class ThumbnailGrid {
 
     private final ListView<List<PageEntry>> rows = new ListView<>();
 
+    /**
+     * 選択中のページ位置。
+     *
+     * <p>ここに変更リスナを足して {@code ListView#refresh} を呼んではならない。
+     * <b>あれは全セルを作り直す</b>（{@code VirtualFlow} が sheet を空にし、各セルを
+     * {@code updateIndex(-1)} してから組み直す）。ドラッグは MOUSE_PRESSED →
+     * DRAG_DETECTED → DRAG_DROPPED と続く一連のジェスチャで、その間にレイアウトパスが
+     * 挟まるため、作り直すとタイルが別のページを受け持ち、掴んだのと違うページが動く。
+     *
+     * <p>選択が動いたときの見た目は {@link ThumbnailTile} が自分で当てる。
+     * 更新が要るのは旧選択と新選択の 2 枚だけである。
+     */
     private final SimpleIntegerProperty selectedIndex = new SimpleIntegerProperty(-1);
 
     /** ページ並びが変わったら行を組み直す。 */
@@ -84,12 +97,6 @@ final class ThumbnailGrid {
 
         rows.widthProperty().addListener((observable, previous, current) ->
                 applyColumns(current.doubleValue()));
-
-        // 選択が動いたら、見えている行だけ描き直して選択枠を移す。
-        selectedIndex.addListener((observable, previous, current) -> {
-            rows.refresh();
-            scrollToSelection(current.intValue());
-        });
     }
 
     /** 画面に置くための節点。 */
@@ -128,7 +135,8 @@ final class ThumbnailGrid {
 
         applyColumns(rows.getWidth());
         rebuild();
-        select(pageOrder.size() > 0 ? 0 : -1);
+        // 前の文書のスクロール位置が残らないよう、先頭まで戻す。
+        selectAndReveal(pageOrder.size() > 0 ? 0 : -1);
     }
 
     /** 表示を空にする。 */
@@ -176,9 +184,24 @@ final class ThumbnailGrid {
         return columns;
     }
 
-    /** ページを選ぶ。 */
+    /**
+     * ページを選ぶ。スクロールはしない。
+     *
+     * <p>クリックとドラッグの開始から呼ぶ。どちらも利用者がタイルの位置を見て決めた操作であり、
+     * そこで一覧を動かさない。
+     */
     void select(int index) {
         selectedIndex.set(index);
+    }
+
+    /**
+     * ページを選び、見えるところまでスクロールする。
+     *
+     * <p>選択が画面の外へ出うる操作から呼ぶ。既に見えているなら {@link #reveal} が何もしない。
+     */
+    private void selectAndReveal(int index) {
+        select(index);
+        reveal(index);
     }
 
     /** ページを動かす。タイルのドロップから呼ぶ。 */
@@ -187,7 +210,8 @@ final class ThumbnailGrid {
             return;
         }
         order.move(fromIndex, toIndex);
-        select(toIndex);
+        // 動かした先が別の行になることがある。掴んでいたページを見失わせない。
+        selectAndReveal(toIndex);
     }
 
     /** その節点がこの一覧の中のものか。文書間のドラッグを弾くために使う。 */
@@ -237,15 +261,39 @@ final class ThumbnailGrid {
             rows.refresh();
         }
 
-        // ページが減ると選択が並びの外に出る。
+        // ページが減ると選択が並びの外に出る。末尾へ寄せた選択は画面の外にありうる。
         if (selectedIndex.get() >= pages.size()) {
-            select(pages.size() - 1);
+            selectAndReveal(pages.size() - 1);
         }
     }
 
-    private void scrollToSelection(int index) {
-        if (index >= 0 && columns > 0) {
-            rows.scrollTo(index / columns);
+    /**
+     * そのページが見えるところまでスクロールする。既に見えているなら動かさない。
+     *
+     * <p><b>{@code ListView#scrollTo(int)} は使えない。</b>名前に反して「見えるようにする」
+     * ではなく、その行を <b>viewport の最上段へ送る</b>。実体は
+     * {@code ScrollToEvent.scrollToTopIndex()} を投げるだけで、受けた
+     * {@code VirtualContainerBase} が {@code VirtualFlow#scrollToTop(int)} を呼ぶ。
+     * 見えている行に対して呼んでも容赦なく飛ぶ。
+     *
+     * <p>{@code VirtualFlow#scrollTo(int)} のほうが目的に合う。行が見えていれば何もせず、
+     * はみ出していれば足りない分だけ動かす。可視判定を自前で持つ必要はない。
+     *
+     * <p>{@code VirtualFlow} は {@code javafx.scene.control.skin} の公開クラスであり、
+     * style class {@code virtual-flow} は {@code ListView} の skin が必ず付ける。
+     * skin ができる前は取れないが、その時点では画面に何も出ていないので、
+     * 最上段送りになっても見え方は変わらない。
+     */
+    private void reveal(int index) {
+        if (index < 0 || columns <= 0) {
+            return;
+        }
+        int row = index / columns;
+
+        if (rows.lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
+            flow.scrollTo(row);
+        } else {
+            rows.scrollTo(row);
         }
     }
 
@@ -288,7 +336,8 @@ final class ThumbnailGrid {
         };
 
         if (next != current && next >= 0 && next < size) {
-            select(next);
+            // キーで動かす選択は画面の外へ出る。行が変わったぶんだけ追いかける。
+            selectAndReveal(next);
         }
         if (next != current) {
             // 端でも握り潰す。ここで通すと ListView が行選択を始める。
@@ -349,13 +398,11 @@ final class ThumbnailGrid {
             ensureTiles(grid.columns());
 
             int base = getIndex() * grid.columns();
-            int selected = grid.selectedIndex();
 
             for (int column = 0; column < tiles.size(); column++) {
                 ThumbnailTile tile = tiles.get(column);
                 if (column < pages.size()) {
-                    int index = base + column;
-                    tile.show(index, pages.get(column), index == selected);
+                    tile.show(base + column, pages.get(column));
                 } else {
                     // 最終行の余りは空にする。桁を保って左詰めの見た目を崩さない。
                     tile.clear();

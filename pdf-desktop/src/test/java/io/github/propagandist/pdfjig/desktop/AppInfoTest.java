@@ -26,4 +26,20 @@ class AppInfoTest {
         assertFalse(AppInfo.version().contains("${"), AppInfo.version());
         assertFalse(AppInfo.version().isBlank());
     }
+
+    @Test
+    @DisplayName("AI が使えないことは伝えるが、無効とは言わない")
+    void tellsAiIsAbsentWithoutSayingDisabled() {
+        String absent = AppInfo.aiStatus(false);
+
+        // 「無効」は「有効にできるが今は切ってある」と読める。この版に設定は存在しない。
+        assertFalse(absent.contains("無効"), absent);
+        assertTrue(absent.contains("この版には含まれていません"), absent);
+    }
+
+    @Test
+    @DisplayName("AI が使えるときはそう出す")
+    void tellsAiIsAvailable() {
+        assertTrue(AppInfo.aiStatus(true).contains("利用可能"), AppInfo.aiStatus(true));
+    }
 }

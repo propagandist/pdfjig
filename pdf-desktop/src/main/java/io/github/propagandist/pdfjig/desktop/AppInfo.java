@@ -44,6 +44,22 @@ final class AppInfo {
         return NAME + " " + version();
     }
 
+    /**
+     * AI 機能の状態。
+     *
+     * <p>AI が無いことは隠さない（CLAUDE.md INV-3）。ただし<b>「無効」とは書かない</b>。
+     * 無効は「有効にできるが今は切ってある」と読め、利用者は在りもしない設定を探すことになる。
+     * 実際、この版には AI 機能そのものが入っておらず、有効にする経路はどこにもない。
+     *
+     * <p>出す先はバージョン情報のダイアログである。文書の状態を出すステータスバーに置くと、
+     * 版の性格と文書の状態が同じ行に混ざるうえ、常に同じ文字列が出続けることになる。
+     *
+     * @param available プロバイダが使える状態か
+     */
+    static String aiStatus(boolean available) {
+        return "AI 機能: " + (available ? "利用可能" : "この版には含まれていません");
+    }
+
     static String javaRuntime() {
         return "Java " + property("java.version");
     }

@@ -83,6 +83,9 @@ public final class MainWindow {
     /** いま含んでいるファイルの一覧。1 ファイルのときは出ない。 */
     private final SourceLegend legend = new SourceLegend();
 
+    /** ダイアログを始めるフォルダ。読む用と書く用を分けて覚える。 */
+    private final RecentFolders folders = new RecentFolders();
+
     private final Label status = new Label();
 
     /** 進行中の操作がある間は true。操作の重ね掛けを防ぐ。 */
@@ -304,6 +307,13 @@ public final class MainWindow {
      * @param path 開くファイル
      */
     public void open(Path path) {
+        // 開くのに失敗しても覚える。パスワードが要る文書でも壊れた文書でも、
+        // 次に PDF を探す場所は同じフォルダである。
+        //
+        // openDocument ではなくここに置くのは、起動引数から開く経路（PdfjigApplication、
+        // ファイルの関連付け）も通すためである。
+        folders.rememberReadFile(path);
+
         runAsync(() -> DocumentSession.open(path), this::adopt, failure -> {
             if (errorCodeOf(failure) == ErrorCode.PASSWORD_REQUIRED) {
                 askPasswordAndOpen(path, false);
@@ -343,6 +353,7 @@ public final class MainWindow {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("PDF を開く");
         chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
+        readingFolder().ifPresent(chooser::setInitialDirectory);
 
         File chosen = chooser.showOpenDialog(stage);
         if (chosen == null) {
@@ -359,6 +370,7 @@ public final class MainWindow {
         chooser.setTitle("名前を付けて保存");
         chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
         chooser.setInitialFileName(suggestedFileName());
+        writingFolder().ifPresent(chooser::setInitialDirectory);
 
         File chosen = chooser.showSaveDialog(stage);
         if (chosen == null) {
@@ -368,6 +380,8 @@ public final class MainWindow {
         List<Path> sources = session.paths();
         List<PageSelection> pages = session.order().toPageSelections();
         Path output = chosen.toPath();
+        // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
+        folders.rememberWrittenFile(output);
         runAsync(() -> assemble(sources, pages, output), this::showWarnings);
     }
 
@@ -417,6 +431,7 @@ public final class MainWindow {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("追加する PDF を選ぶ");
         chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
+        readingFolder().ifPresent(chooser::setInitialDirectory);
 
         List<File> chosen = chooser.showOpenMultipleDialog(stage);
         if (chosen == null) {
@@ -436,6 +451,7 @@ public final class MainWindow {
      * ページの描画は今までどおりサムネイル側が非同期で受け持つ。
      */
     private void addDocument(Path path) {
+        folders.rememberReadFile(path);
         try {
             session.add(path);
         } catch (PdfjigException e) {
@@ -545,6 +561,8 @@ public final class MainWindow {
 
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle("分割したファイルの保存先");
+        writingFolder().ifPresent(chooser::setInitialDirectory);
+
         File directory = chooser.showDialog(stage);
         if (directory == null) {
             return;
@@ -554,6 +572,7 @@ public final class MainWindow {
         List<List<PageSelection>> segments = order.toSegments();
         String baseName = baseNameOf(session.path());
         Path outputDir = directory.toPath();
+        folders.rememberWrittenFolder(outputDir);
 
         runAsync(
                 () -> splitInto(sources, segments, outputDir, baseName),
@@ -707,6 +726,34 @@ public final class MainWindow {
         return baseNameOf(session.path()) + "-edited.pdf";
     }
 
+    /**
+     * PDF を選ぶダイアログを始めるフォルダ。
+     *
+     * <p>まだ読んでいなければ、いま開いている文書の隣から始める。どちらも無ければ渡さない。
+     * 未指定のときに出るのは Windows が覚えている場所であり、ホームに固定するより馴染みがある。
+     */
+    private Optional<File> readingFolder() {
+        return folders.reading().or(this::documentFolder).map(Path::toFile);
+    }
+
+    /**
+     * 書き出し先を選ぶダイアログを始めるフォルダ。
+     *
+     * <p>まだ書き出していなければ、いま開いている文書の隣から始める。
+     * 読む用とは分けてある。PDF を取ってくる場所と、整理した結果を置く場所は違うことが多い。
+     */
+    private Optional<File> writingFolder() {
+        return folders.writing().or(this::documentFolder).map(Path::toFile);
+    }
+
+    /** いま開いている文書のあるフォルダ。開いた後に消えていることもあるので確かめる。 */
+    private Optional<Path> documentFolder() {
+        if (session == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(session.path().getParent()).filter(Files::isDirectory);
+    }
+
     private static String baseNameOf(Path path) {
         String name = path.getFileName().toString();
         int extension = name.lastIndexOf('.');
@@ -742,7 +789,7 @@ public final class MainWindow {
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
     private void showAbout() {
-        AboutDialog.show(stage, hostServices);
+        AboutDialog.show(stage, hostServices, aiProvider.isAvailable());
     }
 
     private void showWarnings(List<Warning> warnings) {
@@ -814,8 +861,8 @@ public final class MainWindow {
                 text.append("（暗号化されています）");
             }
         }
-        // AI が無いことを隠さない。無いままで全機能が使えるのが前提である（INV-3）。
-        text.append("　　AI 機能: ").append(aiProvider.isAvailable() ? "利用可能" : "無効");
+        // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、
+        // 版の性格を混ぜると読み分けられない。出す先はバージョン情報（AppInfo#aiStatus）。
         status.setText(text.toString());
     }
 }
