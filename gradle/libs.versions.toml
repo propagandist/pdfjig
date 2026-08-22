@@ -5,6 +5,8 @@ poi = "5.4.1"
 picocli = "4.7.7"
 javafx = "21.0.7"
 archunit = "1.4.2"
+testfx = "4.0.18"
+hamcrest = "2.2"
 junit = "5.12.2"
 openjfx-plugin = "0.1.0"
 
@@ -14,6 +16,8 @@ tabula = { module = "technology.tabula:tabula", version.ref = "tabula" }
 poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "poi" }
 picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
 archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+testfx-junit5 = { module = "org.testfx:testfx-junit5", version.ref = "testfx" }
+hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

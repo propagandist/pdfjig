@@ -28,6 +28,56 @@ application {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 画面を操作するテスト（uiTest）
+//
+// 通常の test とは別のソースセットにしてある。理由は 3 つある。
+//
+// 1. デスクトップセッションを要する。CI では windows ジョブでだけ走らせたく、
+//    build に混ぜると ubuntu 側でも動いてしまう
+// 2. 数秒〜十数秒かかる。数十ミリ秒で終わる既存のテストと同じタスクに置くと、
+//    手元で test を回す速さが失われる
+// 3. TestFX の依存を通常の test のクラスパスへ漏らさない
+//
+// ヘッドレス（Monocle）は使わない。org.testfx:openjfx-monocle:21.0.2 は JavaFX 21 で
+// Window#_updateViewSize を実装しておらず、表示時に AbstractMethodError になる
+// （TestFX/Monocle#97）。windows ランナーは対話セッションを持つのでそのまま動かせる。
+// 配布対象と同じ描画経路を通る点でも、そちらのほうが検証として正直である。
+// ─────────────────────────────────────────────────────────────────────────────
+
+val uiTest by sourceSets.creating
+
+uiTest.compileClasspath += sourceSets.main.get().output
+uiTest.runtimeClasspath += sourceSets.main.get().output
+
+configurations["uiTestImplementation"].extendsFrom(configurations.implementation.get())
+configurations["uiTestRuntimeOnly"].extendsFrom(configurations.runtimeOnly.get())
+
+dependencies {
+    "uiTestImplementation"(platform(libs.junit.bom))
+    "uiTestImplementation"(libs.junit.jupiter)
+    "uiTestImplementation"(libs.testfx.junit5)
+    // TestFX は hamcrest を runtime スコープでしか宣言していない。NodeQuery の
+    // シグネチャに Matcher が現れるため、コンパイルには明示的に要る。
+    "uiTestImplementation"(libs.hamcrest)
+    // テスト用の PDF はその場で作る（CLAUDE.md INV-6）。作法は pdf-core と共有する。
+    "uiTestImplementation"(testFixtures(project(":pdf-core")))
+    "uiTestRuntimeOnly"(libs.junit.platform.launcher)
+}
+
+val uiTestTask = tasks.register<Test>("uiTest") {
+    description = "画面を操作するテスト。デスクトップセッションを要するため build には含めない。"
+    group = "verification"
+
+    testClassesDirs = uiTest.output.classesDirs
+    classpath = uiTest.runtimeClasspath
+
+    // 画面を掴むテストが 2 つ同時に動くと、片方のクリックがもう片方の窓へ行く。
+    maxParallelForks = 1
+
+    shouldRunAfter(tasks.named("test"))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Windows 向けパッケージング（HANDOVER.md Phase 4）
 //
 // 構成は installDist → jlink → jpackage の 3 段。
