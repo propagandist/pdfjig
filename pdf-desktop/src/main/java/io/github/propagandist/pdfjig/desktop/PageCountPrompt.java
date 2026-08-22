@@ -35,7 +35,7 @@ final class PageCountPrompt {
      */
     static Optional<Integer> ask(Stage owner, int pageCount, String baseName) {
         Spinner<Integer> spinner = new Spinner<>(1, pageCount, 1);
-        spinner.setId("page-count");
+        spinner.setId("page-count-input");
         spinner.setEditable(true);
 
         Label summary = new Label();

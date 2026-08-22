@@ -98,21 +98,78 @@ Public リポジトリであり、一度コミットされた機密文書は取�
 - 実装クラスは役割を表す名前にする（`DefaultTextExtraction` ではなく `PdfBoxTextExtraction`）
 - `pdf-ai` の実装は `AnthropicProvider` / `OllamaProvider` / `NoOpProvider`
 
+画面の節点には `setId` で識別子を付ける。テストは文言ではなくこれで掴む。
+
+| 対象 | 形 | 例 |
+|---|---|---|
+| ツールバー | `tool-<操作>` | `tool-open` `tool-rotate-right` |
+| メニュー | `menu-<操作>` | `menu-open` `menu-about` |
+| 主画面の部品 | `<役割>` | `thumbnail-list` `status-label` |
+| サムネイル | `thumbnail-tile-<並びの位置>` | `thumbnail-tile-0` |
+| ダイアログ | `<用途>-dialog` | `password-dialog` `range-dialog` |
+| ダイアログの中身 | `<用途>-<役割>` | `password-field` `range-first` `page-count-input` |
+
+ツールバーとメニューは同じ `Action` から作られる。id もそこから配ること。
+別々に書くと、片方だけ直したときに掴めなくなる。
+
+サムネイルのタイルは行ごと使い回される。**受け持つページが変わったら id も付け替え、
+空きタイルでは外すこと。** 残すと同じ id の節点が一覧に 2 つ並ぶ。
+
+**id はテストとの契約である。** 変えるときは `pdf-desktop/src/uiTest` を必ず見る。
+
 ### JavaFX
 
 - `PDFRenderer` の呼び出しは必ずバックグラウンドスレッド（`Task` / `Service`）
 - JavaFX Application Thread では、レンダリング済み `Image` の差し込みのみ
 - UI から `pdf-core` を同期呼び出ししない。ファイル I/O を伴う操作はすべて非同期
+- Windows のネイティブなファイル選択は `FileDialogs` の向こう側に置く。
+  直に `FileChooser` / `DirectoryChooser` を使わない。あの境界の外は自動テストから
+  操作できず、「開く → 編集 → 保存」を画面の上で通せなくなる
+- ツールバーのボタンには `setAccessibleText` を付ける。Windows の UI Automation から
+  見えるのは Name だけで、`setId` は届かない（JavaFX は AutomationId に内部の連番を返す）。
+  **これは起動スモーク `tools/smoke/Verify-AppImage.ps1` との契約であり、
+  文言を変えるならあちらも変える**
 
 ### テスト
 
-- `pdf-core` はユニットテストで網羅する。UI に依存しないため容易であり、ここが品質の担保点
-- 画面を操作するテストは `pdf-desktop` の `uiTest` ソースセットに置く（`./gradlew :pdf-desktop:uiTest`）。
-  デスクトップセッションを要するため `build` には含まれない。**書く前に `HANDOVER.md` の
-  「UI テストの自動化」を読むこと。** 踏むと理由の分からない落ち方をする罠がいくつかある
+- `pdf-core` の公開メソッドは、**正常系・境界・壊れた入力**の 3 つを見る。値を持つだけの
+  `record` / `enum` は除く。UI に依存しないため容易であり、ここが品質の担保点
 - ArchUnit で INV-1 を検証する（`pdf-core` から `pdf-ai` への依存がないこと）
 - `pdf-ai` のテストは LLM をモックする。実 API を叩くテストは CI に入れない
 - パスワード関連は、例外メッセージにパスワード文字列が含まれないことを明示的にテストする
+- テスト用の PDF はリポジトリに置かず、`pdf-core` の testFixtures にある `TestPdfs` で
+  その場で作る（INV-6）。**生成の作法をモジュールごとに書かない。**
+  分かれた瞬間から、片方だけ直した壊れた入力でテストが通るようになる
+
+#### 画面のテスト
+
+置き場は `pdf-desktop/src/uiTest`（`./gradlew :pdf-desktop:uiTest`）。
+デスクトップセッションを要するため `build` には含めない。
+
+**書く前に `HANDOVER.md`「UI テストの自動化」を読むこと。**
+理由の分からない落ち方をする罠がいくつかある。
+
+- 節点は id で掴む（上の「命名」）。文言で掴んでよいのはメニュー項目だけである。
+  `MenuItem` は `Node` ではなく、id では掴めない
+- ダイアログの中身は `clickWhenReady` を通す。窓が出る前の節点を押すと
+  「no nodes were visible」で落ちる。主画面のボタンは常に出ているので直に押してよい
+- 書き出しを伴うテストは、**出力ファイルを開き直して中身まで確かめる。**
+  画面の上で何かが変わったことだけを見ても、ファイルが正しい保証にはならない
+- `@Start` / `@Stop` は各テストクラスが自分で持つ。TestFX は宣言されたメソッドの中からしか
+  探さず、土台クラスに置いても呼ばれない
+
+#### 不安定なテストの扱い
+
+**環境の側の揺れは吸収してよい。判断の側の揺れは吸収してはならない。**
+
+- 吸収してよい例 — 窓が前面に出るまでの間、クリックが OS に取りこぼされる。
+  押した結果が起きたかを見て押し直す（`DesktopUiTest#clickUntilAccepted`）
+- 吸収してはならない例 — 結果が出ないので待ち時間を延ばす。それは非同期の完了条件を
+  正しく見ていないということであり、待てば直るものではない
+- **吸収するなら諦める上限を必ず置き、超えたら理由を書いて落とす。**
+  いつまでも retry するテストは、壊れていることを報せない
+- なぜその吸収が要るのかをコードのコメントに残す。残っていないリトライは、
+  次に読む者には「意味の分からないおまじない」にしか見えない
 
 ---
 
