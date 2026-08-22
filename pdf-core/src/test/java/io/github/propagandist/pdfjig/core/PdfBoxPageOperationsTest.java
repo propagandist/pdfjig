@@ -35,8 +35,8 @@ class PdfBoxPageOperationsTest {
             Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1", "A2");
             Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1", "B2", "B3");
 
-            Path merged = operations.merge(
-                    List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
 
             assertEquals(List.of("A1", "A2", "B1", "B2", "B3"), textsOf(merged));
         }
@@ -47,8 +47,7 @@ class PdfBoxPageOperationsTest {
             Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1", "A2");
             Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
 
-            operations.merge(
-                    List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+            operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
 
             assertEquals(List.of("A1", "A2"), textsOf(first));
             assertEquals(List.of("B1"), textsOf(second));
@@ -62,9 +61,7 @@ class PdfBoxPageOperationsTest {
                     assertThrows(
                                     PdfjigException.class,
                                     () -> operations.merge(
-                                            List.of(),
-                                            tempDir.resolve("merged.pdf"),
-                                            MergeOptions.defaults()))
+                                            List.of(), tempDir.resolve("merged.pdf"), MergeOptions.defaults()))
                             .errorCode());
         }
 
@@ -78,10 +75,7 @@ class PdfBoxPageOperationsTest {
                     ErrorCode.ENCRYPTION_PROPAGATION_UNSUPPORTED,
                     assertThrows(
                                     PdfjigException.class,
-                                    () -> operations.merge(
-                                            List.of(input),
-                                            tempDir.resolve("merged.pdf"),
-                                            options))
+                                    () -> operations.merge(List.of(input), tempDir.resolve("merged.pdf"), options))
                             .errorCode());
         }
     }
@@ -92,12 +86,10 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("ページ数ごとに区切り、連番のファイル名で書き出す")
         void splitsEveryNPages() throws Exception {
-            Path input = TestPdfs.withText(
-                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4", "P5");
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4", "P5");
             Path outputDir = tempDir.resolve("out");
 
-            List<Path> outputs = operations.split(
-                    input, SplitStrategy.everyNPages(2), outputDir);
+            List<Path> outputs = operations.split(input, SplitStrategy.everyNPages(2), outputDir);
 
             assertEquals(3, outputs.size());
             assertEquals("doc_001.pdf", outputs.get(0).getFileName().toString());
@@ -110,8 +102,7 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("指定した範囲だけを切り出す")
         void splitsByRanges() throws Exception {
-            Path input = TestPdfs.withText(
-                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
 
             List<Path> outputs = operations.split(
                     input,
@@ -125,11 +116,10 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("境界指定では先頭ページ 1 が補われる")
         void completesFirstBoundary() throws Exception {
-            Path input = TestPdfs.withText(
-                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
 
-            List<Path> outputs = operations.split(
-                    input, SplitStrategy.atBoundaries(List.of(3)), tempDir.resolve("out"));
+            List<Path> outputs =
+                    operations.split(input, SplitStrategy.atBoundaries(List.of(3)), tempDir.resolve("out"));
 
             assertEquals(2, outputs.size());
             assertEquals(List.of("P1", "P2"), textsOf(outputs.get(0)));
@@ -158,8 +148,7 @@ class PdfBoxPageOperationsTest {
                     ErrorCode.OUTPUT_ALREADY_EXISTS,
                     assertThrows(
                                     PdfjigException.class,
-                                    () -> operations.split(
-                                            input, SplitStrategy.everyNPages(1), outputDir))
+                                    () -> operations.split(input, SplitStrategy.everyNPages(1), outputDir))
                             .errorCode());
             assertFalse(Files.exists(outputDir.resolve("doc_001.pdf")));
         }
@@ -173,8 +162,7 @@ class PdfBoxPageOperationsTest {
         void appliesNewOrder() throws Exception {
             Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
 
-            Path output = operations.reorder(
-                    input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
+            Path output = operations.reorder(input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
 
             assertEquals(List.of("P3", "P1", "P2"), textsOf(output));
             assertEquals(List.of("P1", "P2", "P3"), textsOf(input));
@@ -192,9 +180,7 @@ class PdfBoxPageOperationsTest {
 
         private ErrorCode reorderFailure(Path input, List<Integer> newOrder) {
             Path output = tempDir.resolve("reordered-" + newOrder.hashCode() + ".pdf");
-            return assertThrows(
-                            PdfjigException.class,
-                            () -> operations.reorder(input, newOrder, output))
+            return assertThrows(PdfjigException.class, () -> operations.reorder(input, newOrder, output))
                     .errorCode();
         }
     }
@@ -205,13 +191,10 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("指定したページを指定した順に並べる")
         void keepsGivenSelectionAndOrder() throws Exception {
-            Path input = TestPdfs.withText(
-                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
 
             Path output = operations.assemble(
-                    input,
-                    List.of(PageSelection.of(4), PageSelection.of(1)),
-                    tempDir.resolve("assembled.pdf"));
+                    input, List.of(PageSelection.of(4), PageSelection.of(1)), tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of("P4", "P1"), textsOf(output));
         }
@@ -254,9 +237,7 @@ class PdfBoxPageOperationsTest {
 
             Path output = operations.assemble(
                     input,
-                    List.of(
-                            PageSelection.of(1),
-                            new PageSelection(0, 1, Rotation.CLOCKWISE_90)),
+                    List.of(PageSelection.of(1), new PageSelection(0, 1, Rotation.CLOCKWISE_90)),
                     tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of(0, 90), TestPdfs.rotationsOf(output));
@@ -286,8 +267,7 @@ class PdfBoxPageOperationsTest {
                     ErrorCode.EMPTY_RESULT,
                     assertThrows(
                                     PdfjigException.class,
-                                    () -> operations.assemble(
-                                            input, List.of(), tempDir.resolve("assembled.pdf")))
+                                    () -> operations.assemble(input, List.of(), tempDir.resolve("assembled.pdf")))
                             .errorCode());
         }
 
@@ -319,10 +299,7 @@ class PdfBoxPageOperationsTest {
 
             Path output = operations.assemble(
                     List.of(first, second),
-                    List.of(
-                            PageSelection.of(1, 3),
-                            PageSelection.of(0, 1),
-                            PageSelection.of(1, 1)),
+                    List.of(PageSelection.of(1, 3), PageSelection.of(0, 1), PageSelection.of(1, 1)),
                     tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of("B3", "A1", "B1"), textsOf(output));
@@ -352,9 +329,7 @@ class PdfBoxPageOperationsTest {
 
             operations.assemble(
                     List.of(first, second),
-                    List.of(
-                            new PageSelection(1, 1, Rotation.HALF_TURN),
-                            new PageSelection(0, 1, Rotation.HALF_TURN)),
+                    List.of(new PageSelection(1, 1, Rotation.HALF_TURN), new PageSelection(0, 1, Rotation.HALF_TURN)),
                     tempDir.resolve("assembled.pdf"));
 
             assertEquals(List.of(0), TestPdfs.rotationsOf(first));
@@ -403,9 +378,7 @@ class PdfBoxPageOperationsTest {
                     assertThrows(
                                     PdfjigException.class,
                                     () -> operations.assemble(
-                                            List.of(),
-                                            List.of(PageSelection.of(1)),
-                                            tempDir.resolve("assembled.pdf")))
+                                            List.of(), List.of(PageSelection.of(1)), tempDir.resolve("assembled.pdf")))
                             .errorCode());
         }
 
@@ -413,8 +386,7 @@ class PdfBoxPageOperationsTest {
         @DisplayName("暗号化された入力が混ざれば、その分だけ警告が出る")
         void warnsForEachEncryptedInput() throws Exception {
             Path plain = TestPdfs.plain(tempDir.resolve("plain.pdf"), 1);
-            Path protectedByOwner =
-                    TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+            Path protectedByOwner = TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
 
             List<Warning> collected = new ArrayList<>();
             PageOperations warned = new PdfBoxPageOperations(collected::add);
@@ -438,8 +410,7 @@ class PdfBoxPageOperationsTest {
 
             Path output = operations.rotate(
                     input,
-                    Map.of(1, Rotation.CLOCKWISE_90, 2, Rotation.CLOCKWISE_90,
-                            3, Rotation.CLOCKWISE_90),
+                    Map.of(1, Rotation.CLOCKWISE_90, 2, Rotation.CLOCKWISE_90, 3, Rotation.CLOCKWISE_90),
                     tempDir.resolve("rotated.pdf"));
 
             assertEquals(List.of(90, 180, 0), TestPdfs.rotationsOf(output));
@@ -450,8 +421,7 @@ class PdfBoxPageOperationsTest {
         void keepsUnlistedPages() throws Exception {
             Path input = TestPdfs.rotated(tempDir.resolve("doc.pdf"), 0, 180);
 
-            Path output = operations.rotate(
-                    input, Map.of(1, Rotation.HALF_TURN), tempDir.resolve("rotated.pdf"));
+            Path output = operations.rotate(input, Map.of(1, Rotation.HALF_TURN), tempDir.resolve("rotated.pdf"));
 
             assertEquals(List.of(180, 180), TestPdfs.rotationsOf(output));
             assertEquals(List.of(0, 180), TestPdfs.rotationsOf(input));
@@ -467,9 +437,7 @@ class PdfBoxPageOperationsTest {
                     assertThrows(
                                     PdfjigException.class,
                                     () -> operations.rotate(
-                                            input,
-                                            Map.of(3, Rotation.CLOCKWISE_90),
-                                            tempDir.resolve("rotated.pdf")))
+                                            input, Map.of(3, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf")))
                             .errorCode());
         }
 
@@ -478,8 +446,7 @@ class PdfBoxPageOperationsTest {
         void treatsMalformedRotationAsZero() throws Exception {
             Path input = TestPdfs.rotated(tempDir.resolve("doc.pdf"), 45);
 
-            Path output = operations.rotate(
-                    input, Map.of(1, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf"));
+            Path output = operations.rotate(input, Map.of(1, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf"));
 
             // PDF 仕様は /Rotate を 90 の倍数に限る。PDFBox は仕様外の値を 0 と解釈するため、
             // 45 度のページに 90 度を加えた結果は 135 度ではなく 90 度になる。
@@ -493,11 +460,9 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("範囲のページだけが取り出される")
         void extractsRange() throws Exception {
-            Path input = TestPdfs.withText(
-                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
 
-            Path output = operations.extractPages(
-                    input, PageRange.of(2, 3), tempDir.resolve("extracted.pdf"));
+            Path output = operations.extractPages(input, PageRange.of(2, 3), tempDir.resolve("extracted.pdf"));
 
             assertEquals(List.of("P2", "P3"), textsOf(output));
         }
@@ -505,11 +470,9 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("範囲のページが取り除かれる")
         void deletesRange() throws Exception {
-            Path input = TestPdfs.withText(
-                    tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3", "P4");
 
-            Path output = operations.deletePages(
-                    input, PageRange.of(2, 3), tempDir.resolve("deleted.pdf"));
+            Path output = operations.deletePages(input, PageRange.of(2, 3), tempDir.resolve("deleted.pdf"));
 
             assertEquals(List.of("P1", "P4"), textsOf(output));
         }
@@ -524,9 +487,7 @@ class PdfBoxPageOperationsTest {
                     assertThrows(
                                     PdfjigException.class,
                                     () -> operations.deletePages(
-                                            input,
-                                            PageRange.of(1, 2),
-                                            tempDir.resolve("deleted.pdf")))
+                                            input, PageRange.of(1, 2), tempDir.resolve("deleted.pdf")))
                             .errorCode());
         }
 
@@ -540,9 +501,7 @@ class PdfBoxPageOperationsTest {
                     assertThrows(
                                     PdfjigException.class,
                                     () -> operations.extractPages(
-                                            input,
-                                            PageRange.of(2, 5),
-                                            tempDir.resolve("extracted.pdf")))
+                                            input, PageRange.of(2, 5), tempDir.resolve("extracted.pdf")))
                             .errorCode());
         }
     }
@@ -560,8 +519,7 @@ class PdfBoxPageOperationsTest {
                     ErrorCode.OUTPUT_ALREADY_EXISTS,
                     assertThrows(
                                     PdfjigException.class,
-                                    () -> operations.extractPages(
-                                            input, PageRange.singlePage(1), output))
+                                    () -> operations.extractPages(input, PageRange.singlePage(1), output))
                             .errorCode());
             assertEquals(0L, Files.size(output));
         }
@@ -573,9 +531,7 @@ class PdfBoxPageOperationsTest {
 
             assertEquals(
                     ErrorCode.OUTPUT_ALREADY_EXISTS,
-                    assertThrows(
-                                    PdfjigException.class,
-                                    () -> operations.reorder(input, List.of(2, 1), input))
+                    assertThrows(PdfjigException.class, () -> operations.reorder(input, List.of(2, 1), input))
                             .errorCode());
             assertEquals(List.of("P1", "P2"), textsOf(input));
         }
@@ -591,8 +547,7 @@ class PdfBoxPageOperationsTest {
             // 黙って平文で出すと、利用者は保護されているつもりで配布することになる。
             Path input = TestPdfs.ownerProtected(tempDir.resolve("protected.pdf"), "owner", 2);
 
-            Path output = operations.extractPages(
-                    input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+            Path output = operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
 
             assertEquals(List.of(Warning.ENCRYPTION_NOT_PROPAGATED), warnings);
             try (PdfDocument result = PdfDocument.open(output)) {
@@ -605,8 +560,7 @@ class PdfBoxPageOperationsTest {
         void warnsOnRotate() throws Exception {
             Path input = TestPdfs.ownerProtected(tempDir.resolve("protected.pdf"), "owner", 1);
 
-            Path output = operations.rotate(
-                    input, Map.of(1, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf"));
+            Path output = operations.rotate(input, Map.of(1, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf"));
 
             assertEquals(List.of(Warning.ENCRYPTION_NOT_PROPAGATED), warnings);
             try (PdfDocument result = PdfDocument.open(output)) {
@@ -619,8 +573,7 @@ class PdfBoxPageOperationsTest {
         void staysSilentForPlainInput() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 2);
 
-            operations.extractPages(
-                    input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
 
             assertTrue(warnings.isEmpty());
         }

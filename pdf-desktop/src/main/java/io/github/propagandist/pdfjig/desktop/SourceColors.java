@@ -18,18 +18,10 @@ final class SourceColors {
      * どのみち無理があり、ツールチップとファイル一覧で確かめてもらう。
      */
     private static final String[] PALETTE = {
-        "#2e7d6b",
-        "#c2543d",
-        "#4a5fbf",
-        "#8a5fa8",
-        "#b08a2e",
-        "#3d7fa8",
-        "#a8437a",
-        "#5f7a3d",
+        "#2e7d6b", "#c2543d", "#4a5fbf", "#8a5fa8", "#b08a2e", "#3d7fa8", "#a8437a", "#5f7a3d",
     };
 
-    private SourceColors() {
-    }
+    private SourceColors() {}
 
     /**
      * その出どころに割り当てる色。

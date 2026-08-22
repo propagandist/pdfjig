@@ -58,8 +58,7 @@ class SplitUiTest extends DesktopUiTest {
     }
 
     @Test
-    void 区切りが無いまま分割を押すと断って何も書かない(@TempDir Path dir, FxRobot robot)
-            throws Exception {
+    void 区切りが無いまま分割を押すと断って何も書かない(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
 
         Path outputDir = Files.createDirectory(dir.resolve("out"));
@@ -98,8 +97,7 @@ class SplitUiTest extends DesktopUiTest {
     }
 
     @Test
-    void 削除してから分割すると編集後の並びが切り分けられる(@TempDir Path dir, FxRobot robot)
-            throws Exception {
+    void 削除してから分割すると編集後の並びが切り分けられる(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 5));
 
         // 1 枚消してから区切る。pdf-core の split は元の並びを切るため、ここでは使っていない。
@@ -136,9 +134,7 @@ class SplitUiTest extends DesktopUiTest {
         clickWhenReady(robot, "#message-ok");
         WaitForAsyncUtils.waitForFxEvents();
 
-        assertEquals(
-                List.of("doc_001.pdf", "doc_002.pdf", "doc_003.pdf", "doc_004.pdf"),
-                listPdfs(outputDir));
+        assertEquals(List.of("doc_001.pdf", "doc_002.pdf", "doc_003.pdf", "doc_004.pdf"), listPdfs(outputDir));
 
         // 画面の上で数が合っていても、中身まで見なければファイルが正しい保証にはならない。
         for (String name : listPdfs(outputDir)) {
@@ -164,17 +160,14 @@ class SplitUiTest extends DesktopUiTest {
         WaitForAsyncUtils.waitForFxEvents();
 
         // 区切りが 1 つあっても 2 ファイルにはならない。この操作は区切りを見ない。
-        assertEquals(
-                List.of("doc_001.pdf", "doc_002.pdf", "doc_003.pdf", "doc_004.pdf"),
-                listPdfs(outputDir));
+        assertEquals(List.of("doc_001.pdf", "doc_002.pdf", "doc_003.pdf", "doc_004.pdf"), listPdfs(outputDir));
 
         // 付けてある区切りも消えない。書き出しは画面の状態を変えない。
         assertEquals("4 / 4 ページ　区切り 1 か所 → 2 ファイルに分かれます", statusText(robot));
     }
 
     @Test
-    void ページが1枚だけなら1枚ずつには分けられない(@TempDir Path dir, FxRobot robot)
-            throws Exception {
+    void ページが1枚だけなら1枚ずつには分けられない(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 1));
 
         // できるのは元と同じ 1 ファイルだけで分割にならない。区切りが無いときと違って

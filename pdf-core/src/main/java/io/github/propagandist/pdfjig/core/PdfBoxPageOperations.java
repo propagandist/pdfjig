@@ -122,9 +122,9 @@ public final class PdfBoxPageOperations implements PageOperations {
 
         try (PdfDocument source = open(input)) {
             int pageCount = source.pageCount();
-            rotations.keySet()
-                    .forEach(pageNumber ->
-                            PageRange.singlePage(pageNumber).validateAgainst(pageCount));
+            rotations
+                    .keySet()
+                    .forEach(pageNumber -> PageRange.singlePage(pageNumber).validateAgainst(pageCount));
 
             // 回転はページ属性の変更だけで済む。ページを詰め替えると、しおりや
             // 注釈といった文書全体の構造を落とす経路ができるため、元の文書を保存する。
@@ -213,8 +213,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         String baseName = baseNameOf(input);
         List<Path> outputs = new ArrayList<>(count);
         for (int number = 1; number <= count; number++) {
-            outputs.add(outputDir.resolve(
-                    String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)));
+            outputs.add(outputDir.resolve(String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)));
         }
         return outputs;
     }
@@ -230,18 +229,17 @@ public final class PdfBoxPageOperations implements PageOperations {
                 List.of(source), pageNumbers.stream().map(PageSelection::of).toList(), output);
     }
 
-    private static void writeSelections(
-            List<PdfDocument> sources, List<PageSelection> pages, Path output) {
+    private static void writeSelections(List<PdfDocument> sources, List<PageSelection> pages, Path output) {
         try (PDDocument target = new PDDocument()) {
             for (PageSelection selection : pages) {
                 PdfDocument source = sources.get(selection.sourceIndex());
                 // importPage が返すのは元のページ辞書の複製である。ここで向きを変えても
                 // 元の文書には及ばず、同じページを二度含めてそれぞれ別の向きにもできる。
-                PDPage imported =
-                        target.importPage(source.delegate().getPage(selection.pageNumber() - 1));
+                PDPage imported = target.importPage(source.delegate().getPage(selection.pageNumber() - 1));
                 if (selection.rotated()) {
-                    imported.setRotation(
-                            rotationOf(imported).plus(selection.additionalRotation()).degrees());
+                    imported.setRotation(rotationOf(imported)
+                            .plus(selection.additionalRotation())
+                            .degrees());
                 }
             }
             save(target, output);
@@ -251,7 +249,9 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     private static List<Integer> pageNumbersOf(PageRange range) {
-        return IntStream.rangeClosed(range.firstPage(), range.lastPage()).boxed().toList();
+        return IntStream.rangeClosed(range.firstPage(), range.lastPage())
+                .boxed()
+                .toList();
     }
 
     /**
@@ -270,10 +270,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
         Set<Integer> seen = new HashSet<>(pageCount);
         for (Integer pageNumber : newOrder) {
-            if (pageNumber == null
-                    || pageNumber < 1
-                    || pageNumber > pageCount
-                    || !seen.add(pageNumber)) {
+            if (pageNumber == null || pageNumber < 1 || pageNumber > pageCount || !seen.add(pageNumber)) {
                 throw new PdfjigException(ErrorCode.INVALID_PAGE_ORDER);
             }
         }

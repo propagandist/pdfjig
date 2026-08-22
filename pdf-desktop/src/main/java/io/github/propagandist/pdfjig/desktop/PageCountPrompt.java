@@ -25,8 +25,7 @@ final class PageCountPrompt {
     /** 分割の出力ファイル名。pdf-core の分割と同じ形にそろえる。 */
     private static final String NAME_FORMAT = "%s_%03d.pdf";
 
-    private PageCountPrompt() {
-    }
+    private PageCountPrompt() {}
 
     /**
      * ページ数を尋ねる。
@@ -46,10 +45,13 @@ final class PageCountPrompt {
         summary.getStyleClass().add("prompt-summary");
 
         // 手入力は確定するまで値に反映されない。両方を見て追従させる。
-        spinner.valueProperty().addListener((observable, previous, current) ->
-                summary.setText(describe(pageCount, current, baseName)));
-        spinner.getEditor().textProperty().addListener((observable, previous, current) ->
-                summary.setText(describe(pageCount, parse(current, pageCount), baseName)));
+        spinner.valueProperty()
+                .addListener(
+                        (observable, previous, current) -> summary.setText(describe(pageCount, current, baseName)));
+        spinner.getEditor()
+                .textProperty()
+                .addListener((observable, previous, current) ->
+                        summary.setText(describe(pageCount, parse(current, pageCount), baseName)));
         summary.setText(describe(pageCount, spinner.getValue(), baseName));
 
         VBox content = new VBox(

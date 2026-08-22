@@ -32,7 +32,8 @@ class PdfDocumentTest {
 
         assertEquals(
                 ErrorCode.FILE_NOT_FOUND,
-                assertThrows(PdfjigException.class, () -> PdfDocument.open(missing)).errorCode());
+                assertThrows(PdfjigException.class, () -> PdfDocument.open(missing))
+                        .errorCode());
     }
 
     @Test

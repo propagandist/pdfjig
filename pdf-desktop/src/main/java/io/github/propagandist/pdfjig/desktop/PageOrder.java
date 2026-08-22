@@ -237,8 +237,7 @@ public final class PageOrder {
             throw new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE);
         }
         pages.setAll(IntStream.range(0, pages.size())
-                .mapToObj(index -> pages.get(index)
-                        .withBreak(index > 0 && index % pagesPerFile == 0))
+                .mapToObj(index -> pages.get(index).withBreak(index > 0 && index % pagesPerFile == 0))
                 .toList());
     }
 
@@ -338,9 +337,7 @@ public final class PageOrder {
         return selection.sourceIndex() < removedSourceIndex
                 ? selection
                 : new PageSelection(
-                        selection.sourceIndex() - 1,
-                        selection.pageNumber(),
-                        selection.additionalRotation());
+                        selection.sourceIndex() - 1, selection.pageNumber(), selection.additionalRotation());
     }
 
     private static List<PageSelection> identityOrder(int sourceIndex, int pageCount) {

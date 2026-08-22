@@ -64,8 +64,7 @@ class ReorderUiTest extends DesktopUiTest {
     void 掴んで落とすと並びが変わる(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2", "P3"));
 
-        robot.drag("#thumbnail-tile-0", MouseButton.PRIMARY)
-                .dropTo("#thumbnail-tile-2");
+        robot.drag("#thumbnail-tile-0", MouseButton.PRIMARY).dropTo("#thumbnail-tile-2");
         WaitForAsyncUtils.waitForFxEvents();
 
         Path output = saveAs(robot, dir.resolve("out.pdf"));
@@ -76,10 +75,11 @@ class ReorderUiTest extends DesktopUiTest {
     /** 書き出された PDF の、ページごとの本文。 */
     private static List<String> pageTexts(Path pdf) {
         try (PdfDocument document = PdfDocument.open(pdf)) {
-            return new PdfBoxTextExtraction().extractByPage(document).stream()
-                    .map(PageText::text)
-                    .map(String::trim)
-                    .toList();
+            return new PdfBoxTextExtraction()
+                    .extractByPage(document).stream()
+                            .map(PageText::text)
+                            .map(String::trim)
+                            .toList();
         }
     }
 }

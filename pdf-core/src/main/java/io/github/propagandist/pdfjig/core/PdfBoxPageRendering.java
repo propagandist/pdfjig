@@ -48,8 +48,7 @@ public final class PdfBoxPageRendering implements PageRendering {
 
     private static BufferedImage renderScaled(PdfDocument document, int pageNumber, float scale) {
         try {
-            return new PDFRenderer(document.delegate())
-                    .renderImage(pageNumber - 1, scale, IMAGE_TYPE);
+            return new PDFRenderer(document.delegate()).renderImage(pageNumber - 1, scale, IMAGE_TYPE);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.RENDERING_FAILED, e);
         }

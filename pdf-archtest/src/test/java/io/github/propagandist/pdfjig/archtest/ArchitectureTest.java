@@ -34,8 +34,7 @@ class ArchitectureTest {
         // 空のクラス集合に対しては、どんな禁止ルールも自動的に成功する。
         // クラスパスの設定ミスで「緑だが何も検証していない」状態になるのを防ぐ番人。
         for (String pkg : new String[] {".core.", ".ai.", ".cli.", ".desktop."}) {
-            boolean found = classes.stream()
-                    .anyMatch(c -> c.getName().contains("pdfjig" + pkg));
+            boolean found = classes.stream().anyMatch(c -> c.getName().contains("pdfjig" + pkg));
             assertTrue(found, "パッケージ " + pkg + " のクラスが 1 つも読み込まれていない");
         }
     }
@@ -44,8 +43,11 @@ class ArchitectureTest {
     @DisplayName("INV-1: pdf-core は pdf-ai に依存しない")
     void coreMustNotDependOnAi() {
         noClasses()
-                .that().resideInAPackage("..pdfjig.core..")
-                .should().dependOnClassesThat().resideInAPackage("..pdfjig.ai..")
+                .that()
+                .resideInAPackage("..pdfjig.core..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAPackage("..pdfjig.ai..")
                 .because("依存の向きは一方通行である。崩れると設計全体が意味を失う（CLAUDE.md INV-1）")
                 .check(classes);
     }
@@ -54,8 +56,11 @@ class ArchitectureTest {
     @DisplayName("PDFBox の型が pdf-core の外から見えない")
     void pdfboxMustNotLeakOutOfCore() {
         noClasses()
-                .that().resideOutsideOfPackage("..pdfjig.core..")
-                .should().dependOnClassesThat().resideInAnyPackage("org.apache.pdfbox..")
+                .that()
+                .resideOutsideOfPackage("..pdfjig.core..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("org.apache.pdfbox..")
                 .because("PDFBox への依存は pdf-core に閉じる（CLAUDE.md リソース管理）")
                 .check(classes);
     }
@@ -64,8 +69,11 @@ class ArchitectureTest {
     @DisplayName("Apache POI の型が pdf-core の外から見えない")
     void poiMustNotLeakOutOfCore() {
         noClasses()
-                .that().resideOutsideOfPackage("..pdfjig.core..")
-                .should().dependOnClassesThat().resideInAnyPackage("org.apache.poi..")
+                .that()
+                .resideOutsideOfPackage("..pdfjig.core..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("org.apache.poi..")
                 .because("POI への依存は pdf-core に閉じる（CLAUDE.md リソース管理）")
                 .check(classes);
     }
@@ -75,8 +83,11 @@ class ArchitectureTest {
     void aiMustNotTouchTheFileSystem() {
         // pdf-ai が Path / File を扱えないなら、ファイルを書き出す経路は構造的に存在しない。
         noClasses()
-                .that().resideInAPackage("..pdfjig.ai..")
-                .should().dependOnClassesThat().resideInAnyPackage("java.nio.file..", "java.io..")
+                .that()
+                .resideInAPackage("..pdfjig.ai..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("java.nio.file..", "java.io..")
                 .because("AI はファイルを変更しない。適用は pdf-core が行う（CLAUDE.md INV-2）")
                 .check(classes);
     }

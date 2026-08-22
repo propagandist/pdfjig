@@ -49,6 +49,7 @@ class PageRangeTest {
         range.validateAgainst(10);
         assertEquals(
                 ErrorCode.PAGE_OUT_OF_RANGE,
-                assertThrows(PdfjigException.class, () -> range.validateAgainst(9)).errorCode());
+                assertThrows(PdfjigException.class, () -> range.validateAgainst(9))
+                        .errorCode());
     }
 }

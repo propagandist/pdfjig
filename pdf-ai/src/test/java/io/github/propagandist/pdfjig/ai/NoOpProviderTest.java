@@ -25,8 +25,7 @@ class NoOpProviderTest {
     @Test
     @DisplayName("利用不可でも例外を投げず、空の提案を返す")
     void returnsEmptyProposalInsteadOfThrowing() {
-        Proposal<List<BoundaryCandidate>> proposal =
-                provider.detectBoundaries(List.of(new PageText(1, "請求書")));
+        Proposal<List<BoundaryCandidate>> proposal = provider.detectBoundaries(List.of(new PageText(1, "請求書")));
 
         assertEquals(List.of(), proposal.value());
         assertEquals(0.0, proposal.confidence());

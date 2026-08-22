@@ -62,15 +62,13 @@ public final class GenerateIcon {
     /** ICONDIR の長さ。 */
     private static final int HEADER_SIZE = 6;
 
-    private GenerateIcon() {
-    }
+    private GenerateIcon() {}
 
     public static void main(String[] args) throws IOException {
         Path root = args.length > 0 ? Path.of(args[0]) : Path.of(".");
 
         Path ico = root.resolve("pdf-desktop/packaging/pdfjig.ico");
-        Path png = root.resolve(
-                "pdf-desktop/src/main/resources/io/github/propagandist/pdfjig/desktop/pdfjig-256.png");
+        Path png = root.resolve("pdf-desktop/src/main/resources/io/github/propagandist/pdfjig/desktop/pdfjig-256.png");
 
         Files.createDirectories(ico.getParent());
         Files.createDirectories(png.getParent());
@@ -148,8 +146,7 @@ public final class GenerateIcon {
 
         g.setColor(BACKGROUND);
         g.fill(new RoundRectangle2D.Double(
-                r(size, 0.02), r(size, 0.02), r(size, 0.96), r(size, 0.96),
-                r(size, 0.22), r(size, 0.22)));
+                r(size, 0.02), r(size, 0.02), r(size, 0.96), r(size, 0.96), r(size, 0.22), r(size, 0.22)));
 
         drawPaper(g, size);
         drawClamp(g, size);
@@ -169,8 +166,12 @@ public final class GenerateIcon {
         if (size < 32) {
             g.setColor(PAPER);
             g.fill(new RoundRectangle2D.Double(
-                    r(size, left), r(size, top), r(size, right - left), r(size, bottom - top),
-                    r(size, 0.04), r(size, 0.04)));
+                    r(size, left),
+                    r(size, top),
+                    r(size, right - left),
+                    r(size, bottom - top),
+                    r(size, 0.04),
+                    r(size, 0.04)));
             return;
         }
 
@@ -208,16 +209,18 @@ public final class GenerateIcon {
         g.setStroke(new BasicStroke((float) r(size, 0.02)));
 
         g.fill(new RoundRectangle2D.Double(
-                r(size, left), r(size, top), r(size, spine), r(size, bottom - top),
-                r(size, 0.04), r(size, 0.04)));
+                r(size, left), r(size, top), r(size, spine), r(size, bottom - top), r(size, 0.04), r(size, 0.04)));
 
         g.fill(new RoundRectangle2D.Double(
-                r(size, left), r(size, top), r(size, reach - left), r(size, jaw),
-                r(size, 0.04), r(size, 0.04)));
+                r(size, left), r(size, top), r(size, reach - left), r(size, jaw), r(size, 0.04), r(size, 0.04)));
 
         g.fill(new RoundRectangle2D.Double(
-                r(size, left), r(size, bottom - jaw), r(size, reach - left), r(size, jaw),
-                r(size, 0.04), r(size, 0.04)));
+                r(size, left),
+                r(size, bottom - jaw),
+                r(size, reach - left),
+                r(size, jaw),
+                r(size, 0.04),
+                r(size, 0.04)));
     }
 
     /** 比率を実座標に直す。 */

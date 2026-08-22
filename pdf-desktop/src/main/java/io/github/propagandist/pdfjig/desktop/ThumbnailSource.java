@@ -42,8 +42,7 @@ public final class ThumbnailSource implements AutoCloseable {
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 5L;
 
     /** キャッシュの鍵。同じページ番号でも文書が違えば別のサムネイルになる。 */
-    private record PageKey(int sourceIndex, int pageNumber) {
-    }
+    private record PageKey(int sourceIndex, int pageNumber) {}
 
     private final PageRendering rendering = new PdfBoxPageRendering();
 
@@ -137,8 +136,7 @@ public final class ThumbnailSource implements AutoCloseable {
                     return hit.get();
                 }
 
-                Image image = SwingFXUtils.toFXImage(
-                        rendering.renderThumbnail(document, pageNumber, edgePixels), null);
+                Image image = SwingFXUtils.toFXImage(rendering.renderThumbnail(document, pageNumber, edgePixels), null);
                 synchronized (cache) {
                     cache.put(key, image);
                 }

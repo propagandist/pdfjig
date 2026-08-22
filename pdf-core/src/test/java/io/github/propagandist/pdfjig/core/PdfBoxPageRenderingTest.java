@@ -68,9 +68,7 @@ class PdfBoxPageRenderingTest {
         try (PdfDocument document = PdfDocument.open(pdf)) {
             assertEquals(
                     ErrorCode.PAGE_OUT_OF_RANGE,
-                    assertThrows(
-                                    PdfjigException.class,
-                                    () -> rendering.renderThumbnail(document, 3, 120))
+                    assertThrows(PdfjigException.class, () -> rendering.renderThumbnail(document, 3, 120))
                             .errorCode());
         }
     }

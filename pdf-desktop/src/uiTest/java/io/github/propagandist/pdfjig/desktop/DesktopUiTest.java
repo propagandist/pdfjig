@@ -72,8 +72,8 @@ abstract class DesktopUiTest {
         window = new MainWindow(stage, aiProvider(), null, dialogs);
 
         Scene scene = new Scene(window.build(), 960, 720);
-        scene.getStylesheets().add(
-                PdfjigApplication.class.getResource("pdfjig.css").toExternalForm());
+        scene.getStylesheets()
+                .add(PdfjigApplication.class.getResource("pdfjig.css").toExternalForm());
         stage.setScene(scene);
         stage.show();
     }
@@ -131,8 +131,7 @@ abstract class DesktopUiTest {
      *
      * @param stillPending まだ押した結果が起きていない間 {@code true} を返すもの
      */
-    void clickUntilAccepted(FxRobot robot, String id, BooleanSupplier stillPending)
-            throws Exception {
+    void clickUntilAccepted(FxRobot robot, String id, BooleanSupplier stillPending) throws Exception {
         for (int attempt = 1; attempt <= CLICK_ATTEMPTS; attempt++) {
             robot.clickOn(id);
             WaitForAsyncUtils.waitForFxEvents();
@@ -140,9 +139,7 @@ abstract class DesktopUiTest {
                 return;
             }
         }
-        throw new AssertionError(
-                id + " を " + CLICK_ATTEMPTS + " 回押しても届かなかった"
-                        + "（窓が前面に出ていない可能性がある）");
+        throw new AssertionError(id + " を " + CLICK_ATTEMPTS + " 回押しても届かなかった" + "（窓が前面に出ていない可能性がある）");
     }
 
     /**
@@ -193,8 +190,7 @@ abstract class DesktopUiTest {
             return false;
         }
         Bounds bounds = node.localToScene(node.getBoundsInLocal());
-        return bounds.getWidth() > 0 && bounds.getHeight() > 0
-                && scene.getWidth() > 0 && scene.getHeight() > 0;
+        return bounds.getWidth() > 0 && bounds.getHeight() > 0 && scene.getWidth() > 0 && scene.getHeight() > 0;
     }
 
     static void waitFor(Callable<Boolean> condition) throws Exception {

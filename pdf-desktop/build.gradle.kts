@@ -69,29 +69,30 @@ dependencies {
     "uiTestRuntimeOnly"(libs.junit.platform.launcher)
 }
 
-val uiTestTask = tasks.register<Test>("uiTest") {
-    description = "画面を操作するテスト。デスクトップセッションを要するため build には含めない。"
-    group = "verification"
+val uiTestTask =
+    tasks.register<Test>("uiTest") {
+        description = "画面を操作するテスト。デスクトップセッションを要するため build には含めない。"
+        group = "verification"
 
-    testClassesDirs = uiTest.output.classesDirs
-    classpath = uiTest.runtimeClasspath
+        testClassesDirs = uiTest.output.classesDirs
+        classpath = uiTest.runtimeClasspath
 
-    // 画面を掴むテストが 2 つ同時に動くと、片方のクリックがもう片方の窓へ行く。
-    maxParallelForks = 1
+        // 画面を掴むテストが 2 つ同時に動くと、片方のクリックがもう片方の窓へ行く。
+        maxParallelForks = 1
 
-    // ★ 開始も出す。完了したものしか出さないと、ハングしたときに「どのテストで止まったか」が
-    //   ログに残らず、最後に PASSED した次を推測するしかない。2026-08-22 にそこで誤診した
-    //   （古いブランチで ReorderUiTest が除外されずに走っていただけなのを、JUnit の版差だと
-    //   読んだ）。ジョブ側に出るのは "The operation was canceled." の 1 行だけである。
-    //
-    //   通常の test には足さない。あちらは 121 本あって数十ミリ秒で終わる。
-    //   ここは 25 本で、1 本が数分に伸びうる側である。
-    testLogging {
-        setEvents(listOf("started", "passed", "skipped", "failed"))
+        // ★ 開始も出す。完了したものしか出さないと、ハングしたときに「どのテストで止まったか」が
+        //   ログに残らず、最後に PASSED した次を推測するしかない。2026-08-22 にそこで誤診した
+        //   （古いブランチで ReorderUiTest が除外されずに走っていただけなのを、JUnit の版差だと
+        //   読んだ）。ジョブ側に出るのは "The operation was canceled." の 1 行だけである。
+        //
+        //   通常の test には足さない。あちらは 121 本あって数十ミリ秒で終わる。
+        //   ここは 25 本で、1 本が数分に伸びうる側である。
+        testLogging {
+            setEvents(listOf("started", "passed", "skipped", "failed"))
+        }
+
+        shouldRunAfter(tasks.named("test"))
     }
-
-    shouldRunAfter(tasks.named("test"))
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Windows 向けパッケージング（HANDOVER.md Phase 4）
@@ -160,28 +161,30 @@ val upgradeUuid = "3210BCE4-3635-4EFC-8EC1-DC77881091BB"
  *   2026-08-22 に外した。POI の宣言そのものを M1 まで外したため
  *   （理由は pdf-core/build.gradle.kts）。**POI を戻すときは、この 2 つも戻すこと。**
  */
-val runtimeModules = listOf(
-    "java.base",
-    "java.desktop",
-    "java.logging",
-    "java.xml",
-    "java.security.jgss",
-    "java.xml.crypto",
-    "jdk.localedata",
-    "javafx.base",
-    "javafx.graphics",
-    "javafx.controls",
-    "javafx.swing",
-)
+val runtimeModules =
+    listOf(
+        "java.base",
+        "java.desktop",
+        "java.logging",
+        "java.xml",
+        "java.security.jgss",
+        "java.xml.crypto",
+        "jdk.localedata",
+        "javafx.base",
+        "javafx.graphics",
+        "javafx.controls",
+        "javafx.swing",
+    )
 
 /** 収録するロケール。UI は日本語であり、それ以外の環境では英語にフォールバックさせる。 */
 val includeLocales = "en,ja"
 
 val javafxJmods = configurations.dependencyScope("javafxJmods")
 
-val javafxJmodsPath = configurations.resolvable("javafxJmodsPath") {
-    extendsFrom(javafxJmods.get())
-}
+val javafxJmodsPath =
+    configurations.resolvable("javafxJmodsPath") {
+        extendsFrom(javafxJmods.get())
+    }
 
 dependencies {
     javafxJmods("org.openjfx.jmods:jmods:$javafxVersion@zip")
@@ -189,14 +192,18 @@ dependencies {
 
 val javaToolchains = extensions.getByType<JavaToolchainService>()
 
-val toolchainHome = javaToolchains
-    .launcherFor { languageVersion = JavaLanguageVersion.of(21) }
-    .map { it.metadata.installationPath }
+val toolchainHome =
+    javaToolchains
+        .launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+        .map { it.metadata.installationPath }
 
 val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
 fun jdkTool(name: String): String =
-    toolchainHome.get().file("bin/" + if (isWindows) "$name.exe" else name).asFile.absolutePath
+    toolchainHome
+        .get()
+        .file("bin/" + if (isWindows) "$name.exe" else name)
+        .asFile.absolutePath
 
 val packagingDir = layout.buildDirectory.dir("jpackage")
 
@@ -224,112 +231,140 @@ val iconFile = layout.projectDirectory.file("packaging/pdfjig.ico")
 fun clearDirectory(target: File) {
     if (target.exists() && !target.deleteRecursively()) {
         throw GradleException(
-            "出力先を消せませんでした: $target"
-                + "（このディレクトリのファイルを掴んでいるプロセスがないか確認すること）")
+            "出力先を消せませんでした: $target" +
+                "（このディレクトリのファイルを掴んでいるプロセスがないか確認すること）",
+        )
     }
 }
 
-val unpackJavafxJmods = tasks.register<Sync>("unpackJavafxJmods") {
-    description = "JavaFX の jmods を展開する。"
-    group = "distribution"
+val unpackJavafxJmods =
+    tasks.register<Sync>("unpackJavafxJmods") {
+        description = "JavaFX の jmods を展開する。"
+        group = "distribution"
 
-    from(javafxJmodsPath.flatMap { it.elements }.map { zipTree(it.single()) }) {
-        // zip の中は javafx-jmods-<version>/*.jmod という 1 階層。jlink の --module-path に
-        // そのまま渡したいので剥がす。
-        eachFile {
-            relativePath = RelativePath(true, *relativePath.segments.drop(1).toTypedArray())
+        from(javafxJmodsPath.flatMap { it.elements }.map { zipTree(it.single()) }) {
+            // zip の中は javafx-jmods-<version>/*.jmod という 1 階層。jlink の --module-path に
+            // そのまま渡したいので剥がす。
+            eachFile {
+                relativePath = RelativePath(true, *relativePath.segments.drop(1).toTypedArray())
+            }
+        }
+        into(jmodsDir)
+        includeEmptyDirs = false
+    }
+
+val jpackageInput =
+    tasks.register<Sync>("jpackageInput") {
+        description = "アプリイメージに入れる jar を集める。"
+        group = "distribution"
+
+        dependsOn(tasks.named("installDist"))
+        from(layout.buildDirectory.dir("install/pdf-desktop/lib")) {
+            // JavaFX の jar は入れない。ランタイムイメージ側に名前付きモジュールとして入るため、
+            // クラスパスにも同じパッケージが居ると split package になって壊れる。
+            exclude("javafx-*.jar")
+        }
+        into(inputDir)
+    }
+
+val jlinkRuntime =
+    tasks.register<Exec>("jlinkRuntime") {
+        description = "JavaFX を含むランタイムイメージを組む。"
+        group = "distribution"
+
+        dependsOn(unpackJavafxJmods)
+        inputs.dir(jmodsDir)
+        inputs.property("modules", runtimeModules)
+        inputs.property("locales", includeLocales)
+        outputs.dir(runtimeDir)
+
+        doFirst {
+            // jlink は出力先が既にあると失敗する。
+            clearDirectory(runtimeDir.get().asFile)
+
+            val modulePath =
+                listOf(
+                    toolchainHome
+                        .get()
+                        .dir("jmods")
+                        .asFile.absolutePath,
+                    jmodsDir.get().asFile.absolutePath,
+                ).joinToString(File.pathSeparator)
+
+            commandLine(
+                jdkTool("jlink"),
+                "--module-path",
+                modulePath,
+                "--add-modules",
+                runtimeModules.joinToString(","),
+                "--include-locales=$includeLocales",
+                "--output",
+                runtimeDir.get().asFile.absolutePath,
+                "--strip-debug",
+                "--no-header-files",
+                "--no-man-pages",
+                "--compress=zip-6",
+            )
         }
     }
-    into(jmodsDir)
-    includeEmptyDirs = false
-}
 
-val jpackageInput = tasks.register<Sync>("jpackageInput") {
-    description = "アプリイメージに入れる jar を集める。"
-    group = "distribution"
+val jpackageAppImage =
+    tasks.register<Exec>("jpackageAppImage") {
+        description = "アプリイメージを作る。"
+        group = "distribution"
 
-    dependsOn(tasks.named("installDist"))
-    from(layout.buildDirectory.dir("install/pdf-desktop/lib")) {
-        // JavaFX の jar は入れない。ランタイムイメージ側に名前付きモジュールとして入るため、
-        // クラスパスにも同じパッケージが居ると split package になって壊れる。
-        exclude("javafx-*.jar")
+        dependsOn(jpackageInput, jlinkRuntime)
+        inputs.dir(inputDir)
+        inputs.dir(runtimeDir)
+        inputs.file(iconFile)
+        inputs.property("appVersion", appVersion)
+        outputs.dir(imageDir)
+
+        val mainJarName = tasks.jar.flatMap { it.archiveFileName }
+        val mainClassName = application.mainClass
+
+        doFirst {
+            clearDirectory(imageDir.get().asFile)
+
+            commandLine(
+                jdkTool("jpackage"),
+                "--type",
+                "app-image",
+                "--name",
+                appName,
+                "--app-version",
+                appVersion,
+                "--vendor",
+                appVendor,
+                "--copyright",
+                "Copyright 2026 $appVendor",
+                "--description",
+                appDescription,
+                "--icon",
+                iconFile.asFile.absolutePath,
+                "--runtime-image",
+                runtimeDir.get().asFile.absolutePath,
+                "--input",
+                inputDir.get().asFile.absolutePath,
+                "--main-jar",
+                mainJarName.get(),
+                "--main-class",
+                mainClassName.get(),
+                // アプリはクラスパスに居るため、JavaFX のモジュールは明示的に解決させる必要がある。
+                // これが無いと "JavaFX runtime components are missing" で起動しない。
+                "--java-options",
+                "--add-modules=javafx.controls,javafx.swing",
+                "--dest",
+                imageDir.get().asFile.absolutePath,
+            )
+        }
     }
-    into(inputDir)
-}
-
-val jlinkRuntime = tasks.register<Exec>("jlinkRuntime") {
-    description = "JavaFX を含むランタイムイメージを組む。"
-    group = "distribution"
-
-    dependsOn(unpackJavafxJmods)
-    inputs.dir(jmodsDir)
-    inputs.property("modules", runtimeModules)
-    inputs.property("locales", includeLocales)
-    outputs.dir(runtimeDir)
-
-    doFirst {
-        // jlink は出力先が既にあると失敗する。
-        clearDirectory(runtimeDir.get().asFile)
-
-        val modulePath = listOf(
-            toolchainHome.get().dir("jmods").asFile.absolutePath,
-            jmodsDir.get().asFile.absolutePath,
-        ).joinToString(File.pathSeparator)
-
-        commandLine(
-            jdkTool("jlink"),
-            "--module-path", modulePath,
-            "--add-modules", runtimeModules.joinToString(","),
-            "--include-locales=$includeLocales",
-            "--output", runtimeDir.get().asFile.absolutePath,
-            "--strip-debug",
-            "--no-header-files",
-            "--no-man-pages",
-            "--compress=zip-6",
-        )
-    }
-}
-
-val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
-    description = "アプリイメージを作る。"
-    group = "distribution"
-
-    dependsOn(jpackageInput, jlinkRuntime)
-    inputs.dir(inputDir)
-    inputs.dir(runtimeDir)
-    inputs.file(iconFile)
-    inputs.property("appVersion", appVersion)
-    outputs.dir(imageDir)
-
-    val mainJarName = tasks.jar.flatMap { it.archiveFileName }
-    val mainClassName = application.mainClass
-
-    doFirst {
-        clearDirectory(imageDir.get().asFile)
-
-        commandLine(
-            jdkTool("jpackage"),
-            "--type", "app-image",
-            "--name", appName,
-            "--app-version", appVersion,
-            "--vendor", appVendor,
-            "--copyright", "Copyright 2026 $appVendor",
-            "--description", appDescription,
-            "--icon", iconFile.asFile.absolutePath,
-            "--runtime-image", runtimeDir.get().asFile.absolutePath,
-            "--input", inputDir.get().asFile.absolutePath,
-            "--main-jar", mainJarName.get(),
-            "--main-class", mainClassName.get(),
-            // アプリはクラスパスに居るため、JavaFX のモジュールは明示的に解決させる必要がある。
-            // これが無いと "JavaFX runtime components are missing" で起動しない。
-            "--java-options", "--add-modules=javafx.controls,javafx.swing",
-            "--dest", imageDir.get().asFile.absolutePath,
-        )
-    }
-}
 
 /** アプリイメージから MSI / EXE を作る共通部分。 */
-fun Exec.jpackageInstaller(type: String, perUser: Boolean) {
+fun Exec.jpackageInstaller(
+    type: String,
+    perUser: Boolean,
+) {
     dependsOn(jpackageAppImage)
     inputs.dir(imageDir)
     inputs.property("appVersion", appVersion)
@@ -340,22 +375,37 @@ fun Exec.jpackageInstaller(type: String, perUser: Boolean) {
         target.parentFile.mkdirs()
         target.delete()
 
-        val arguments = mutableListOf(
-            jdkTool("jpackage"),
-            "--type", type,
-            "--app-image", imageDir.get().dir(appName).asFile.absolutePath,
-            "--name", appName,
-            "--app-version", appVersion,
-            "--vendor", appVendor,
-            "--copyright", "Copyright 2026 $appVendor",
-            "--description", installerDescription,
-            "--license-file", licenseFile.asFile.absolutePath,
-            "--win-menu",
-            "--win-menu-group", appName,
-            "--win-shortcut",
-            "--win-upgrade-uuid", upgradeUuid,
-            "--dest", distDir.asFile.absolutePath,
-        )
+        val arguments =
+            mutableListOf(
+                jdkTool("jpackage"),
+                "--type",
+                type,
+                "--app-image",
+                imageDir
+                    .get()
+                    .dir(appName)
+                    .asFile.absolutePath,
+                "--name",
+                appName,
+                "--app-version",
+                appVersion,
+                "--vendor",
+                appVendor,
+                "--copyright",
+                "Copyright 2026 $appVendor",
+                "--description",
+                installerDescription,
+                "--license-file",
+                licenseFile.asFile.absolutePath,
+                "--win-menu",
+                "--win-menu-group",
+                appName,
+                "--win-shortcut",
+                "--win-upgrade-uuid",
+                upgradeUuid,
+                "--dest",
+                distDir.asFile.absolutePath,
+            )
         if (perUser) {
             arguments += "--win-per-user-install"
         } else {
@@ -367,29 +417,32 @@ fun Exec.jpackageInstaller(type: String, perUser: Boolean) {
     }
 }
 
-val packageMsi = tasks.register<Exec>("packageMsi") {
-    description = "マシン単位でインストールする MSI を作る。情報システム部門による一括配布向け。"
-    group = "distribution"
+val packageMsi =
+    tasks.register<Exec>("packageMsi") {
+        description = "マシン単位でインストールする MSI を作る。情報システム部門による一括配布向け。"
+        group = "distribution"
 
-    jpackageInstaller("msi", perUser = false)
-}
+        jpackageInstaller("msi", perUser = false)
+    }
 
-val packageExe = tasks.register<Exec>("packageExe") {
-    description = "ユーザー単位でインストールする EXE を作る。管理者権限が要らない。"
-    group = "distribution"
+val packageExe =
+    tasks.register<Exec>("packageExe") {
+        description = "ユーザー単位でインストールする EXE を作る。管理者権限が要らない。"
+        group = "distribution"
 
-    jpackageInstaller("exe", perUser = true)
-}
+        jpackageInstaller("exe", perUser = true)
+    }
 
-val packageZip = tasks.register<Zip>("packageZip") {
-    description = "インストール不要で動く ZIP を作る。インストーラを使えない環境向け。"
-    group = "distribution"
+val packageZip =
+    tasks.register<Zip>("packageZip") {
+        description = "インストール不要で動く ZIP を作る。インストーラを使えない環境向け。"
+        group = "distribution"
 
-    dependsOn(jpackageAppImage)
-    from(imageDir)
-    destinationDirectory = distDir
-    archiveFileName = "$appName-$appVersion-win-x64.zip"
-}
+        dependsOn(jpackageAppImage)
+        from(imageDir)
+        destinationDirectory = distDir
+        archiveFileName = "$appName-$appVersion-win-x64.zip"
+    }
 
 tasks.register("packageAll") {
     description = "MSI / EXE / ZIP をまとめて作る。"

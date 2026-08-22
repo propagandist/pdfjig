@@ -34,9 +34,17 @@ class MainWindowUiTest extends DesktopUiTest {
     @Test
     void 文書を開いていなければページへの操作は押せない(FxRobot robot) {
         for (String id : new String[] {
-                "#tool-save", "#tool-delete", "#tool-rotate-right", "#tool-rotate-left",
-                "#tool-keep-range", "#tool-toggle-break", "#tool-reset",
-                "#tool-add", "#tool-split", "#tool-split-pages"}) {
+            "#tool-save",
+            "#tool-delete",
+            "#tool-rotate-right",
+            "#tool-rotate-left",
+            "#tool-keep-range",
+            "#tool-toggle-break",
+            "#tool-reset",
+            "#tool-add",
+            "#tool-split",
+            "#tool-split-pages"
+        }) {
             assertTrue(button(robot, id).isDisabled(), id + " が押せてしまう");
         }
     }

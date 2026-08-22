@@ -37,8 +37,7 @@ public final class TestPdfs {
     /** {@link #withText} が使う上マージン（pt）。ベースラインまでの距離。 */
     public static final float TEXT_TOP = 72f;
 
-    private TestPdfs() {
-    }
+    private TestPdfs() {}
 
     /** 指定ページ数の平文 PDF を作る。 */
     public static Path plain(Path target, int pageCount) throws IOException {
@@ -64,10 +63,8 @@ public final class TestPdfs {
                 document.addPage(page);
                 try (PDPageContentStream content = new PDPageContentStream(document, page)) {
                     content.beginText();
-                    content.setFont(
-                            new PDType1Font(Standard14Fonts.FontName.HELVETICA), FONT_SIZE);
-                    content.newLineAtOffset(
-                            TEXT_LEFT, page.getMediaBox().getHeight() - TEXT_TOP);
+                    content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), FONT_SIZE);
+                    content.newLineAtOffset(TEXT_LEFT, page.getMediaBox().getHeight() - TEXT_TOP);
                     content.showText(text);
                     content.endText();
                 }
@@ -100,8 +97,7 @@ public final class TestPdfs {
             document.addPage(new PDPage());
 
             AccessPermission permissions = new AccessPermission();
-            StandardProtectionPolicy policy =
-                    new StandardProtectionPolicy(userPassword, userPassword, permissions);
+            StandardProtectionPolicy policy = new StandardProtectionPolicy(userPassword, userPassword, permissions);
             policy.setEncryptionKeyLength(256);
             document.protect(policy);
 
@@ -116,8 +112,7 @@ public final class TestPdfs {
      * <p>ユーザーパスワードが空なので誰でも開けるが、暗号化はされている。
      * 「開けるのに保護されている」という、伝播の判定が効く状態を作るために使う。
      */
-    public static Path ownerProtected(Path target, String ownerPassword, int pageCount)
-            throws IOException {
+    public static Path ownerProtected(Path target, String ownerPassword, int pageCount) throws IOException {
         try (PDDocument document = new PDDocument()) {
             for (int i = 0; i < pageCount; i++) {
                 document.addPage(new PDPage());
@@ -125,8 +120,7 @@ public final class TestPdfs {
 
             AccessPermission permissions = new AccessPermission();
             permissions.setCanPrint(false);
-            StandardProtectionPolicy policy =
-                    new StandardProtectionPolicy(ownerPassword, "", permissions);
+            StandardProtectionPolicy policy = new StandardProtectionPolicy(ownerPassword, "", permissions);
             policy.setEncryptionKeyLength(256);
             document.protect(policy);
 

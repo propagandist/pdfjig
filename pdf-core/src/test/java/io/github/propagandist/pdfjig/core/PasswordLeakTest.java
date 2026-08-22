@@ -31,9 +31,7 @@ class PasswordLeakTest {
     void exceptionMustNotRevealAnyPassword() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
 
-        PdfjigException thrown = assertThrows(
-                PdfjigException.class,
-                () -> PdfDocument.open(pdf, WRONG.toCharArray()));
+        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, WRONG.toCharArray()));
 
         assertEquals(ErrorCode.INVALID_PASSWORD, thrown.errorCode());
 
@@ -47,15 +45,11 @@ class PasswordLeakTest {
     void causeMustNotBeChained() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
 
-        PdfjigException thrown = assertThrows(
-                PdfjigException.class,
-                () -> PdfDocument.open(pdf, WRONG.toCharArray()));
+        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, WRONG.toCharArray()));
 
         assertEquals(null, thrown.getCause(), "原因例外を連結してはならない");
         assertEquals(
-                "org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException",
-                thrown.causeType(),
-                "診断のために型名だけは保持する");
+                "org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException", thrown.causeType(), "診断のために型名だけは保持する");
     }
 
     @Test

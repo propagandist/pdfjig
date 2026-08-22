@@ -30,7 +30,6 @@ public interface WarningListener {
      * @return 何もしないリスナー
      */
     static WarningListener ignoring() {
-        return warning -> {
-        };
+        return warning -> {};
     }
 }

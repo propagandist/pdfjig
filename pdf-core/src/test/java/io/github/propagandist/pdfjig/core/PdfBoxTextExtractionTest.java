@@ -96,8 +96,7 @@ class PdfBoxTextExtractionTest {
             assertEquals(TestPdfs.TEXT_LEFT, first.x(), 1.0f);
             // 上端から 72pt がベースライン。グリフ上端はそれより上（y が小さい）。
             // 左下原点のままなら y は 700 前後になるため、この検証で取り違えを検出できる。
-            assertTrue(first.y() > 0f && first.y() < TestPdfs.TEXT_TOP,
-                    "上端からの距離として妥当でない y: " + first.y());
+            assertTrue(first.y() > 0f && first.y() < TestPdfs.TEXT_TOP, "上端からの距離として妥当でない y: " + first.y());
             assertTrue(first.width() > 0f);
             assertTrue(first.height() > 0f);
             assertEquals(TestPdfs.FONT_SIZE, first.fontSize(), 0.01f);
@@ -112,9 +111,7 @@ class PdfBoxTextExtractionTest {
         try (PdfDocument document = PdfDocument.open(pdf)) {
             assertEquals(
                     ErrorCode.PAGE_OUT_OF_RANGE,
-                    assertThrows(
-                                    PdfjigException.class,
-                                    () -> extraction.extractWithPositions(document, 2))
+                    assertThrows(PdfjigException.class, () -> extraction.extractWithPositions(document, 2))
                             .errorCode());
         }
     }

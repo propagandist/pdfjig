@@ -31,8 +31,7 @@ final class AboutDialog {
     /** アイコンの表示サイズ。原寸 256px の画像を縮めて使う。 */
     private static final int ICON_SIZE = 64;
 
-    private AboutDialog() {
-    }
+    private AboutDialog() {}
 
     /**
      * ダイアログを開き、閉じられるまで待つ。
@@ -81,9 +80,8 @@ final class AboutDialog {
         VBox.setMargin(copyright, new Insets(10, 0, 0, 0));
         VBox.setMargin(java, new Insets(10, 0, 0, 0));
 
-        ImageView icon = new ImageView(new Image(
-                AboutDialog.class.getResourceAsStream("pdfjig-256.png"),
-                ICON_SIZE, ICON_SIZE, true, true));
+        ImageView icon = new ImageView(
+                new Image(AboutDialog.class.getResourceAsStream("pdfjig-256.png"), ICON_SIZE, ICON_SIZE, true, true));
 
         HBox content = new HBox(16, icon, details);
         content.setAlignment(Pos.TOP_LEFT);
