@@ -137,10 +137,12 @@ val upgradeUuid = "3210BCE4-3635-4EFC-8EC1-DC77881091BB"
  *
  * - java.desktop / java.xml — 推移で入るが、BufferedImage と XML は直接使っているので明示する。
  *   javafx.swing 経由の推移に頼ると、依存が変わったとき黙って消える
- * - jdk.unsupported — POI が sun.misc.Unsafe を使う
- * - jdk.xml.dom — xmlbeans が要求する
  * - jdk.localedata — 日本語ロケール。サービス経由の読み込みなので jdeps では検出できない。
  *   外すと jlink 後に ja が消え、日付・数値の書式が英語圏のものに化ける
+ *
+ * ★ jdk.unsupported（POI の sun.misc.Unsafe）と jdk.xml.dom（xmlbeans）は
+ *   2026-08-22 に外した。POI の宣言そのものを M1 まで外したため
+ *   （理由は pdf-core/build.gradle.kts）。**POI を戻すときは、この 2 つも戻すこと。**
  */
 val runtimeModules = listOf(
     "java.base",
@@ -149,8 +151,6 @@ val runtimeModules = listOf(
     "java.xml",
     "java.security.jgss",
     "java.xml.crypto",
-    "jdk.unsupported",
-    "jdk.xml.dom",
     "jdk.localedata",
     "javafx.base",
     "javafx.graphics",

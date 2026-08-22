@@ -10,9 +10,16 @@ plugins {
 // CLAUDE.md INV-1: このファイルに pdf-ai が現れることは絶対にない。
 // PDFBox / POI / tabula への依存はこのモジュールに閉じるため、すべて implementation で宣言する
 // （api にすると PDDocument 等の型が下流モジュールから見えてしまう）。
+//
+// ★ POI は M1（Excel 出力）で戻す。いまは宣言していない。
+//   2026-08-22 時点で 1 行も使っていないのに、配布物の 14MB を占め（実際に使っている
+//   PDFBox の 3.5 倍）、Dependabot の警告 2 件（log4j-api / commons-lang3）の出所も
+//   すべてここだった。使っていないものの CVE を見続ける理由がない。
+//   戻すときは gradle/libs.versions.toml の poi.ooxml をそのまま使い、
+//   pdf-desktop の runtimeModules に jdk.unsupported と jdk.xml.dom を足し直すこと。
+//   SPEC.md §85（Excel 出力 = SXSSF）は変えていない。仕様としての POI は残っている。
 dependencies {
     implementation(libs.pdfbox)
-    implementation(libs.poi.ooxml)
 
     // api にしない。TestPdfs が返すのは Path だけであり、PDDocument を下流へ見せる必要はない。
     testFixturesImplementation(libs.pdfbox)
