@@ -20,8 +20,11 @@ jobs:
         # windows-latest は配布対象プラットフォーム、ubuntu-latest は速い一次検証。
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # ハングしたジョブを 6 時間放置しないための上限。2026-08-21 実測で windows が最長 5 分 56 秒。
-    timeout-minutes: 30
+    # ハングしたジョブを 6 時間放置しないための上限。
+    # 2026-08-22 実測（uiTest を含む）で windows が 5 分 0 秒、ubuntu が 50 秒。
+    # 3 倍の余裕を見てある。★ 実測より桁を大きくしない——上限が緩いほど、
+    # 遅くなったことに気づくのが遅れる（uiTest が 19 分かかっていたのを 30 分の上限が隠した）。
+    timeout-minutes: 15
 
     # uses は SHA でピンしてある。末尾の版コメントは Dependabot が SHA と一緒に
     # 書き換えるので消さないこと（理由は .github/dependabot.yml）。
