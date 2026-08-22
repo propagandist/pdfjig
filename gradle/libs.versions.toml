@@ -33,6 +33,13 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 palantir-java-format = { module = "com.palantir.javaformat:palantir-java-format", version.ref = "palantir-java-format" }
 ktlint-cli = { module = "com.pinterest.ktlint:ktlint-cli", version.ref = "ktlint" }
 
+# ★ これも依存には入らない。理由は上の 2 つと少し違う。
+#   `javafx` は build.gradle.kts が libs.versions.javafx.get() で読んで実際に使っているが、
+#   どの [libraries] からも version.ref されていないため **Dependabot の視界に入っていなかった**
+#   （2026-08-22 の update job で確認）。ここに座標を 1 つ置くと 21.0.x のパッチが降りてくる。
+#   major は .github/dependabot.yml の ignore で止めてある。**消すと JavaFX の版を誰も追わなくなる。**
+javafx-controls = { module = "org.openjfx:javafx-controls", version.ref = "javafx" }
+
 [plugins]
 javafx = { id = "org.openjfx.javafxplugin", version.ref = "openjfx-plugin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

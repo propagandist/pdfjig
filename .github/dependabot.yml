@@ -92,14 +92,22 @@ updates:
           - "com.diffplug.spotless*"
           - "com.palantir.javaformat:*"
           - "com.pinterest.ktlint:*"
+    ignore:
+      # JavaFX は JDK 21 に合わせて 21.x に留める（下の ★）。major の PR は来ても必ず却下する
+      # ことになるので止める。**21.0.x のパッチは受ける**——そのために libs.versions.toml へ
+      # javafx-controls を宣言してある。
+      - dependency-name: "org.openjfx:*"
+        update-types: ["version-update:semver-major"]
 
 # ★ JavaFX の版は JDK 21 に合わせて 21.x に留める。libs.versions.toml の `javafx` は
 #   openjfx の jmods（org.openjfx.jmods:jmods）の座標にも文字列で入っていて、major が
 #   上がると jpackage が作るランタイムイメージが JDK 21 と噛み合わなくなる。
 #
-#   2026-08-22 の update job で確かめた。**Dependabot は `javafx` を見ていない。**
-#   Dependency Snapshot に出たのは org.openjfx.javafxplugin（[plugins] の側、version.ref は
+#   2026-08-22 の update job で、**Dependabot が `javafx` を見ていない**ことが分かった。
+#   Dependency Snapshot に出るのは org.openjfx.javafxplugin（[plugins] の側、version.ref は
 #   openjfx-plugin）であって、[versions] の `javafx` はどの [libraries] からも version.ref
-#   されていないため視界に入らない。ignore が要らない代わりに、**この版は誰も追っていない。**
-#   21.x に留める方針の間は実害がないが、**JDK を上げるときは手で見ること。**
-#   追わせたいなら org.openjfx.jmods:jmods を [libraries] に宣言する（座標は実在する）。
+#   されていないため視界に入らなかった。
+#
+#   そこで libs.versions.toml に org.openjfx:javafx-controls を宣言し、**追わせるようにした。**
+#   上の ignore で major を止めてあるので、来るのは 21.0.x のパッチだけである。
+#   **JavaFX の PR が来たら、まず major が上がっていないかを見ること**（ignore を外したとき用）。
