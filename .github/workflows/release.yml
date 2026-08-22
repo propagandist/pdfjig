@@ -119,7 +119,8 @@ jobs:
           foreach ($file in $expected) {
             if (-not (Test-Path $file)) { throw "$file が無い" }
             $size = (Get-Item $file).Length
-            # JRE 同梱で 60MB 前後になる。極端に小さいものはランタイムの取り込みに失敗している。
+            # JRE 同梱で 45MB 前後になる（2026-08-22 実測。POI を外す前は 60MB 前後だった）。
+            # 極端に小さいものはランタイムの取り込みに失敗している。
             if ($size -lt 30MB) { throw "$file が小さすぎる: $size バイト" }
             "{0}  {1:N1} MB" -f $file, ($size / 1MB)
           }
