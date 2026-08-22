@@ -17,23 +17,31 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
  * テスト用の PDF をその場で生成する。
  *
  * <p>リポジトリに PDF を置かない（CLAUDE.md INV-6）。フィクスチャは常にここで作る。
+ *
+ * <p>testFixtures に置いてあるのは、画面を操作するテスト（{@code pdf-desktop} の
+ * {@code uiTest}）からも同じフィクスチャを使うためである。生成の作法が 2 か所に分かれると、
+ * 「片方だけ直した壊れた PDF」でテストが通ってしまう。
+ *
+ * <p>PDFBox は {@code testFixturesImplementation} で取ってある。ここが返すのは
+ * {@link Path} だけであり、{@code PDDocument} が下流モジュールへ漏れることはない
+ * （CLAUDE.md「PDFBox の型を他モジュールに漏らさない」）。
  */
-final class TestPdfs {
+public final class TestPdfs {
 
     /** {@link #withText} が使うフォントサイズ（pt）。 */
-    static final float FONT_SIZE = 12f;
+    public static final float FONT_SIZE = 12f;
 
     /** {@link #withText} が使う左マージン（pt）。 */
-    static final float TEXT_LEFT = 72f;
+    public static final float TEXT_LEFT = 72f;
 
     /** {@link #withText} が使う上マージン（pt）。ベースラインまでの距離。 */
-    static final float TEXT_TOP = 72f;
+    public static final float TEXT_TOP = 72f;
 
     private TestPdfs() {
     }
 
     /** 指定ページ数の平文 PDF を作る。 */
-    static Path plain(Path target, int pageCount) throws IOException {
+    public static Path plain(Path target, int pageCount) throws IOException {
         try (PDDocument document = new PDDocument()) {
             for (int i = 0; i < pageCount; i++) {
                 document.addPage(new PDPage());
@@ -49,7 +57,7 @@ final class TestPdfs {
      * <p>標準 14 フォントは ASCII しか持たないため、{@code pageTexts} は ASCII に限る。
      * テキストはページ左端から 72pt、上端から 72pt（ベースライン）の位置に置かれる。
      */
-    static Path withText(Path target, String... pageTexts) throws IOException {
+    public static Path withText(Path target, String... pageTexts) throws IOException {
         try (PDDocument document = new PDDocument()) {
             for (String text : pageTexts) {
                 PDPage page = new PDPage();
@@ -74,7 +82,7 @@ final class TestPdfs {
      *
      * <p>PDF 仕様に反する角度もそのまま書き込める。壊れた入力に対する挙動を試すため。
      */
-    static Path rotated(Path target, int... rotations) throws IOException {
+    public static Path rotated(Path target, int... rotations) throws IOException {
         try (PDDocument document = new PDDocument()) {
             for (int rotation : rotations) {
                 PDPage page = new PDPage();
@@ -87,7 +95,7 @@ final class TestPdfs {
     }
 
     /** AES-256 で暗号化した 1 ページの PDF を作る。 */
-    static Path encrypted(Path target, String userPassword) throws IOException {
+    public static Path encrypted(Path target, String userPassword) throws IOException {
         try (PDDocument document = new PDDocument()) {
             document.addPage(new PDPage());
 
@@ -108,7 +116,7 @@ final class TestPdfs {
      * <p>ユーザーパスワードが空なので誰でも開けるが、暗号化はされている。
      * 「開けるのに保護されている」という、伝播の判定が効く状態を作るために使う。
      */
-    static Path ownerProtected(Path target, String ownerPassword, int pageCount)
+    public static Path ownerProtected(Path target, String ownerPassword, int pageCount)
             throws IOException {
         try (PDDocument document = new PDDocument()) {
             for (int i = 0; i < pageCount; i++) {
@@ -128,7 +136,7 @@ final class TestPdfs {
     }
 
     /** 各ページの回転角を先頭から順に返す。 */
-    static List<Integer> rotationsOf(Path pdf) throws IOException {
+    public static List<Integer> rotationsOf(Path pdf) throws IOException {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
             List<Integer> rotations = new ArrayList<>();
             for (PDPage page : document.getPages()) {

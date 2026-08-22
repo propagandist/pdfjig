@@ -1,3 +1,10 @@
+plugins {
+    // テスト用の PDF を作る TestPdfs を pdf-desktop の画面テストからも使う。
+    // リポジトリに PDF を置けない（CLAUDE.md INV-6）以上、フィクスチャは常に生成する必要があり、
+    // その作法をモジュールごとに書くと必ず食い違う。
+    `java-test-fixtures`
+}
+
 // 確定的処理のみ。外部ネットワーク通信を一切行わない。
 //
 // CLAUDE.md INV-1: このファイルに pdf-ai が現れることは絶対にない。
@@ -6,6 +13,9 @@
 dependencies {
     implementation(libs.pdfbox)
     implementation(libs.poi.ooxml)
+
+    // api にしない。TestPdfs が返すのは Path だけであり、PDDocument を下流へ見せる必要はない。
+    testFixturesImplementation(libs.pdfbox)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
