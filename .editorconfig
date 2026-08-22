@@ -1,0 +1,33 @@
+# 整形の判断は Spotless が正である（CLAUDE.md「整形」）。このファイルの役目は 2 つ。
+#
+# 1. IDE の整形を palantir / ktlint に寄せ、spotlessApply のたびに書き戻される往復を減らす
+# 2. ★ ktlint はこのファイルを読む（editorConfigPath の既定がトッププロジェクトの .editorconfig）。
+#    **ここに書いた値は Spotless の挙動そのものを変える。触ったら ./gradlew spotlessApply を
+#    掛けて差分が出ないことを確かめること。**
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# Windows のシェルが読むものだけは CRLF（.gitattributes と対。片方だけ変えないこと）。
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+# palantir-java-format は .editorconfig を読まない。ここは IDE に同じ形を教えるためだけにある。
+[*.java]
+indent_size = 4
+max_line_length = 120
+
+# ★ ここは ktlint が読む。ktlint_official は ktlint の既定であり、書いてあるのは意図の表明。
+#   indent_size / max_line_length は **書かない**。既定から外れる値を置くと *.gradle.kts が
+#   一斉に書き換わる。
+[*.{kt,kts}]
+ktlint_code_style = ktlint_official
+
+[*.{yml,yaml,toml}]
+indent_size = 2

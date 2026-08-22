@@ -30,6 +30,8 @@ Claude Code への引き継ぎ文書。
 | 最小 Windows | 10 21H2 (x64) | サポート終了済みの古いビルドを切る |
 | JavaFX ランタイム | Gluon の jmods を Gradle で取得 | JavaFX 同梱 JDK を全員に強いない |
 | MSI UpgradeCode | `3210BCE4-3635-4EFC-8EC1-DC77881091BB` | **二度と変えない。** 変えると旧版が残る |
+| ブランチ | `develop` 単線。`main` はリリース時に作る | 下記「ブランチをどう使っているか」 |
+| 整形 | Spotless（palantir / ktlint） | 下記「整形を Spotless に寄せた」 |
 
 ---
 
@@ -853,12 +855,58 @@ palantir と ktlint の座標を `libs.versions.toml` の `[libraries]` に宣�
 `contents: write` を持つジョブを増やすことになり、得られるのは 1 コマンド打つ手間の
 削減でしかない。**割に合わないと判断した。**
 
+#### IDE を寄せる（.editorconfig）
+
+IDE が違う形に整えると、`spotlessApply` のたびに書き戻される往復が起きる。`.editorconfig` で
+IDE 側に同じ形を教えてある。
+
+★ **これは IDE 向けの無害な追加ではない。ktlint はこのファイルを読む**
+（`editorConfigPath` の既定がトッププロジェクトの `.editorconfig`）。そのため Kotlin セクションには
+`ktlint_code_style`（ktlint の既定と同じ値）だけを書き、`indent_size` / `max_line_length` は
+**書いていない**。既定から外れる値を置くと `*.gradle.kts` が一斉に書き換わる。
+**触ったら `./gradlew spotlessApply` を掛けて差分が出ないことを確かめること。**
+
+Java 側（`indent_size = 4` / `max_line_length = 120`）は IDE に palantir と同じ形を教えるためだけの
+もので、palantir 自身は `.editorconfig` を読まない。
+
+#### pre-push フックは入れていない
+
+Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotlessCheck` を走らせて、
+崩れていれば `spotlessApply` を自動実行して push を中断する。**採らなかった。**
+
+- 検査は既に 2 重にある——`CLAUDE.md` の規約（コミット前に `spotlessApply`）と、CI の
+  `spotlessCheck`（ubuntu で 1 分 10 秒で結果が出る）
+- ★ `.git/hooks` は git で共有されない。clone ごとに手で入れる必要があり、**入れ忘れると黙って
+  効かない**。`uiTest` を「ワークフローの `if` ではなくソースセットで担保する」と決めたのと
+  同じ理由で、**共有されない仕掛けより構造で担保された CI を採る**
+
+欲しくなったら各自で `./gradlew spotlessInstallGitPrePushHook` を実行すればよい。
+外すときは `.git/hooks/pre-push` を消す。
+
 #### blame
 
 改行の正規化と一括整形は `.git-blame-ignore-revs` に載せた。GitHub は自動で参照する。
 手元では `git config blame.ignoreRevsFile .git-blame-ignore-revs` が要る。
 **載せてよいのは中身を変えていないコミットだけである。**
 整形と実装が混ざったコミットを載せると、blame から本物の変更まで消える。
+
+---
+
+### ブランチをどう使っているか（2026-08-22）
+
+どこにも書いていなかったので残す。**2026-08-22 時点でタグは 0 本、GitHub Releases も 0 件**
+（v0.1.0 は未リリース）。
+
+- **`develop` が既定である。** GitHub の default branch も `develop`。開発はここに集まる
+- 作業は `feature/` `fix/` `chore/` `ci/` を切り、`--no-ff` で `develop` へマージする。
+  マージ済みのブランチは残さない（`git branch --merged develop` が `develop` だけになる状態を保つ）
+- **リリースは `v*` タグで走る**（`.github/workflows/release.yml` の `on.push.tags`）。
+  **ブランチは通らない。** 公開されるのは GitHub Releases に出るインストーラであって、
+  ブランチではない
+- ★ **`main` はまだ無い。** ローカルに初期コミットを指す残骸があったので消した。
+  **v0.1.0 のタグを打つときに、そのコミットから `main` を作って push する。**
+  以後 `main` は「公開済みの版」を指す。それまでは作らない——まだ公開していないものを
+  指す「公開用ブランチ」は嘘になる
 
 ---
 

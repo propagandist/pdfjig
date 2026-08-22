@@ -84,6 +84,7 @@ spotless {
             "gradle/libs.versions.toml",
             ".gitignore",
             ".gitattributes",
+            ".editorconfig",
             "**/*.css",
         )
         // processResources が css を build/ へ写す。dist/ は jpackage の成果物。

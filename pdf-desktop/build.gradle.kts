@@ -44,7 +44,7 @@ application {
 // 配布対象と同じ描画経路を通る点でも、そちらのほうが検証として正直である。
 // ─────────────────────────────────────────────────────────────────────────────
 
-val uiTest by sourceSets.creating
+val uiTest = sourceSets.create("uiTest")
 
 uiTest.compileClasspath += sourceSets.main.get().output
 uiTest.runtimeClasspath += sourceSets.main.get().output
