@@ -123,7 +123,29 @@ jobs:
             "{0}  {1:N1} MB" -f $file, ($size / 1MB)
           }
 
-          # GUI の実起動は Monocle 等が要るためここでは行わない。実機での確認で担保する。
+      # 中身が揃っていることと、それが実際に立ち上がることは別である。
+      # 確かめるのは ZIP だけにしてある。MSI / EXE を入れると、消すところまで含めないと
+      # 片手落ちになり、失敗したときにランナーの状態が壊れる。
+      # インストーラの挙動は引き続き人が見る（docs/HANDOVER.md 4-4）。
+      #
+      # ★ shell は powershell（Windows PowerShell 5.1）でなければならない。
+      #   このワークフローの既定は pwsh だが、UI Automation のアセンブリは
+      #   .NET Framework にしか無く、pwsh では Add-Type の時点で落ちる。
+      - name: ZIP から起動することを検める
+        shell: powershell
+        run: |
+          & "tools/smoke/Verify-AppImage.ps1" `
+            -ZipPath "dist/PDFjig-${{ steps.version.outputs.version }}-win-x64.zip" `
+            -ArtifactDir "$env:RUNNER_TEMP/smoke"
+
+      # UI Automation の失敗は理由が読めない。絵とプロセス一覧が無いと切り分けられない。
+      - name: 起動確認の証拠を上げる
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-evidence
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: ignore
 
       - name: チェックサムを作る
         run: |

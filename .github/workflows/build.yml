@@ -40,6 +40,19 @@ jobs:
       - name: Build
         run: ./gradlew build --stacktrace
 
+      # 画面を操作するテスト。デスクトップセッションを要するため windows でだけ回す。
+      #
+      # ★ ヘッドレス（Monocle）は使っていない。org.testfx:openjfx-monocle:21.0.2 は
+      #   JavaFX 21 で Window#_updateViewSize を実装しておらず、表示時に
+      #   AbstractMethodError になる（TestFX/Monocle#97）。ランナーは対話セッションを
+      #   持つのでそのまま動く。配布対象と同じ描画経路を通る点でも、こちらが正直である。
+      #
+      # ubuntu で走らせないのはソースセットで担保している（build には含まれない）。
+      # if だけに頼ると、uiTest が build に紛れ込んだとき黙って ubuntu でも動き出す。
+      - name: UI test
+        if: runner.os == 'Windows'
+        run: ./gradlew :pdf-desktop:uiTest --stacktrace
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
