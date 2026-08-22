@@ -58,11 +58,20 @@ updates:
       pdfbox:
         patterns:
           - "org.apache.pdfbox:*"
+      # ★ TestFX も単独で出す。版が動くとロボットの挙動そのものが変わる。
+      #   ReorderUiTest の Javadoc にある MoveRobotImpl のステップ刻みは実装依存で、
+      #   UI テストの所要時間も成否もそこで決まる。他の版上げとまとめると差分が読めない。
+      testfx:
+        patterns:
+          - "org.testfx:*"
       # テスト用の依存はまとめてよい。落ちれば分かる。
+      # hamcrest は TestFX の NodeQuery のシグネチャに Matcher が現れるためだけに
+      # 明示している依存なので、ここへ寄せる。
       test:
         patterns:
           - "org.junit*"
           - "com.tngtech.archunit:*"
+          - "org.hamcrest:*"
 
 # ★ JavaFX の版は JDK 21 に合わせて 21.x に留める。libs.versions.toml の `javafx` は
 #   openjfx の jmods（org.openjfx.jmods:jmods）の座標にも文字列で入っていて、major が
