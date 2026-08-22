@@ -821,6 +821,20 @@ palantir と ktlint の座標を `libs.versions.toml` の `[libraries]` に宣�
 （`.github/dependabot.yml`）。連動して整形結果を変えるものを別々に受けると、
 `spotlessApply` を 3 回掛けることになるためである。
 
+**2026-08-22 の update job で実際に確かめた。** グループ化した直後に Dependabot が設定を
+読み直して走り、次のことが分かった。
+
+- **Dependabot は `[plugins]` を見ている。** `com.diffplug.spotless` は素の id のまま
+  Dependency Snapshot に現れ、`formatting` グループに入った。マーカー座標
+  （`…:com.diffplug.spotless.gradle.plugin`）にはならない
+- **`[libraries]` に宣言しただけの palantir / ktlint も追われている。**
+  「Dependabot に版を追わせるためだけの宣言」は狙いどおりに効いている
+- ★ **`javafx = "21.0.7"` は追われていない。** Dependency Snapshot に出るのは
+  `org.openjfx.javafxplugin`（プラグイン側、`version.ref` は `openjfx-plugin`）であり、
+  `[versions]` の `javafx` はどの `[libraries]` からも `version.ref` されていないため
+  視界に入らない。**JDK 21 に留める方針の間は実害がないが、誰も追っていないことは事実である。**
+  追わせるなら `org.openjfx.jmods:jmods` を `[libraries]` に宣言する
+
 #### 整形ツールの版が上がったとき
 
 `formatting` グループの PR は **CI が落ちることがある。壊れているのではない。**

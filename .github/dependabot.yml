@@ -82,10 +82,11 @@ updates:
       # ★ major が上がったときは特に見ること。ktlint 2.0 は ktlint_official のルールが
       #   変わり、受けると全 *.gradle.kts が書き換わりうる。
       #
-      # com.diffplug.spotless の末尾がワイルドカードなのは、libs.versions.toml の [plugins]
-      # がマーカー座標（com.diffplug.spotless:com.diffplug.spotless.gradle.plugin）として
-      # 扱われる場合も拾うため。**Dependabot が [plugins] を見るかは実走で確かめていない**
-      # （JavaFX と同じ状況）。[libraries] に宣言した palantir / ktlint の 2 座標は確実に来る。
+      # 2026-08-22 の update job で確かめた。**Dependabot は [plugins] を見ている**——
+      # com.diffplug.spotless は素の id のまま来て、3 つとも formatting に入った。
+      # 末尾のワイルドカードは、マーカー座標
+      # （com.diffplug.spotless:com.diffplug.spotless.gradle.plugin）で来る形に変わった
+      # ときのための保険であり、今は無くても一致する。
       formatting:
         patterns:
           - "com.diffplug.spotless*"
@@ -95,5 +96,10 @@ updates:
 # ★ JavaFX の版は JDK 21 に合わせて 21.x に留める。libs.versions.toml の `javafx` は
 #   openjfx の jmods（org.openjfx.jmods:jmods）の座標にも文字列で入っていて、major が
 #   上がると jpackage が作るランタイムイメージが JDK 21 と噛み合わなくなる。
-#   Dependabot がこの版を拾うかどうかは実走で確かめていないので、ignore は書いていない。
-#   **JavaFX の PR が来たら、まず major が上がっていないかを見ること。**
+#
+#   2026-08-22 の update job で確かめた。**Dependabot は `javafx` を見ていない。**
+#   Dependency Snapshot に出たのは org.openjfx.javafxplugin（[plugins] の側、version.ref は
+#   openjfx-plugin）であって、[versions] の `javafx` はどの [libraries] からも version.ref
+#   されていないため視界に入らない。ignore が要らない代わりに、**この版は誰も追っていない。**
+#   21.x に留める方針の間は実害がないが、**JDK を上げるときは手で見ること。**
+#   追わせたいなら org.openjfx.jmods:jmods を [libraries] に宣言する（座標は実在する）。
