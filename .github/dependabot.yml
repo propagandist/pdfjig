@@ -72,6 +72,25 @@ updates:
           - "org.junit*"
           - "com.tngtech.archunit:*"
           - "org.hamcrest:*"
+      # 整形ツールは 1 本にまとめる。3 つは連動して整形結果を変えるため、別々に来ると
+      # spotlessApply を 3 回掛けることになる。
+      #
+      # ★ この PR は CI が落ちることがある。版が上がると整形規則が変わり、既存コードが
+      #   新しい規則を満たさなくなるためである。**壊れているのではない。**
+      #   直し方は HANDOVER.md「整形ツールの版が上がったとき」。
+      #
+      # ★ major が上がったときは特に見ること。ktlint 2.0 は ktlint_official のルールが
+      #   変わり、受けると全 *.gradle.kts が書き換わりうる。
+      #
+      # com.diffplug.spotless の末尾がワイルドカードなのは、libs.versions.toml の [plugins]
+      # がマーカー座標（com.diffplug.spotless:com.diffplug.spotless.gradle.plugin）として
+      # 扱われる場合も拾うため。**Dependabot が [plugins] を見るかは実走で確かめていない**
+      # （JavaFX と同じ状況）。[libraries] に宣言した palantir / ktlint の 2 座標は確実に来る。
+      formatting:
+        patterns:
+          - "com.diffplug.spotless*"
+          - "com.palantir.javaformat:*"
+          - "com.pinterest.ktlint:*"
 
 # ★ JavaFX の版は JDK 21 に合わせて 21.x に留める。libs.versions.toml の `javafx` は
 #   openjfx の jmods（org.openjfx.jmods:jmods）の座標にも文字列で入っていて、major が
