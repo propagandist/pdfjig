@@ -79,6 +79,17 @@ val uiTestTask = tasks.register<Test>("uiTest") {
     // 画面を掴むテストが 2 つ同時に動くと、片方のクリックがもう片方の窓へ行く。
     maxParallelForks = 1
 
+    // ★ 開始も出す。完了したものしか出さないと、ハングしたときに「どのテストで止まったか」が
+    //   ログに残らず、最後に PASSED した次を推測するしかない。2026-08-22 にそこで誤診した
+    //   （古いブランチで ReorderUiTest が除外されずに走っていただけなのを、JUnit の版差だと
+    //   読んだ）。ジョブ側に出るのは "The operation was canceled." の 1 行だけである。
+    //
+    //   通常の test には足さない。あちらは 121 本あって数十ミリ秒で終わる。
+    //   ここは 25 本で、1 本が数分に伸びうる側である。
+    testLogging {
+        setEvents(listOf("started", "passed", "skipped", "failed"))
+    }
+
     shouldRunAfter(tasks.named("test"))
 }
 
