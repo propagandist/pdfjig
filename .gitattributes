@@ -1,0 +1,22 @@
+# 改行コードはリポジトリで固定する。書いた環境（Windows / WSL / CI ランナー）で混ざると、
+# 中身を変えていないファイルが差分に出てレビューが読めなくなる。
+#
+# Spotless の lineEndings には GIT_ATTRIBUTES を指定してあり、判断はこのファイルが正である
+# （build.gradle.kts の spotless ブロック）。**片方だけ変えないこと。**
+* text=auto eol=lf
+
+# Windows のシェルが読むものだけは CRLF でなければならない。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# gradlew は ubuntu ランナーが sh で実行する。CRLF になると起動しない。
+gradlew text eol=lf
+
+# 触らせない。
+*.pdf binary
+*.ico binary
+*.png binary
+*.jar binary
+*.msi binary
+*.exe binary
