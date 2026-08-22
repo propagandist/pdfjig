@@ -171,6 +171,21 @@ public final class PageOrder {
         return List.copyOf(segments);
     }
 
+    /**
+     * 1 ページずつに切り分けたページ列。分割で使う。
+     *
+     * <p><b>区切りは見ない。</b>「1 ページずつ」に切れ目の判断は無く、区切りを介す意味が
+     * ないためである。付けてある区切りもそのまま残る（{@link #toSegments()} と違い、
+     * この操作は区切りを書き換えない）。
+     *
+     * <p>対象は編集中の並びであり、並べ替え・削除・回転は反映される。
+     *
+     * @return 1 ページだけを持つかたまりの列
+     */
+    public List<List<PageSelection>> toSinglePageSegments() {
+        return pages.stream().map(entry -> List.of(entry.selection())).toList();
+    }
+
     /** 区切りで分かれるファイルの数。 */
     public int segmentCount() {
         return breakCount() + 1;

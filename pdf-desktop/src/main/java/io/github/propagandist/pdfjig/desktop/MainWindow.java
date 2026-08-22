@@ -95,6 +95,9 @@ public final class MainWindow {
     /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
     private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
 
+    /** いま並んでいるページ数。1 枚ずつの分割が使えるかの判定に使う。 */
+    private final IntegerProperty pageCount = new SimpleIntegerProperty(0);
+
     /** ページ並びが変わるたびに表示を更新する。 */
     private final ListChangeListener<PageEntry> orderListener = change -> onOrderChanged();
 
@@ -194,6 +197,7 @@ public final class MainWindow {
             Action reset,
             Action add,
             Action split,
+            Action splitPages,
             Action about) {
     }
 
@@ -207,6 +211,11 @@ public final class MainWindow {
                 .or(thumbnails.selectedIndexProperty().lessThan(1));
 
         ObservableValue<Boolean> noBreaks = documentOpen.not().or(busy).or(breakCount.isEqualTo(0));
+
+        // 1 ページしかなければ 1 枚ずつには分けられない。できるのは元と同じ 1 ファイルだけで、
+        // 区切りが無いときと違って利用者に打つ手も無い。断るより初めから押させない。
+        ObservableValue<Boolean> notSplittable =
+                documentOpen.not().or(busy).or(pageCount.lessThan(2));
 
         return new Actions(
                 new Action("open", "開く…", "開く", ToolIcons.OPEN,
@@ -241,6 +250,8 @@ public final class MainWindow {
                         null, this::addDocuments, needsDocument),
                 new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT,
                         null, this::splitDocument, needsDocument),
+                new Action("split-pages", "1 ページずつに分割…", "1 枚ずつ", ToolIcons.SPLIT_PAGES,
+                        null, this::splitIntoSinglePages, notSplittable),
                 // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
                 new Action("about", AppInfo.NAME + " について", null, null,
                         null, this::showAbout, null));
@@ -261,7 +272,8 @@ public final class MainWindow {
                         new SeparatorMenuItem(),
                         menuItem(actions.reset())),
                 new Menu("ツール", null,
-                        menuItem(actions.add()), menuItem(actions.split())),
+                        menuItem(actions.add()), menuItem(actions.split()),
+                        menuItem(actions.splitPages())),
                 new Menu("ヘルプ", null, menuItem(actions.about())));
     }
 
@@ -281,7 +293,8 @@ public final class MainWindow {
                 toolButton(actions.keepRange()), toolButton(actions.toggleBreak()),
                 toolButton(actions.reset()),
                 new Separator(),
-                toolButton(actions.add()), toolButton(actions.split()));
+                toolButton(actions.add()), toolButton(actions.split()),
+                toolButton(actions.splitPages()));
     }
 
     private MenuItem menuItem(Action action) {
@@ -533,19 +546,17 @@ public final class MainWindow {
     /** 並びが変わると、枚数の内訳も変わる。 */
     private void onOrderChanged() {
         breakCount.set(session == null ? 0 : session.order().breakCount());
+        pageCount.set(session == null ? 0 : session.order().size());
         legend.update(session);
         updateStatus();
     }
 
     /**
-     * 現在の文書を分割する。
+     * 区切りに従って分割する。
      *
      * <p>切り出すのは <b>編集中の並び</b> である。pdf-core の分割は元の並びを対象に
      * するためここでは使わない。並べ替えや削除をした後で分割したとき、それが
      * 反映されない結果を渡すほうが利用者を惑わせる。
-     */
-    /**
-     * 区切りに従って分割する。
      *
      * <p>区切りが 1 つも無いときは何もしない。全ページを 1 ファイルに書き出しても
      * 分割にならず、黙ってそうするより、区切りが要ることを伝えるほうが正直である。
@@ -562,17 +573,48 @@ public final class MainWindow {
                             + System.lineSeparator()
                             + "新しいファイルの先頭にするページを選び、「ここで区切る」を押してください。"
                             + System.lineSeparator()
-                            + "枚数で機械的に区切るなら「N ページごとに区切る…」を使います。");
+                            + "枚数で機械的に区切るなら「N ページごとに区切る…」を使います。"
+                            + System.lineSeparator()
+                            + "1 枚ずつバラすなら「1 ページずつに分割…」を使います。");
             return;
         }
+        writeSegments(order.toSegments());
+    }
 
+    /**
+     * すべてのページを 1 枚ずつのファイルにする。
+     *
+     * <p><b>区切りは見ない。</b>切れ目に判断の余地が無く、確かめるべきものが無いためである。
+     * 「区切りを入れる操作と書き出す操作を分ける」判断（HANDOVER.md）は、どこで切るかに
+     * 選択の余地がある場合のものであり、ここには当たらない。
+     *
+     * <p>画面の区切りも変えない。付けてある区切りを黙って消さないためである。
+     *
+     * <p>1 ページの文書では呼ばれない。1 ファイルができるだけで分割にならず、
+     * 区切りのときと違って利用者に打つ手も無いので、操作そのものを無効にしてある。
+     */
+    private void splitIntoSinglePages() {
+        if (session == null) {
+            return;
+        }
+        writeSegments(session.order().toSinglePageSegments());
+    }
+
+    /**
+     * 切り分けたページ列を書き出す。
+     *
+     * <p>保存先を尋ねてから非同期で書く。既に同名のファイルがあれば 1 つも書かずに
+     * 失敗する（{@link #splitInto}）。上書きするかどうかは利用者の判断である。
+     *
+     * @param segments かたまりごとのページ指定。先頭から順に連番で書き出す
+     */
+    private void writeSegments(List<List<PageSelection>> segments) {
         Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
         if (directory.isEmpty()) {
             return;
         }
 
         List<Path> sources = session.paths();
-        List<List<PageSelection>> segments = order.toSegments();
         String baseName = baseNameOf(session.path());
         Path outputDir = directory.get();
         folders.rememberWrittenFolder(outputDir);
@@ -621,7 +663,7 @@ public final class MainWindow {
 
         documentOpen.set(true);
         updateTitle();
-        updateStatus();
+        onOrderChanged();
     }
 
     private void closeSession() {
@@ -637,7 +679,7 @@ public final class MainWindow {
 
         documentOpen.set(false);
         updateTitle();
-        updateStatus();
+        onOrderChanged();
     }
 
     /**
