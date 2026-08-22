@@ -34,6 +34,8 @@ final class PageRangePrompt {
     static Optional<PageRange> ask(Stage owner, int pageCount) {
         Spinner<Integer> first = new Spinner<>(1, pageCount, 1);
         Spinner<Integer> last = new Spinner<>(1, pageCount, pageCount);
+        first.setId("range-first");
+        last.setId("range-last");
         first.setEditable(true);
         last.setEditable(true);
 
@@ -46,8 +48,10 @@ final class PageRangePrompt {
         Dialog<PageRange> dialog = new Dialog<>();
         dialog.initOwner(owner);
         dialog.setTitle("範囲の指定");
+        dialog.getDialogPane().setId("range-dialog");
         dialog.getDialogPane().setContent(content);
         dialog.getDialogPane().getButtonTypes().addAll(keep, ButtonType.CANCEL);
+        dialog.getDialogPane().lookupButton(keep).setId("range-keep");
 
         // 始点が終点を越えた指定は、そもそも押せないようにする。
         dialog.getDialogPane()

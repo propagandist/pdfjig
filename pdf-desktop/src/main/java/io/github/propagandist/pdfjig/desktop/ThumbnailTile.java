@@ -172,6 +172,8 @@ final class ThumbnailTile {
 
         root.setVisible(true);
         root.setManaged(true);
+        // タイルは行ごと使い回される。受け持つページが変われば id も変わる。
+        root.setId("thumbnail-tile-" + pageIndex);
         // このタイルが受け持つページが変わったので、選択枠を当て直す。
         applySelected(pageIndex, grid.selectedIndex());
         // 帯の有無は並びの中身ではなく、いくつのファイルを含んでいるかで決まる。
@@ -272,6 +274,8 @@ final class ThumbnailTile {
         cancelPending();
         index = -1;
         shown = null;
+        // 空きタイルに古い id を残さない。残すと、同じ id の節点が一覧に 2 つ並びうる。
+        root.setId(null);
         imageView.setImage(null);
         root.setVisible(false);
         root.setManaged(true);

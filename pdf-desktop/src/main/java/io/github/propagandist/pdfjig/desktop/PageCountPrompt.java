@@ -35,6 +35,7 @@ final class PageCountPrompt {
      */
     static Optional<Integer> ask(Stage owner, int pageCount, String baseName) {
         Spinner<Integer> spinner = new Spinner<>(1, pageCount, 1);
+        spinner.setId("page-count");
         spinner.setEditable(true);
 
         Label summary = new Label();
@@ -61,8 +62,10 @@ final class PageCountPrompt {
         Dialog<Integer> dialog = new Dialog<>();
         dialog.initOwner(owner);
         dialog.setTitle("分割");
+        dialog.getDialogPane().setId("page-count-dialog");
         dialog.getDialogPane().setContent(content);
         dialog.getDialogPane().getButtonTypes().addAll(split, ButtonType.CANCEL);
+        dialog.getDialogPane().lookupButton(split).setId("page-count-split");
         dialog.setResultConverter(button -> {
             if (button != split) {
                 return null;

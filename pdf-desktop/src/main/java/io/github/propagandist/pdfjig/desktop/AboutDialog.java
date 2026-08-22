@@ -49,6 +49,7 @@ final class AboutDialog {
         Label version = new Label("バージョン " + AppInfo.version());
 
         Label ai = detail(AppInfo.aiStatus(aiAvailable));
+        ai.setId("about-ai");
 
         Label copyright = new Label(AppInfo.COPYRIGHT);
         copyright.getStyleClass().add("about-detail");
@@ -94,8 +95,10 @@ final class AboutDialog {
         dialog.initOwner(owner);
         dialog.setTitle("バージョン情報");
         dialog.setHeaderText(null);
+        dialog.getDialogPane().setId("about-dialog");
         dialog.getDialogPane().setContent(content);
         dialog.getDialogPane().getButtonTypes().addAll(copy, ButtonType.CLOSE);
+        dialog.getDialogPane().lookupButton(ButtonType.CLOSE).setId("about-close");
         // ボタンで閉じるには結果を返す必要がある。見せるだけのダイアログなので値は持たない。
         dialog.setResultConverter(button -> null);
 

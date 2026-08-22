@@ -8,7 +8,6 @@ import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Warning;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,9 +51,6 @@ import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
-import javafx.stage.DirectoryChooser;
-import javafx.stage.FileChooser;
-import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
 
 /**
@@ -86,6 +82,9 @@ public final class MainWindow {
     /** ダイアログを始めるフォルダ。読む用と書く用を分けて覚える。 */
     private final RecentFolders folders = new RecentFolders();
 
+    /** ファイルとフォルダを選ばせる手段。テストではここを差し替える。 */
+    private final FileDialogs dialogs;
+
     private final Label status = new Label();
 
     /** 進行中の操作がある間は true。操作の重ね掛けを防ぐ。 */
@@ -102,9 +101,23 @@ public final class MainWindow {
     private DocumentSession session;
 
     public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
+        this(stage, aiProvider, hostServices, new NativeFileDialogs(stage));
+    }
+
+    /**
+     * ファイル選択の手段を指定して作る。
+     *
+     * <p>Windows の共通ダイアログは自動テストから操作できない。差し替えられるのは
+     * この経路だけであり、画面の操作を試すテストはここから組み立てる。
+     *
+     * @param dialogs ファイルとフォルダを選ばせる手段
+     */
+    MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices,
+            FileDialogs dialogs) {
         this.stage = stage;
         this.aiProvider = aiProvider;
         this.hostServices = hostServices;
+        this.dialogs = dialogs;
     }
 
     /**
@@ -117,6 +130,8 @@ public final class MainWindow {
         legend.setOnRemove(this::removeSource);
 
         Actions actions = buildActions();
+
+        status.setId("status-label");
 
         HBox statusBar = new HBox(status);
         statusBar.getStyleClass().add("status-bar");
@@ -143,6 +158,9 @@ public final class MainWindow {
      * <p>文言・ショートカット・有効条件・処理をここにまとめてある。メニューとツールバーで
      * 別々に書くと、片方だけ直したときに挙動がずれる。
      *
+     * @param id           節点に付ける識別子。{@code menu-} / {@code tool-} を冠して使う。
+     *                     テストが文言ではなくこれで節点を掴めるようにするためのもので、
+     *                     文言を変えてもテストが落ちないための逃げ道である
      * @param menuText     メニューに出す文言
      * @param toolText     ツールバーに出す文言。{@code null} ならツールバーには出さない
      * @param icon         ツールバーのアイコン（{@link ToolIcons} の SVG パス）
@@ -151,6 +169,7 @@ public final class MainWindow {
      * @param disabled     無効にする条件
      */
     private record Action(
+            String id,
             String menuText,
             String toolText,
             String icon,
@@ -190,40 +209,40 @@ public final class MainWindow {
         ObservableValue<Boolean> noBreaks = documentOpen.not().or(busy).or(breakCount.isEqualTo(0));
 
         return new Actions(
-                new Action("開く…", "開く", ToolIcons.OPEN,
+                new Action("open", "開く…", "開く", ToolIcons.OPEN,
                         new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN),
                         this::openDocument, busy),
-                new Action("名前を付けて保存…", "保存", ToolIcons.SAVE,
+                new Action("save", "名前を付けて保存…", "保存", ToolIcons.SAVE,
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
                         this::saveAs, needsDocument),
-                new Action("閉じる", null, null, null, this::closeSession, needsDocument),
-                new Action("終了", null, null, null, stage::close, null),
-                new Action("選択したページを削除", "削除", ToolIcons.DELETE,
+                new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
+                new Action("quit", "終了", null, null, null, stage::close, null),
+                new Action("delete", "選択したページを削除", "削除", ToolIcons.DELETE,
                         new KeyCodeCombination(KeyCode.DELETE),
                         this::deleteSelected, needsDocument),
-                new Action("右に 90 度回転", "右に回転", ToolIcons.ROTATE_RIGHT,
+                new Action("rotate-right", "右に 90 度回転", "右に回転", ToolIcons.ROTATE_RIGHT,
                         new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.CLOCKWISE_90), needsDocument),
-                new Action("左に 90 度回転", "左に回転", ToolIcons.ROTATE_LEFT,
+                new Action("rotate-left", "左に 90 度回転", "左に回転", ToolIcons.ROTATE_LEFT,
                         new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90), needsDocument),
-                new Action("範囲を指定して残す…", "範囲", ToolIcons.RANGE,
+                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE,
                         null, this::keepRange, needsDocument),
-                new Action("ここで区切る / 区切りを外す", "区切り", ToolIcons.BREAK,
+                new Action("toggle-break", "ここで区切る / 区切りを外す", "区切り", ToolIcons.BREAK,
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
                         this::toggleBreak, breakUnavailable),
-                new Action("N ページごとに区切る…", null, null,
+                new Action("break-every-n", "N ページごとに区切る…", null, null,
                         null, this::breakEveryNPages, needsDocument),
-                new Action("区切りをすべて外す", null, null,
+                new Action("clear-breaks", "区切りをすべて外す", null, null,
                         null, this::clearBreaks, noBreaks),
-                new Action("編集を元に戻す", "元に戻す", ToolIcons.RESET,
+                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET,
                         null, this::resetOrder, needsDocument),
-                new Action("PDF を追加…", "追加", ToolIcons.ADD,
+                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD,
                         null, this::addDocuments, needsDocument),
-                new Action("この文書を分割…", "分割", ToolIcons.SPLIT,
+                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT,
                         null, this::splitDocument, needsDocument),
                 // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
-                new Action(AppInfo.NAME + " について", null, null,
+                new Action("about", AppInfo.NAME + " について", null, null,
                         null, this::showAbout, null));
     }
 
@@ -267,6 +286,7 @@ public final class MainWindow {
 
     private MenuItem menuItem(Action action) {
         MenuItem item = new MenuItem(action.menuText());
+        item.setId("menu-" + action.id());
         item.setOnAction(event -> action.handler().run());
         if (action.accelerator() != null) {
             item.setAccelerator(action.accelerator());
@@ -279,8 +299,13 @@ public final class MainWindow {
 
     private Button toolButton(Action action) {
         Button button = new Button(action.toolText(), ToolIcons.of(action.icon()));
+        button.setId("tool-" + action.id());
         button.getStyleClass().add("tool-button");
         button.setContentDisplay(ContentDisplay.TOP);
+        // Windows の UI Automation から見えるのはこの名前だけで、setId は届かない
+        // （JavaFX は AutomationId に内部の連番を返す）。Labeled の既定でも同じ値になるが、
+        // 明示しておかないと「文言を変えると外側の起動確認が壊れる」ことが読めない。
+        button.setAccessibleText(action.toolText());
         // Tab の巡回はサムネイル一覧に集める。操作の対象はページであって、ボタンではない。
         button.setFocusTraversable(false);
         button.setOnAction(event -> action.handler().run());
@@ -350,36 +375,22 @@ public final class MainWindow {
     }
 
     private void openDocument() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("PDF を開く");
-        chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
-        readingFolder().ifPresent(chooser::setInitialDirectory);
-
-        File chosen = chooser.showOpenDialog(stage);
-        if (chosen == null) {
-            return;
-        }
-        open(chosen.toPath());
+        dialogs.openPdf(readingFolder().orElse(null)).ifPresent(this::open);
     }
 
     private void saveAs() {
         if (session == null) {
             return;
         }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("名前を付けて保存");
-        chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
-        chooser.setInitialFileName(suggestedFileName());
-        writingFolder().ifPresent(chooser::setInitialDirectory);
-
-        File chosen = chooser.showSaveDialog(stage);
-        if (chosen == null) {
+        Optional<Path> chosen =
+                dialogs.savePdf(writingFolder().orElse(null), suggestedFileName());
+        if (chosen.isEmpty()) {
             return;
         }
 
         List<Path> sources = session.paths();
         List<PageSelection> pages = session.order().toPageSelections();
-        Path output = chosen.toPath();
+        Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
         runAsync(() -> assemble(sources, pages, output), this::showWarnings);
@@ -428,18 +439,12 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("追加する PDF を選ぶ");
-        chooser.getExtensionFilters().add(new ExtensionFilter("PDF ファイル", "*.pdf"));
-        readingFolder().ifPresent(chooser::setInitialDirectory);
-
-        List<File> chosen = chooser.showOpenMultipleDialog(stage);
-        if (chosen == null) {
+        Optional<List<Path>> chosen = dialogs.openPdfs(readingFolder().orElse(null));
+        if (chosen.isEmpty()) {
             return;
         }
 
-        chosen.stream()
-                .map(File::toPath)
+        chosen.get().stream()
                 .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                 .forEach(this::addDocument);
     }
@@ -504,6 +509,8 @@ public final class MainWindow {
                 ButtonType.CANCEL);
         alert.setHeaderText("このファイルに対して行った並べ替えや回転も消えます。");
         alert.initOwner(stage);
+        alert.getDialogPane().setId("remove-source-dialog");
+        alert.getDialogPane().lookupButton(ButtonType.OK).setId("remove-source-ok");
         if (alert.showAndWait().filter(ButtonType.OK::equals).isEmpty()) {
             return;
         }
@@ -559,19 +566,15 @@ public final class MainWindow {
             return;
         }
 
-        DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("分割したファイルの保存先");
-        writingFolder().ifPresent(chooser::setInitialDirectory);
-
-        File directory = chooser.showDialog(stage);
-        if (directory == null) {
+        Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
+        if (directory.isEmpty()) {
             return;
         }
 
         List<Path> sources = session.paths();
         List<List<PageSelection>> segments = order.toSegments();
         String baseName = baseNameOf(session.path());
-        Path outputDir = directory.toPath();
+        Path outputDir = directory.get();
         folders.rememberWrittenFolder(outputDir);
 
         runAsync(
@@ -732,8 +735,8 @@ public final class MainWindow {
      * <p>まだ読んでいなければ、いま開いている文書の隣から始める。どちらも無ければ渡さない。
      * 未指定のときに出るのは Windows が覚えている場所であり、ホームに固定するより馴染みがある。
      */
-    private Optional<File> readingFolder() {
-        return folders.reading().or(this::documentFolder).map(Path::toFile);
+    private Optional<Path> readingFolder() {
+        return folders.reading().or(this::documentFolder);
     }
 
     /**
@@ -742,8 +745,8 @@ public final class MainWindow {
      * <p>まだ書き出していなければ、いま開いている文書の隣から始める。
      * 読む用とは分けてある。PDF を取ってくる場所と、整理した結果を置く場所は違うことが多い。
      */
-    private Optional<File> writingFolder() {
-        return folders.writing().or(this::documentFolder).map(Path::toFile);
+    private Optional<Path> writingFolder() {
+        return folders.writing().or(this::documentFolder);
     }
 
     /** いま開いている文書のあるフォルダ。開いた後に消えていることもあるので確かめる。 */
@@ -821,6 +824,8 @@ public final class MainWindow {
         Alert alert = new Alert(type, message, ButtonType.OK);
         alert.setHeaderText(null);
         alert.initOwner(stage);
+        alert.getDialogPane().setId("message-dialog");
+        alert.getDialogPane().lookupButton(ButtonType.OK).setId("message-ok");
         alert.showAndWait();
     }
 

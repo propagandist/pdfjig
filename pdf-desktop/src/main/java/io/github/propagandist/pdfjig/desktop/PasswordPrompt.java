@@ -40,6 +40,7 @@ final class PasswordPrompt {
      */
     static Optional<char[]> ask(Stage owner, Path path, boolean retry) {
         PasswordField field = new PasswordField();
+        field.setId("password-field");
         field.setPromptText("パスワード");
 
         Label explanation = new Label(path.getFileName() + " はパスワードで保護されています。");
@@ -54,8 +55,12 @@ final class PasswordPrompt {
         dialog.initOwner(owner);
         dialog.setTitle("パスワードの入力");
         dialog.setHeaderText(retry ? "パスワードが正しくありません。" : null);
+        dialog.getDialogPane().setId("password-dialog");
         dialog.getDialogPane().setContent(content);
         dialog.getDialogPane().getButtonTypes().addAll(unlock, ButtonType.CANCEL);
+        // ボタンは ButtonType から自動で作られる。id を付けられるのは追加した後だけ。
+        dialog.getDialogPane().lookupButton(unlock).setId("password-unlock");
+        dialog.getDialogPane().lookupButton(ButtonType.CANCEL).setId("password-cancel");
         dialog.setOnShown(event -> field.requestFocus());
 
         dialog.setResultConverter(button -> {

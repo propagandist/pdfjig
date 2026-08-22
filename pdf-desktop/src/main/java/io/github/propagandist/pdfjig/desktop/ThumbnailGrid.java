@@ -81,6 +81,7 @@ final class ThumbnailGrid {
     private Runnable onDelete = () -> { };
 
     ThumbnailGrid() {
+        rows.setId("thumbnail-list");
         rows.getStyleClass().add("thumbnail-list");
         rows.setPlaceholder(new Label("PDF を開いてください。"));
         rows.setCellFactory(view -> new RowCell(this));
