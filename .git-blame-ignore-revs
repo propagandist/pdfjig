@@ -1,0 +1,14 @@
+# 中身を変えていない一括変更のコミット。git blame から外す。
+#
+# GitHub はこのファイルを自動で参照する。手元では一度だけ次を実行すること:
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# ★ 載せてよいのは「中身を変えていないコミット」だけである。
+#   整形と実装が混ざったコミットを載せると、blame から本物の変更まで消える。
+
+# chore: 改行コードを LF に固定する
+0271c9aa609658eb4b6b49930d8a0cafdab5cd36
+
+# style: Spotless を全体に掛ける
+9e19ea694a037b1875ce3cc923c2295ea59c226c
