@@ -322,6 +322,48 @@ class PageOrderTest {
     }
 
     @Test
+    @DisplayName("1 ページずつに切り分ける")
+    void splitsIntoSinglePages() {
+        PageOrder order = PageOrder.of(5);
+
+        List<List<PageSelection>> segments = order.toSinglePageSegments();
+
+        assertEquals(5, segments.size());
+        assertEquals(List.of(1, 1, 1, 1, 1), segments.stream().map(List::size).toList());
+        assertEquals(List.of(1, 2, 3, 4, 5), firstPageNumbersOf(segments));
+    }
+
+    @Test
+    @DisplayName("1 ページずつの切り分けは区切りを見ず、付いている区切りも消さない")
+    void ignoresBreaksWhenSplittingIntoSinglePages() {
+        PageOrder order = PageOrder.of(5);
+        order.toggleBreakAt(2);
+        order.toggleBreakAt(4);
+
+        List<List<PageSelection>> segments = order.toSinglePageSegments();
+
+        // 区切りが 2 つあっても 3 つには分かれない。
+        assertEquals(5, segments.size());
+        // 付けてある区切りはそのまま残る。書き出しても画面の状態は変わらない。
+        assertEquals(2, order.breakCount());
+    }
+
+    @Test
+    @DisplayName("1 ページずつの切り分けは編集後の並びと向きに従う")
+    void followsTheEditedOrderWhenSplittingIntoSinglePages() {
+        PageOrder order = PageOrder.of(4);
+        order.removeAt(0);
+        order.move(2, 0);
+        order.rotateAt(0, Rotation.CLOCKWISE_90);
+
+        List<List<PageSelection>> segments = order.toSinglePageSegments();
+
+        // 1 枚消して、末尾を先頭へ動かして、その 1 枚を回した後の並び。
+        assertEquals(List.of(4, 2, 3), firstPageNumbersOf(segments));
+        assertEquals(Rotation.CLOCKWISE_90, segments.get(0).get(0).additionalRotation());
+    }
+
+    @Test
     @DisplayName("枚数ごとに区切り直すと、前の区切りは残らない")
     void replacesBreaksWhenApplyingEveryNPages() {
         PageOrder order = PageOrder.of(6);
@@ -404,5 +446,9 @@ class PageOrderTest {
 
     private static List<Integer> pageNumbersOf(PageOrder order) {
         return order.toPageSelections().stream().map(PageSelection::pageNumber).toList();
+    }
+
+    private static List<Integer> firstPageNumbersOf(List<List<PageSelection>> segments) {
+        return segments.stream().map(segment -> segment.get(0).pageNumber()).toList();
     }
 }

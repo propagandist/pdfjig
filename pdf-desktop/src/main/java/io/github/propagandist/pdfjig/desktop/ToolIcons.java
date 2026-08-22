@@ -60,6 +60,10 @@ final class ToolIcons {
     static final String SPLIT =
             "M4 4h6v16H4zM14 4h6v16h-6z";
 
+    /** 1 ページずつに分割。細く分かれた 3 枚。分割との違いが数で読める。 */
+    static final String SPLIT_PAGES =
+            "M3 4h4v16H3zM10 4h4v16h-4zM17 4h4v16h-4z";
+
     /** 範囲を指定して残す。左右の括弧。 */
     static final String RANGE =
             "M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3";
