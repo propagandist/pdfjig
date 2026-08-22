@@ -12,10 +12,13 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
 /**
- * 1 ファイルあたりのページ数を尋ねるダイアログ。分割で使う。
+ * 1 ファイルあたりのページ数を尋ねるダイアログ。枚数で区切り直すときに使う。
  *
- * <p>入力に追従して<b>何個のファイルがどんな名前でできるか</b>を出す。
- * 枚数だけを尋ねると、実行するまで結果が分からず、確かめるには一度書き出すしかない。
+ * <p><b>ここで決めるのは区切りだけで、書き出しはしない。</b>区切った結果を画面で
+ * 確かめてから「この文書を分割…」で書き出す。
+ *
+ * <p>入力に追従して<b>何個に分かれるか</b>を出す。枚数だけを尋ねると、実行するまで
+ * 結果が分からず、確かめるには一度書き出すしかない。
  */
 final class PageCountPrompt {
 
@@ -51,23 +54,23 @@ final class PageCountPrompt {
 
         VBox content = new VBox(
                 8,
-                new Label("いま並んでいる " + pageCount + " ページを、先頭から順に切り分けます。"),
+                new Label("いま並んでいる " + pageCount + " ページを、先頭から順に区切ります。"),
                 new Label("1 ファイルあたりのページ数"),
                 spinner,
                 summary);
         content.setPadding(new Insets(12));
 
-        ButtonType split = new ButtonType("分割", ButtonData.OK_DONE);
+        ButtonType apply = new ButtonType("区切る", ButtonData.OK_DONE);
 
         Dialog<Integer> dialog = new Dialog<>();
         dialog.initOwner(owner);
-        dialog.setTitle("分割");
+        dialog.setTitle("N ページごとに区切る");
         dialog.getDialogPane().setId("page-count-dialog");
         dialog.getDialogPane().setContent(content);
-        dialog.getDialogPane().getButtonTypes().addAll(split, ButtonType.CANCEL);
-        dialog.getDialogPane().lookupButton(split).setId("page-count-split");
+        dialog.getDialogPane().getButtonTypes().addAll(apply, ButtonType.CANCEL);
+        dialog.getDialogPane().lookupButton(apply).setId("page-count-apply");
         dialog.setResultConverter(button -> {
-            if (button != split) {
+            if (button != apply) {
                 return null;
             }
             // 手入力は自動では取り込まれない。確定させてから読む。
@@ -78,7 +81,7 @@ final class PageCountPrompt {
         return dialog.showAndWait();
     }
 
-    /** 何個のファイルが、どんな名前でできるか。 */
+    /** 何個に分かれ、分割したときどんな名前で出るか。 */
     private static String describe(int pageCount, Integer pagesPerFile, String baseName) {
         if (pagesPerFile == null) {
             return "";
@@ -88,8 +91,8 @@ final class PageCountPrompt {
         String last = nameOf(baseName, fileCount);
 
         return fileCount == 1
-                ? fileCount + " 個のファイルになります（" + first + "）"
-                : fileCount + " 個のファイルになります（" + first + " 〜 " + last + "）";
+                ? fileCount + " 個に分かれます（" + first + "）"
+                : fileCount + " 個に分かれます（" + first + " 〜 " + last + "）";
     }
 
     private static String nameOf(String baseName, int number) {
