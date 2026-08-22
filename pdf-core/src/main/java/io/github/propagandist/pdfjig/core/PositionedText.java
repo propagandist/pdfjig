@@ -14,8 +14,7 @@ package io.github.propagandist.pdfjig.core;
  * @param height   見た目の高さ
  * @param fontSize フォントサイズ（pt）
  */
-public record PositionedText(
-        String text, float x, float y, float width, float height, float fontSize) {
+public record PositionedText(String text, float x, float y, float width, float height, float fontSize) {
 
     public PositionedText {
         if (text == null) {

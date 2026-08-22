@@ -31,8 +31,7 @@ final class AppInfo {
     /** 値を読めなかった項目に出す文言。 */
     private static final String UNKNOWN = "不明";
 
-    private AppInfo() {
-    }
+    private AppInfo() {}
 
     /** ビルドが付けた版数。 */
     static String version() {
@@ -87,12 +86,7 @@ final class AppInfo {
      * @return 改行で区切った診断情報
      */
     static String diagnostics() {
-        return String.join(
-                System.lineSeparator(),
-                nameAndVersion(),
-                javaRuntime(),
-                javafxRuntime(),
-                operatingSystem());
+        return String.join(System.lineSeparator(), nameAndVersion(), javaRuntime(), javafxRuntime(), operatingSystem());
     }
 
     /** システムプロパティを読む。読めなくても表示を壊さない。 */

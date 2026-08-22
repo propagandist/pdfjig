@@ -21,8 +21,7 @@ public sealed interface SplitStrategy {
      * @param pages                 1 文書あたりのページ数
      * @param encryptionPropagation 入力が暗号化されていた場合の扱い
      */
-    record EveryNPages(int pages, EncryptionPropagation encryptionPropagation)
-            implements SplitStrategy {
+    record EveryNPages(int pages, EncryptionPropagation encryptionPropagation) implements SplitStrategy {
 
         public EveryNPages {
             if (pages < 1) {
@@ -41,8 +40,7 @@ public sealed interface SplitStrategy {
      * @param ranges                切り出す範囲。順序が出力の順序になる
      * @param encryptionPropagation 入力が暗号化されていた場合の扱い
      */
-    record ByRanges(List<PageRange> ranges, EncryptionPropagation encryptionPropagation)
-            implements SplitStrategy {
+    record ByRanges(List<PageRange> ranges, EncryptionPropagation encryptionPropagation) implements SplitStrategy {
 
         public ByRanges {
             if (ranges == null || ranges.isEmpty()) {

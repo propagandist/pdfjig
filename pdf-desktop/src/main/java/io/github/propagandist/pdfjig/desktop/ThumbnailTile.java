@@ -137,8 +137,7 @@ final class ThumbnailTile {
         // あれは全セルを作り直す（VirtualFlow が sheet を空にし、各セルを updateIndex(-1) する）。
         // 選択が動いて更新が要るのは旧選択と新選択の 2 枚だけであり、全部を作り直す理由がない。
         // 作り直すと、ドラッグのジェスチャの最中にタイルが入れ替わって掴んだページを見失う。
-        grid.selectedIndexProperty().addListener((observable, previous, current) ->
-                applySelected(current.intValue()));
+        grid.selectedIndexProperty().addListener((observable, previous, current) -> applySelected(current.intValue()));
 
         root.setOnMousePressed(this::select);
         root.setOnDragDetected(this::startDrag);
@@ -166,9 +165,7 @@ final class ThumbnailTile {
      */
     void show(int pageIndex, PageEntry entry) {
         PageSelection selection = entry.selection();
-        boolean samePage = index == pageIndex
-                && imageView.getImage() != null
-                && Objects.equals(shown, selection);
+        boolean samePage = index == pageIndex && imageView.getImage() != null && Objects.equals(shown, selection);
 
         root.setVisible(true);
         root.setManaged(true);
@@ -217,8 +214,7 @@ final class ThumbnailTile {
         task.setOnFailed(event -> {
             // 絵が出ないだけで操作は続けられる。黙って枠のままにせず、理由を添える。
             if (stillShowing(sourceIndex, pageNumber)) {
-                Tooltip.install(
-                        root, new Tooltip(grid.describe(shown) + "（表示できません）"));
+                Tooltip.install(root, new Tooltip(grid.describe(shown) + "（表示できません）"));
             }
         });
         pending = task;
@@ -264,9 +260,7 @@ final class ThumbnailTile {
 
     /** そのページをまだ表示しているか。同じページ番号でも文書が違えば別物である。 */
     private boolean stillShowing(int sourceIndex, int pageNumber) {
-        return shown != null
-                && shown.sourceIndex() == sourceIndex
-                && shown.pageNumber() == pageNumber;
+        return shown != null && shown.sourceIndex() == sourceIndex && shown.pageNumber() == pageNumber;
     }
 
     /** 余った桁を空にする。行の幅は保ったままにして、桁が詰まらないようにする。 */

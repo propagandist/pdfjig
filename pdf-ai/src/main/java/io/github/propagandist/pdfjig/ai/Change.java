@@ -7,5 +7,4 @@ package io.github.propagandist.pdfjig.ai;
  * @param before   元の値
  * @param after    提案後の値
  */
-public record Change(String location, String before, String after) {
-}
+public record Change(String location, String before, String after) {}

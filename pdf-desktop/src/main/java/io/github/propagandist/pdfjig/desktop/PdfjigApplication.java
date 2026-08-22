@@ -33,11 +33,10 @@ public final class PdfjigApplication extends Application {
         MainWindow window = new MainWindow(stage, aiProvider, getHostServices());
 
         Scene scene = new Scene(window.build(), INITIAL_WIDTH, INITIAL_HEIGHT);
-        scene.getStylesheets().add(
-                PdfjigApplication.class.getResource("pdfjig.css").toExternalForm());
+        scene.getStylesheets()
+                .add(PdfjigApplication.class.getResource("pdfjig.css").toExternalForm());
 
-        stage.getIcons().add(new Image(
-                PdfjigApplication.class.getResourceAsStream("pdfjig-256.png")));
+        stage.getIcons().add(new Image(PdfjigApplication.class.getResourceAsStream("pdfjig-256.png")));
 
         stage.setScene(scene);
         stage.setOnHidden(event -> window.dispose());

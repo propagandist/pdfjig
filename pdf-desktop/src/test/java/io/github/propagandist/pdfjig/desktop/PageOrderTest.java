@@ -108,7 +108,9 @@ class PageOrderTest {
         assertEquals(List.of(3, 1, 2), pageNumbersOf(order));
         assertEquals(
                 List.of(Rotation.CLOCKWISE_90, Rotation.NONE, Rotation.NONE),
-                order.toPageSelections().stream().map(PageSelection::additionalRotation).toList());
+                order.toPageSelections().stream()
+                        .map(PageSelection::additionalRotation)
+                        .toList());
     }
 
     @Test
@@ -158,9 +160,7 @@ class PageOrderTest {
                 assertThrows(PdfjigException.class, () -> order.removeAt(-1)).errorCode());
         assertEquals(
                 ErrorCode.PAGE_OUT_OF_RANGE,
-                assertThrows(
-                                PdfjigException.class,
-                                () -> order.rotateAt(5, Rotation.CLOCKWISE_90))
+                assertThrows(PdfjigException.class, () -> order.rotateAt(5, Rotation.CLOCKWISE_90))
                         .errorCode());
     }
 
@@ -183,9 +183,7 @@ class PageOrderTest {
     void exposesReadOnlyView() {
         PageOrder order = PageOrder.of(2);
 
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> order.pages().add(PageEntry.of(PageSelection.of(3))));
+        assertThrows(UnsupportedOperationException.class, () -> order.pages().add(PageEntry.of(PageSelection.of(3))));
     }
 
     @Test
@@ -306,7 +304,8 @@ class PageOrderTest {
         assertEquals(
                 List.of(List.of(1), List.of(2, 3, 4), List.of(5)),
                 order.toSegments().stream()
-                        .map(segment -> segment.stream().map(PageSelection::pageNumber).toList())
+                        .map(segment ->
+                                segment.stream().map(PageSelection::pageNumber).toList())
                         .toList());
         assertEquals(3, order.segmentCount());
     }
@@ -317,8 +316,11 @@ class PageOrderTest {
         PageOrder order = PageOrder.of(3);
 
         assertEquals(1, order.toSegments().size());
-        assertEquals(List.of(1, 2, 3),
-                order.toSegments().get(0).stream().map(PageSelection::pageNumber).toList());
+        assertEquals(
+                List.of(1, 2, 3),
+                order.toSegments().get(0).stream()
+                        .map(PageSelection::pageNumber)
+                        .toList());
     }
 
     @Test
@@ -426,7 +428,8 @@ class PageOrderTest {
 
         order.reset();
 
-        assertEquals(List.of("0:1", "0:2"),
+        assertEquals(
+                List.of("0:1", "0:2"),
                 order.toPageSelections().stream()
                         .map(page -> page.sourceIndex() + ":" + page.pageNumber())
                         .toList());

@@ -7,5 +7,4 @@ package io.github.propagandist.pdfjig.ai;
  * @param confidence 確信度 0.0〜1.0
  * @param reason     根拠
  */
-public record BoundaryCandidate(int startPage, double confidence, String reason) {
-}
+public record BoundaryCandidate(int startPage, double confidence, String reason) {}

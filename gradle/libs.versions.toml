@@ -9,6 +9,9 @@ testfx = "4.0.18"
 hamcrest = "3.0"
 junit = "6.1.3"
 openjfx-plugin = "0.1.0"
+spotless = "8.10.0"
+palantir-java-format = "2.97.0"
+ktlint = "1.8.0"
 
 [libraries]
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
@@ -23,5 +26,13 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 
+# ★ 以下 2 つはどのモジュールの依存にも入らない。Spotless が自分の classloader で解決するため、
+#   ここに書いた座標は解決に使われない。**Dependabot に版を追わせるためだけの宣言である。**
+#   [versions] だけ書いても Dependabot は座標を知らず、版が固まったまま古びる。
+#   参照は build.gradle.kts が libs.versions.* 経由で行う。**消すと版が更新されなくなる。**
+palantir-java-format = { module = "com.palantir.javaformat:palantir-java-format", version.ref = "palantir-java-format" }
+ktlint-cli = { module = "com.pinterest.ktlint:ktlint-cli", version.ref = "ktlint" }
+
 [plugins]
 javafx = { id = "org.openjfx.javafxplugin", version.ref = "openjfx-plugin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

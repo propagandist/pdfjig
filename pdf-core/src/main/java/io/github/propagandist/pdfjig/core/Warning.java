@@ -13,8 +13,7 @@ public enum Warning {
      *
      * <p>これを黙って行うと、利用者は保護されているつもりで平文の機密文書を配布することになる。
      */
-    ENCRYPTION_NOT_PROPAGATED(
-            "入力の暗号化は出力に引き継がれません。出力されたファイルは保護されていません。");
+    ENCRYPTION_NOT_PROPAGATED("入力の暗号化は出力に引き継がれません。出力されたファイルは保護されていません。");
 
     private final String defaultMessage;
 

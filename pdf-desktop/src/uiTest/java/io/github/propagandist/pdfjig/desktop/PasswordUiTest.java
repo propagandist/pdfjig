@@ -37,8 +37,7 @@ class PasswordUiTest extends DesktopUiTest {
     }
 
     @Test
-    void 暗号化された文書を開くとパスワードを尋ねる(@TempDir Path dir, FxRobot robot)
-            throws Exception {
+    void 暗号化された文書を開くとパスワードを尋ねる(@TempDir Path dir, FxRobot robot) throws Exception {
         askFor(dir, robot);
 
         assertEquals("パスワードの入力", dialogTitle(robot));
@@ -107,8 +106,7 @@ class PasswordUiTest extends DesktopUiTest {
      * {@code ErrorCode} の定型文だけである（CLAUDE.md INV-5）。
      */
     @Test
-    void 画面のどこにも入力したパスワードは出ない(@TempDir Path dir, FxRobot robot)
-            throws Exception {
+    void 画面のどこにも入力したパスワードは出ない(@TempDir Path dir, FxRobot robot) throws Exception {
         askFor(dir, robot);
 
         clickWhenReady(robot, "#password-field");
@@ -117,8 +115,7 @@ class PasswordUiTest extends DesktopUiTest {
         waitFor(() -> "パスワードが正しくありません。".equals(headerTextOrNull(robot)));
 
         DialogPane pane = dialogPane(robot);
-        assertTrue(visibleText(pane).stream().noneMatch(text -> text.contains(CORRECT)),
-                "画面に出ている文言にパスワードが混ざっている");
+        assertTrue(visibleText(pane).stream().noneMatch(text -> text.contains(CORRECT)), "画面に出ている文言にパスワードが混ざっている");
 
         clickWhenReady(robot, "#password-cancel");
         WaitForAsyncUtils.waitForFxEvents();
@@ -143,7 +140,8 @@ class PasswordUiTest extends DesktopUiTest {
 
     /** 尋ね直しの見出し。ダイアログが出ていない一瞬もあるので、無ければ {@code null}。 */
     private static String headerTextOrNull(FxRobot robot) {
-        return robot.lookup("#password-dialog").tryQuery()
+        return robot.lookup("#password-dialog")
+                .tryQuery()
                 .map(node -> ((DialogPane) node).getHeaderText())
                 .orElse(null);
     }
@@ -151,9 +149,7 @@ class PasswordUiTest extends DesktopUiTest {
     /** ダイアログに出ている文字列をすべて集める。 */
     private static java.util.List<String> visibleText(DialogPane pane) {
         return pane.lookupAll(".label, .button").stream()
-                .map(node -> node instanceof javafx.scene.control.Labeled labeled
-                        ? labeled.getText()
-                        : "")
+                .map(node -> node instanceof javafx.scene.control.Labeled labeled ? labeled.getText() : "")
                 .filter(text -> text != null && !text.isEmpty())
                 .toList();
     }

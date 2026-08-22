@@ -762,6 +762,70 @@ AI 機能の入口は今この版に無いため、INV-3 について確かめ�
 
 ---
 
+### 整形を Spotless に寄せた（2026-08-22）
+
+整形の判断を機械に移した。**手で整えない。コミット前に `./gradlew spotlessApply` を掛ける。**
+
+#### 改行が混ざっていた
+
+`.gitattributes` が無く、`core.autocrlf` は手元で `false`、global で `input`、system で `true` と
+三層で食い違っていた。書いた環境の改行がそのまま index に入り、**LF 82 / CRLF 16 の混在**に
+なっていた（`README.md`、`docs/*.md`、`pdf-desktop` の Java 8 本、`pdfjig.css` などが CRLF）。
+
+`* text=auto eol=lf` を正とし、Windows のシェルが読む `*.bat` / `*.cmd` / `*.ps1` だけを
+チェックアウト時に CRLF へ戻す。`gradlew` は ubuntu ランナーが `sh` で実行するため明示的に固定した。
+
+★ **Spotless を素で入れてはならなかった。** `lineEndings` の既定は `.gitattributes` が無いと
+git の設定へフォールバックし、Windows では CRLF 側に倒れる。LF の 82 ファイルを書き換えに行き、
+ubuntu と windows で判定が食い違って CI が割れる。**取り決めを先に置き、Spotless には参照させる。**
+
+★ Gradle では `LineEnding.GIT_ATTRIBUTES` を指定できない（例外になる。
+[spotless#1274](https://github.com/diffplug/spotless/issues/1274)）。使えるのは
+`GIT_ATTRIBUTES_FAST_ALLSAME` だけであり、これは **対象が全部同じ改行** という前提で判定を省く。
+その前提は「CRLF で残す `*.bat` / `*.ps1` を Spotless の対象に入れていない」ことで成り立っている。
+**それらを target に足すと、混在を最初の 1 ファイルで代表して黙って改行を壊す。**
+
+#### 何を選んだか
+
+| 対象 | 何を使うか | なぜ |
+|---|---|---|
+| Java | palantir-java-format（4 スペース / 120 桁） | 既存が 4 スペース。100 桁だと 530 行が折り返される |
+| `*.gradle.kts` | ktlint（`ktlint_official`） | 既定のまま。スタイルの好みで例外を作らない |
+| md / yml / toml / css | 行末の空白と末尾の改行だけ | 整形はしない。`.md` の意図的な行末 2 スペースは 0 件と確認済み |
+
+- **palantir は Javadoc を整形しない。** 懸念していた日本語の桁揃え（`@param path     入力ファイル`）は
+  無傷で残った。google-java-format はこれを潰すので、**乗り換えるならその点を見ること**
+- **`formatAnnotations()` は入れていない。** `@SuppressWarnings` の位置を動かす副作用が
+  `-Werror -Xlint:all` と噛み合ったときに読みにくい
+- ktlint は代入の右辺を改行して字下げする（`val x =` の次の行から `listOf(`）。
+  Gradle DSL では見慣れないが、機械に任せた以上は例外を作らないことを選んだ
+- 逃げ道として `toggleOffOn()` を有効にしてある（`// spotless:off` 〜 `// spotless:on`）。多用しないこと
+
+適用の実差分は 549 行追加 / 578 行削除、41 ファイル。Java 8,513 行に対してこの程度で済んだのは、
+既存が google-java-format 系の作法（static import 先頭、ASCII 順、ワイルドカード禁止）で
+書かれていたためである。行末の空白と末尾改行の欠落は導入前から 0 件だった。
+
+#### CI とワークフロー
+
+`spotlessCheck` は `check` に自動で載るため、**既存の `./gradlew build` がそのまま検査になる**。
+ワークフローもジョブも増やしていない（`CLAUDE.md` の CI 節）。
+
+#### 版を追わせる仕掛け
+
+palantir と ktlint の座標を `libs.versions.toml` の `[libraries]` に宣言してあるが、
+**これはどのモジュールの依存にも入らない。** Spotless は自分の classloader で解決するため、
+書いた座標は解決に使われない。`[versions]` だけでは Dependabot が座標を知らず版が固まるので、
+**追わせるためだけの宣言である。消すと更新が来なくなる。**
+
+#### blame
+
+改行の正規化と一括整形は `.git-blame-ignore-revs` に載せた。GitHub は自動で参照する。
+手元では `git config blame.ignoreRevsFile .git-blame-ignore-revs` が要る。
+**載せてよいのは中身を変えていないコミットだけである。**
+整形と実装が混ざったコミットを載せると、blame から本物の変更まで消える。
+
+---
+
 ## 未決事項
 
 実装中に判断が必要になった場合、勝手に決めずここに追記して確認を求めること。

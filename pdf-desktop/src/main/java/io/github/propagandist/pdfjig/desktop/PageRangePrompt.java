@@ -21,8 +21,7 @@ import javafx.stage.Stage;
  */
 final class PageRangePrompt {
 
-    private PageRangePrompt() {
-    }
+    private PageRangePrompt() {}
 
     /**
      * 範囲を尋ねる。
@@ -58,9 +57,7 @@ final class PageRangePrompt {
                 .lookupButton(keep)
                 .disableProperty()
                 .bind(Bindings.createBooleanBinding(
-                        () -> first.getValue() > last.getValue(),
-                        first.valueProperty(),
-                        last.valueProperty()));
+                        () -> first.getValue() > last.getValue(), first.valueProperty(), last.valueProperty()));
 
         dialog.setResultConverter(button -> {
             if (button != keep) {

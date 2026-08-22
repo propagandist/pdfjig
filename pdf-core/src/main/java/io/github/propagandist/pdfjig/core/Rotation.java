@@ -4,7 +4,6 @@ package io.github.propagandist.pdfjig.core;
  * ページの回転角。PDF が許す 90 度単位の 4 値のみを表現する。
  */
 public enum Rotation {
-
     NONE(0),
     CLOCKWISE_90(90),
     HALF_TURN(180),

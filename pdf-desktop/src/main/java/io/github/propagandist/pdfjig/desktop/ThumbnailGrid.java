@@ -78,7 +78,7 @@ final class ThumbnailGrid {
     private ThumbnailSource thumbnails;
 
     /** Delete キーで呼ぶ処理。画面側が差す。 */
-    private Runnable onDelete = () -> { };
+    private Runnable onDelete = () -> {};
 
     ThumbnailGrid() {
         rows.setId("thumbnail-list");
@@ -96,8 +96,7 @@ final class ThumbnailGrid {
         rows.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         rows.addEventFilter(KeyEvent.KEY_PRESSED, this::handleKey);
 
-        rows.widthProperty().addListener((observable, previous, current) ->
-                applyColumns(current.doubleValue()));
+        rows.widthProperty().addListener((observable, previous, current) -> applyColumns(current.doubleValue()));
     }
 
     /** 画面に置くための節点。 */
@@ -171,8 +170,7 @@ final class ThumbnailGrid {
      */
     String describe(PageSelection selection) {
         String origin = showsSources()
-                ? document.sourceName(selection.sourceIndex()) + " の "
-                        + selection.pageNumber() + " ページ目"
+                ? document.sourceName(selection.sourceIndex()) + " の " + selection.pageNumber() + " ページ目"
                 : "元の " + selection.pageNumber() + " ページ目";
 
         return selection.rotated()
@@ -326,15 +324,16 @@ final class ThumbnailGrid {
         int size = order.size();
         int current = selectedIndex.get();
 
-        int next = switch (event.getCode()) {
-            case LEFT -> current - 1;
-            case RIGHT -> current + 1;
-            case UP -> current - columns;
-            case DOWN -> current + columns;
-            case HOME -> 0;
-            case END -> size - 1;
-            default -> current;
-        };
+        int next =
+                switch (event.getCode()) {
+                    case LEFT -> current - 1;
+                    case RIGHT -> current + 1;
+                    case UP -> current - columns;
+                    case DOWN -> current + columns;
+                    case HOME -> 0;
+                    case END -> size - 1;
+                    default -> current;
+                };
 
         if (next != current && next >= 0 && next < size) {
             // キーで動かす選択は画面の外へ出る。行が変わったぶんだけ追いかける。
@@ -357,7 +356,8 @@ final class ThumbnailGrid {
         if (scene == null) {
             return;
         }
-        for (Map.Entry<KeyCombination, Runnable> accelerator : scene.getAccelerators().entrySet()) {
+        for (Map.Entry<KeyCombination, Runnable> accelerator :
+                scene.getAccelerators().entrySet()) {
             if (accelerator.getKey().match(event)) {
                 accelerator.getValue().run();
                 event.consume();

@@ -25,8 +25,7 @@ import javafx.stage.Stage;
  */
 final class PasswordPrompt {
 
-    private PasswordPrompt() {
-    }
+    private PasswordPrompt() {}
 
     /**
      * パスワードを尋ねる。

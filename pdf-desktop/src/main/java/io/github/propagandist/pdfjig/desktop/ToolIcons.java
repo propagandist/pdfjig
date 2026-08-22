@@ -23,57 +23,45 @@ final class ToolIcons {
     private static final double SIZE = 24;
 
     /** 開く。フォルダ。 */
-    static final String OPEN =
-            "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z";
+    static final String OPEN = "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z";
 
     /** 保存。フロッピー。 */
     static final String SAVE =
-            "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"
-                    + "M17 21v-8H7v8M7 3v5h8";
+            "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" + "M17 21v-8H7v8M7 3v5h8";
 
     /** 削除。ごみ箱。 */
     static final String DELETE =
-            "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"
-                    + "m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2";
+            "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" + "m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2";
 
     /** 左に回転。反時計回りの矢印。 */
-    static final String ROTATE_LEFT =
-            "M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10";
+    static final String ROTATE_LEFT = "M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10";
 
     /** 右に回転。時計回りの矢印。 */
-    static final String ROTATE_RIGHT =
-            "M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10";
+    static final String ROTATE_RIGHT = "M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10";
 
     /** PDF を追加。紙にプラス。 */
     static final String ADD =
-            "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-                    + "M14 2v6h6M12 18v-6M9 15h6";
+            "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" + "M14 2v6h6M12 18v-6M9 15h6";
 
     /** ファイル一覧から外す。× 印。 */
     static final String REMOVE = "M7 7l10 10M17 7l-10 10";
 
     /** ここで区切る。2 枚の紙の間に破線。 */
-    static final String BREAK =
-            "M4 4h5v16H4zM15 4h5v16h-5zM12 3v3M12 10.5v3M12 18v3";
+    static final String BREAK = "M4 4h5v16H4zM15 4h5v16h-5zM12 3v3M12 10.5v3M12 18v3";
 
     /** 分割。切り離された 2 枚。 */
-    static final String SPLIT =
-            "M4 4h6v16H4zM14 4h6v16h-6z";
+    static final String SPLIT = "M4 4h6v16H4zM14 4h6v16h-6z";
 
     /** 1 ページずつに分割。細く分かれた 3 枚。分割との違いが数で読める。 */
-    static final String SPLIT_PAGES =
-            "M3 4h4v16H3zM10 4h4v16h-4zM17 4h4v16h-4z";
+    static final String SPLIT_PAGES = "M3 4h4v16H3zM10 4h4v16h-4zM17 4h4v16h-4z";
 
     /** 範囲を指定して残す。左右の括弧。 */
-    static final String RANGE =
-            "M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3";
+    static final String RANGE = "M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3";
 
     /** 並びと向きを元に戻す。折り返す矢印。 */
-    static final String RESET =
-            "M9 14L4 9l5-5M20 20v-7a4 4 0 0 0-4-4H4";
+    static final String RESET = "M9 14L4 9l5-5M20 20v-7a4 4 0 0 0-4-4H4";
 
-    private ToolIcons() {
-    }
+    private ToolIcons() {}
 
     /**
      * アイコンを 1 つ作る。

@@ -37,7 +37,7 @@ final class SourceLegend {
     private final FlowPane root = new FlowPane(16, 4);
 
     /** 「×」で呼ぶ処理。画面側が差す。 */
-    private IntConsumer onRemove = sourceIndex -> { };
+    private IntConsumer onRemove = sourceIndex -> {};
 
     SourceLegend() {
         root.getStyleClass().add("source-legend");
@@ -70,8 +70,7 @@ final class SourceLegend {
 
         root.getChildren().clear();
         for (int sourceIndex = 0; sourceIndex < session.sourceCount(); sourceIndex++) {
-            root.getChildren().add(
-                    chip(sourceIndex, session.sourceName(sourceIndex), counts[sourceIndex]));
+            root.getChildren().add(chip(sourceIndex, session.sourceName(sourceIndex), counts[sourceIndex]));
         }
 
         root.setVisible(true);

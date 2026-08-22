@@ -21,8 +21,7 @@ public final class BuildInfo {
 
     private static final String VERSION = readVersion();
 
-    private BuildInfo() {
-    }
+    private BuildInfo() {}
 
     /**
      * 版数を返す。

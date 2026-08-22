@@ -3,8 +3,8 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageOperations;
-import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
+import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Warning;
@@ -115,8 +115,7 @@ public final class MainWindow {
      *
      * @param dialogs ファイルとフォルダを選ばせる手段
      */
-    MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices,
-            FileDialogs dialogs) {
+    MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices, FileDialogs dialogs) {
         this.stage = stage;
         this.aiProvider = aiProvider;
         this.hostServices = hostServices;
@@ -178,8 +177,7 @@ public final class MainWindow {
             String icon,
             KeyCombination accelerator,
             Runnable handler,
-            ObservableValue<Boolean> disabled) {
-    }
+            ObservableValue<Boolean> disabled) {}
 
     /** 画面が持つ操作一式。メニューとツールバーの双方がここから作られる。 */
     private record Actions(
@@ -198,15 +196,15 @@ public final class MainWindow {
             Action add,
             Action split,
             Action splitPages,
-            Action about) {
-    }
+            Action about) {}
 
     private Actions buildActions() {
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
         ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
 
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
-        ObservableValue<Boolean> breakUnavailable = documentOpen.not()
+        ObservableValue<Boolean> breakUnavailable = documentOpen
+                .not()
                 .or(busy)
                 .or(thumbnails.selectedIndexProperty().lessThan(1));
 
@@ -214,65 +212,104 @@ public final class MainWindow {
 
         // 1 ページしかなければ 1 枚ずつには分けられない。できるのは元と同じ 1 ファイルだけで、
         // 区切りが無いときと違って利用者に打つ手も無い。断るより初めから押させない。
-        ObservableValue<Boolean> notSplittable =
-                documentOpen.not().or(busy).or(pageCount.lessThan(2));
+        ObservableValue<Boolean> notSplittable = documentOpen.not().or(busy).or(pageCount.lessThan(2));
 
         return new Actions(
-                new Action("open", "開く…", "開く", ToolIcons.OPEN,
+                new Action(
+                        "open",
+                        "開く…",
+                        "開く",
+                        ToolIcons.OPEN,
                         new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN),
-                        this::openDocument, busy),
-                new Action("save", "名前を付けて保存…", "保存", ToolIcons.SAVE,
+                        this::openDocument,
+                        busy),
+                new Action(
+                        "save",
+                        "名前を付けて保存…",
+                        "保存",
+                        ToolIcons.SAVE,
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
-                        this::saveAs, needsDocument),
+                        this::saveAs,
+                        needsDocument),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
                 new Action("quit", "終了", null, null, null, stage::close, null),
-                new Action("delete", "選択したページを削除", "削除", ToolIcons.DELETE,
+                new Action(
+                        "delete",
+                        "選択したページを削除",
+                        "削除",
+                        ToolIcons.DELETE,
                         new KeyCodeCombination(KeyCode.DELETE),
-                        this::deleteSelected, needsDocument),
-                new Action("rotate-right", "右に 90 度回転", "右に回転", ToolIcons.ROTATE_RIGHT,
+                        this::deleteSelected,
+                        needsDocument),
+                new Action(
+                        "rotate-right",
+                        "右に 90 度回転",
+                        "右に回転",
+                        ToolIcons.ROTATE_RIGHT,
                         new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
-                        () -> rotateSelected(Rotation.CLOCKWISE_90), needsDocument),
-                new Action("rotate-left", "左に 90 度回転", "左に回転", ToolIcons.ROTATE_LEFT,
+                        () -> rotateSelected(Rotation.CLOCKWISE_90),
+                        needsDocument),
+                new Action(
+                        "rotate-left",
+                        "左に 90 度回転",
+                        "左に回転",
+                        ToolIcons.ROTATE_LEFT,
                         new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
-                        () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90), needsDocument),
-                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE,
-                        null, this::keepRange, needsDocument),
-                new Action("toggle-break", "ここで区切る / 区切りを外す", "区切り", ToolIcons.BREAK,
+                        () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90),
+                        needsDocument),
+                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsDocument),
+                new Action(
+                        "toggle-break",
+                        "ここで区切る / 区切りを外す",
+                        "区切り",
+                        ToolIcons.BREAK,
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
-                        this::toggleBreak, breakUnavailable),
-                new Action("break-every-n", "N ページごとに区切る…", null, null,
-                        null, this::breakEveryNPages, needsDocument),
-                new Action("clear-breaks", "区切りをすべて外す", null, null,
-                        null, this::clearBreaks, noBreaks),
-                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET,
-                        null, this::resetOrder, needsDocument),
-                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD,
-                        null, this::addDocuments, needsDocument),
-                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT,
-                        null, this::splitDocument, needsDocument),
-                new Action("split-pages", "1 ページずつに分割…", "1 枚ずつ", ToolIcons.SPLIT_PAGES,
-                        null, this::splitIntoSinglePages, notSplittable),
+                        this::toggleBreak,
+                        breakUnavailable),
+                new Action("break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsDocument),
+                new Action("clear-breaks", "区切りをすべて外す", null, null, null, this::clearBreaks, noBreaks),
+                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsDocument),
+                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsDocument),
+                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsDocument),
+                new Action(
+                        "split-pages",
+                        "1 ページずつに分割…",
+                        "1 枚ずつ",
+                        ToolIcons.SPLIT_PAGES,
+                        null,
+                        this::splitIntoSinglePages,
+                        notSplittable),
                 // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
-                new Action("about", AppInfo.NAME + " について", null, null,
-                        null, this::showAbout, null));
+                new Action("about", AppInfo.NAME + " について", null, null, null, this::showAbout, null));
     }
 
     private MenuBar buildMenuBar(Actions actions) {
         return new MenuBar(
-                new Menu("ファイル", null,
-                        menuItem(actions.open()), menuItem(actions.save()),
-                        menuItem(actions.close()), menuItem(actions.quit())),
-                new Menu("ページ", null,
+                new Menu(
+                        "ファイル",
+                        null,
+                        menuItem(actions.open()),
+                        menuItem(actions.save()),
+                        menuItem(actions.close()),
+                        menuItem(actions.quit())),
+                new Menu(
+                        "ページ",
+                        null,
                         menuItem(actions.delete()),
-                        menuItem(actions.rotateRight()), menuItem(actions.rotateLeft()),
+                        menuItem(actions.rotateRight()),
+                        menuItem(actions.rotateLeft()),
                         menuItem(actions.keepRange()),
                         new SeparatorMenuItem(),
-                        menuItem(actions.toggleBreak()), menuItem(actions.breakEveryN()),
+                        menuItem(actions.toggleBreak()),
+                        menuItem(actions.breakEveryN()),
                         menuItem(actions.clearBreaks()),
                         new SeparatorMenuItem(),
                         menuItem(actions.reset())),
-                new Menu("ツール", null,
-                        menuItem(actions.add()), menuItem(actions.split()),
+                new Menu(
+                        "ツール",
+                        null,
+                        menuItem(actions.add()),
+                        menuItem(actions.split()),
                         menuItem(actions.splitPages())),
                 new Menu("ヘルプ", null, menuItem(actions.about())));
     }
@@ -285,15 +322,19 @@ public final class MainWindow {
      */
     private ToolBar buildToolBar(Actions actions) {
         return new ToolBar(
-                toolButton(actions.open()), toolButton(actions.save()),
+                toolButton(actions.open()),
+                toolButton(actions.save()),
                 new Separator(),
                 toolButton(actions.delete()),
-                toolButton(actions.rotateLeft()), toolButton(actions.rotateRight()),
+                toolButton(actions.rotateLeft()),
+                toolButton(actions.rotateRight()),
                 new Separator(),
-                toolButton(actions.keepRange()), toolButton(actions.toggleBreak()),
+                toolButton(actions.keepRange()),
+                toolButton(actions.toggleBreak()),
                 toolButton(actions.reset()),
                 new Separator(),
-                toolButton(actions.add()), toolButton(actions.split()),
+                toolButton(actions.add()),
+                toolButton(actions.split()),
                 toolButton(actions.splitPages()));
     }
 
@@ -395,8 +436,7 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        Optional<Path> chosen =
-                dialogs.savePdf(writingFolder().orElse(null), suggestedFileName());
+        Optional<Path> chosen = dialogs.savePdf(writingFolder().orElse(null), suggestedFileName());
         if (chosen.isEmpty()) {
             return;
         }
@@ -516,10 +556,7 @@ public final class MainWindow {
                 .count();
 
         Alert alert = new Alert(
-                AlertType.CONFIRMATION,
-                name + " の " + pageCount + " ページを取り除きます。",
-                ButtonType.OK,
-                ButtonType.CANCEL);
+                AlertType.CONFIRMATION, name + " の " + pageCount + " ページを取り除きます。", ButtonType.OK, ButtonType.CANCEL);
         alert.setHeaderText("このファイルに対して行った並べ替えや回転も消えます。");
         alert.initOwner(stage);
         alert.getDialogPane().setId("remove-source-dialog");
@@ -619,9 +656,7 @@ public final class MainWindow {
         Path outputDir = directory.get();
         folders.rememberWrittenFolder(outputDir);
 
-        runAsync(
-                () -> splitInto(sources, segments, outputDir, baseName),
-                this::showSplitResult);
+        runAsync(() -> splitInto(sources, segments, outputDir, baseName), this::showSplitResult);
     }
 
     /** 選択中のページの区切りを付け外しする。 */
@@ -690,8 +725,7 @@ public final class MainWindow {
      * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
      * 元のファイルはそのまま残る。
      */
-    private static List<Warning> assemble(
-            List<Path> sources, List<PageSelection> pages, Path output) {
+    private static List<Warning> assemble(List<Path> sources, List<PageSelection> pages, Path output) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
@@ -706,16 +740,12 @@ public final class MainWindow {
     }
 
     private static SplitResult splitInto(
-            List<Path> sources,
-            List<List<PageSelection>> segments,
-            Path outputDir,
-            String baseName) {
+            List<Path> sources, List<List<PageSelection>> segments, Path outputDir, String baseName) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
         List<Path> outputs = IntStream.rangeClosed(1, segments.size())
-                .mapToObj(number -> outputDir.resolve(
-                        String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)))
+                .mapToObj(number -> outputDir.resolve(String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)))
                 .toList();
 
         // 1 つでも書けないなら、何も書かずに失敗させる。pdf-core の分割と同じ約束にする。
@@ -731,8 +761,7 @@ public final class MainWindow {
     }
 
     /** 分割の結果。書き出した数と、その途中で出た警告。 */
-    private record SplitResult(int fileCount, List<Warning> warnings) {
-    }
+    private record SplitResult(int fileCount, List<Warning> warnings) {}
 
     private void showSplitResult(SplitResult result) {
         show(AlertType.INFORMATION, result.fileCount() + " 個のファイルを書き出しました。");
@@ -741,8 +770,7 @@ public final class MainWindow {
 
     private static Path temporaryNextTo(Path output) {
         try {
-            Path temporary = Files.createTempFile(
-                    output.toAbsolutePath().getParent(), ".pdfjig-", ".tmp");
+            Path temporary = Files.createTempFile(output.toAbsolutePath().getParent(), ".pdfjig-", ".tmp");
             // pdf-core は既存の出力を拒む。名前だけ押さえて実体は消しておく。
             Files.delete(temporary);
             return temporary;
@@ -809,8 +837,7 @@ public final class MainWindow {
         runAsync(work, onSucceeded, this::showFailure);
     }
 
-    private <T> void runAsync(
-            Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
+    private <T> void runAsync(Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
         Task<T> task = new Task<>() {
             @Override
             protected T call() {
@@ -841,10 +868,8 @@ public final class MainWindow {
         if (warnings.isEmpty()) {
             return;
         }
-        String message = warnings.stream()
-                .distinct()
-                .map(Warning::defaultMessage)
-                .collect(Collectors.joining("\n"));
+        String message =
+                warnings.stream().distinct().map(Warning::defaultMessage).collect(Collectors.joining("\n"));
         show(AlertType.WARNING, message);
     }
 
@@ -856,9 +881,8 @@ public final class MainWindow {
      * 出してよいのは {@link ErrorCode} の定型文だけである。
      */
     private void showFailure(Throwable failure) {
-        String message = failure instanceof PdfjigException pdfjig
-                ? pdfjig.errorCode().defaultMessage()
-                : "操作に失敗しました。";
+        String message =
+                failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
         show(AlertType.ERROR, message);
     }
 
@@ -898,8 +922,11 @@ public final class MainWindow {
                 text.append("（").append(session.sourceCount()).append(" ファイル）");
             }
             if (session.order().breakCount() > 0) {
-                text.append("　区切り ").append(session.order().breakCount()).append(" か所 → ")
-                        .append(session.order().segmentCount()).append(" ファイルに分かれます");
+                text.append("　区切り ")
+                        .append(session.order().breakCount())
+                        .append(" か所 → ")
+                        .append(session.order().segmentCount())
+                        .append(" ファイルに分かれます");
             }
             if (session.order().modified()) {
                 text.append("（未保存の変更があります）");
