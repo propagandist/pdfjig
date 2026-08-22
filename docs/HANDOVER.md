@@ -817,6 +817,28 @@ palantir と ktlint の座標を `libs.versions.toml` の `[libraries]` に宣�
 書いた座標は解決に使われない。`[versions]` だけでは Dependabot が座標を知らず版が固まるので、
 **追わせるためだけの宣言である。消すと更新が来なくなる。**
 
+版上げは `formatting` グループに寄せてあり、3 つまとめて 1 本の PR で来る
+（`.github/dependabot.yml`）。連動して整形結果を変えるものを別々に受けると、
+`spotlessApply` を 3 回掛けることになるためである。
+
+#### 整形ツールの版が上がったとき
+
+`formatting` グループの PR は **CI が落ちることがある。壊れているのではない。**
+版が上がって整形規則が変わり、既存コードが新しい規則を満たさなくなっただけである。
+
+1. PR のブランチを取り込む
+2. `./gradlew spotlessApply`
+3. 差分が出たら `style:` のコミットを足す
+4. 差分が広範なら `.git-blame-ignore-revs` にそのコミットを足す
+5. `./gradlew build` が通ることを確かめて受ける
+
+★ **major の版上げは差分を見てから決めること。** ktlint 2.0 は `ktlint_official` の
+ルールが変わり、受けると全 `*.gradle.kts` が書き換わりうる。
+
+★ **自動で `spotlessApply` を掛けて push するワークフローは作っていない。**
+`contents: write` を持つジョブを増やすことになり、得られるのは 1 コマンド打つ手間の
+削減でしかない。**割に合わないと判断した。**
+
 #### blame
 
 改行の正規化と一括整形は `.git-blame-ignore-revs` に載せた。GitHub は自動で参照する。
