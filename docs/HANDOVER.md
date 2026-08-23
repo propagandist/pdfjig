@@ -1065,3 +1065,28 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
       19 分 20 秒とは桁が違う。** CI から外した判断（上の「UI テストの自動化」）の裏付けに
       なる数字だが、**逆に言えば手元で通ることは CI で通る根拠にならない**（`CLAUDE.md`）。
       4-4 の 9 番目は、テストが通ることとは別に**掴んだ感じを人が見る**必要がある
+- [x] **既定ブランチは `develop` のままにする**と決めた（2026-08-23、v0.1.0 の公開直後）。
+      `main` を作った直後なので「慣習に合わせて default を `main` へ」を検討したが、
+      **default branch を見ている仕組みが 3 つあり、いずれも壊れる。**
+      **`main` を default にしないことは、慣習より実測を採った判断である。**
+  - **① 週次ウォッチが「守っているつもり」になる。** `distributed-artifact-watch` の
+    `actions/checkout` は `ref` を指定していないので、**schedule のときは default branch を
+    取る。** default が `main` だと比べる相手が「いま **`main`** から作れるもの」になり、
+    **`main` はリリース時点を指すので配布物と常に一致する——差が永久に出ない。しかも
+    赤ではなく緑で。** このワークフローが避けようとした状態そのものである。
+    加えて **cron は default branch のワークフロー定義で走る。** 実測で
+    **`main` には #41 の `tr -d '\r'` が入っていない**ので、**直したはずのバグで走り続ける**
+  - **② 依存グラフと Dependabot alerts は default branch を基準にする。**
+    2026-08-23 実測で `develop` の SBOM は **64 件**（上の Spotless の判断にある数字と一致）。
+    `dependency-graph.yml` は `push: branches: ["develop"]` で送っており、
+    default を動かすと**送り先と評価の基準が別のブランチになる。**
+    分類 P で §3.12（依存の CVE）を担保しているのはこの経路だけである
+  - **③ README と `SECURITY.md` は default branch から読まれる**（後者は GitHub の
+    `/security/policy`。`docs/RELEASE_NOTES.md` のリンク先でもある）。
+    **`main` はリリース間に動かない**ので、文書を直しても次のリリースまでトップに出ない
+  - `build.yml` は `["main", "develop"]` の両方で走るので、**CI だけは影響を受けない。**
+    「CI が緑だから安全」と読める形になっているのが、この判断の分かりにくいところである
+  - **見直す契機**——リリース頻度が上がって `main` が `develop` に十分追随するようになるか、
+    `develop` 常設をやめてトランクベースへ移るとき。**そのときは checkout の `ref` 明示・
+    `dependency-graph.yml` のトリガー・cron がどの定義を読むかを同時に直すこと。**
+    片方だけ変えると、①が**緑のまま**壊れる
