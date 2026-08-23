@@ -7,8 +7,10 @@ Claude Code への引き継ぎ文書。
 `pdf-desktop` はサムネイル一覧、ドラッグ&ドロップ並べ替え、削除・回転・範囲指定、
 結合・分割、パスワード入力までが動き、jpackage で MSI / EXE / ZIP を作れる。
 
-**残っているのは v0.1.0 のタグ打ちと、その前の実機確認だけである**（下の「Phase 4 の残り」）。
-その先は M1。着手前に、未決事項のうち設定ファイルの配置・ログ方針・権限フラグへの態度を決める必要がある。
+**残りは GitHub Issues のマイルストーンが持つ**（`CLAUDE.md`「作業の型」）。
+**ここに書くと、片づいた日に嘘になる。**
+
+- https://github.com/propagandist/pdfjig/milestones
 
 ---
 
@@ -288,13 +290,10 @@ CI 側の失敗を本番のタグで踏まずに済む。確認後にタグと�
 
 ## M1 以降の概要
 
-M0 完了後に着手する。詳細は改めて詰める。
+**期の定義は `SPEC.md` §8 が持ち、やることは GitHub Issues のマイルストーンが持つ**
+（`CLAUDE.md`「作業の型」）。**ここに一覧を置かない**——やった日に嘘になる。
 
-| | 内容 |
-|---|---|
-| M1 | 表抽出（tabula-java）、CSV/JSON/XLSX 出力、暗号化一式、`AiProvider` 抽象化、表の正規化 |
-| M2 | 文書境界検出、リネーム・分類、バッチ処理、CLI 公開 |
-| M3 | OCR 対応、誤字補正 |
+- https://github.com/propagandist/pdfjig/milestones
 
 M1 で `AiProvider` を導入する際、実装順は `NoOpProvider` → `OllamaProvider` → `AnthropicProvider`。
 NoOp を最初に作ることで INV-3 が構造的に守られる。
@@ -951,15 +950,11 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
 なったら、**ここではなく issue を立てて確認を求めること**（`CLAUDE.md`「作業の進め方」）。
 **両方に書くと必ず片方が腐る。**
 
-| # | 何が決まっていないか | いつ決まるか |
-|---|---|---|
-| [#12](https://github.com/propagandist/pdfjig/issues/12) | 設定ファイルの置き場所。ダイアログのフォルダを覚える話もここで片づく | M1 |
-| [#13](https://github.com/propagandist/pdfjig/issues/13) | ログの出力先とローテーション方針 | M1 |
-| [#14](https://github.com/propagandist/pdfjig/issues/14) | POI を戻すとき `jdk.unsupported` / `jdk.xml.dom` も一緒に戻す | M1 |
-| [#15](https://github.com/propagandist/pdfjig/issues/15) | 権限フラグ「テキスト抽出禁止」の文書から抽出してよいか | M1 |
-| [#16](https://github.com/propagandist/pdfjig/issues/16) | コード署名証明書を取るか | 配布状況を見て |
-| [#19](https://github.com/propagandist/pdfjig/issues/19) | palantir / ktlint が依存グラフに載らず CVE alert の対象外 | 判断待ち |
-| [#20](https://github.com/propagandist/pdfjig/issues/20) | configuration cache を有効にするか（パッケージング系の書き直しを伴う） | 任意 |
+**いつ決まるかはマイルストーンが持つ**（`CLAUDE.md`「作業の型」）。
+**一覧をここに写さない。**
+
+- 未決の一覧 — https://github.com/propagandist/pdfjig/labels/decision
+- 期ごとの残り — https://github.com/propagandist/pdfjig/milestones
 
 ### 決まったことの記録
 
@@ -1007,3 +1002,13 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
       `:pdf-core:processResources` の 1 件は `build` 単体でも出るが、**1 件だけ直しても
       有効化はできない**（`packageAll` が残り 5 件で落ちる）ので触っていない。
       見直す契機は「構成フェーズが伸びたとき」か「CI でキャッシュが効くと確かめられたとき」
+- [x] **マイルストーン運用を入れた**（#26、2026-08-23）。単位は**リリース版**（`v0.1.0` /
+      `v0.2.0` …）で、`SPEC.md` §8 の M0〜M3 は**仕様側の期**として残る——**1 つの期が
+      複数のリリースに分かれる。** M0〜M3 をそのまま名前にする案は、M1 が 13 issue を
+      抱えた 1 本になって長期間閉じず、進捗を見せないので却下した。
+      ★ **closed の issue にもマイルストーンを付ける。** 閉じたものを外すと
+      「その期に何が起きたか」の記録でなくなる。値は `CLAUDE.md`「作業の型」にある
+- [x] ★ **未決事項の表は、Issues へ移した翌日には既に腐っていた**（同上）。
+      2026-08-23 に移したのに、**同じ日に閉じた #19 #20 が表に残っていた。**
+      「両方に書くと必ず片方が腐る」の実例が、**それを書いたこの文書自身で起きている。**
+      **消すのではなく、起きたこととして残す**——次に一覧を書き足したくなったときに読む
