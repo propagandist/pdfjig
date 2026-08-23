@@ -923,6 +923,8 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
 | [#14](https://github.com/propagandist/pdfjig/issues/14) | POI を戻すとき `jdk.unsupported` / `jdk.xml.dom` も一緒に戻す | M1 |
 | [#15](https://github.com/propagandist/pdfjig/issues/15) | 権限フラグ「テキスト抽出禁止」の文書から抽出してよいか | M1 |
 | [#16](https://github.com/propagandist/pdfjig/issues/16) | コード署名証明書を取るか | 配布状況を見て |
+| [#19](https://github.com/propagandist/pdfjig/issues/19) | palantir / ktlint が依存グラフに載らず CVE alert の対象外 | 判断待ち |
+| [#20](https://github.com/propagandist/pdfjig/issues/20) | configuration cache を有効にするか（パッケージング系の書き直しを伴う） | 任意 |
 
 ### 決まったことの記録
 
