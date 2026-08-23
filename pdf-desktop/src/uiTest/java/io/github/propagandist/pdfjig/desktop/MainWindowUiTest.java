@@ -14,7 +14,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.testfx.api.FxRobot;
 import org.testfx.framework.junit5.Start;
 import org.testfx.framework.junit5.Stop;
-import org.testfx.util.WaitForAsyncUtils;
 
 /** 開く・回す・消す・足す・保存するという、日々の操作をひととおり通す。 */
 class MainWindowUiTest extends DesktopUiTest {
@@ -133,8 +132,9 @@ class MainWindowUiTest extends DesktopUiTest {
         openFixture(robot, TestPdfs.plain(dir.resolve("報告書.pdf"), 1));
 
         // 保存先を仕込まずに押す。取り消したのと同じ扱いになり、何も書き出されない。
-        robot.clickOn("#tool-save");
-        WaitForAsyncUtils.waitForFxEvents();
+        // 仕込んでいない以上「答えが使われたか」では届いたかを判定できないので、
+        // ダイアログに既定名が渡ったことを、押した結果が起きた印とする。
+        clickUntilAccepted(robot, "#tool-save", () -> dialogs.lastSuggestedName() == null);
 
         assertEquals("報告書-edited.pdf", dialogs.lastSuggestedName());
     }
@@ -159,8 +159,13 @@ class MainWindowUiTest extends DesktopUiTest {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 2));
 
         dialogs.willOpenMultiple(TestPdfs.plain(dir.resolve("more.pdf"), 3));
-        robot.clickOn("#tool-add");
-        WaitForAsyncUtils.waitForFxEvents();
+        clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+
+        // 読み込みは背景で走る。waitForFxEvents はイベントキューを捌くだけで、
+        // 読み終わりは待たない。速い環境ではたまたま間に合っていたが、Sandbox の
+        // cold run では「2 / 2 ページ」のまま assert に来た（2026-08-23）。
+        // 5 枚目のタイルが出たことを、足し終わりの条件とする。
+        waitForNode(robot, "#thumbnail-tile-4");
 
         assertEquals("5 / 5 ページ（2 ファイル）", statusText(robot));
     }

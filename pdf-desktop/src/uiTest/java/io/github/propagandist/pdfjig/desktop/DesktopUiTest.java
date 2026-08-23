@@ -145,11 +145,16 @@ abstract class DesktopUiTest {
     /**
      * 「保存」ボタンから書き出し、ファイルができるまで待つ。
      *
+     * <p>押し直しを通すのは「開く」と同じ理由である（{@link #clickUntilAccepted}）。
+     * ここを素のクリックにしていたため、Windows Sandbox の cold run で
+     * 「20 秒待ってもファイルが出てこない」形で落ちた（2026-08-23）。
+     * <b>取りこぼしたクリックは、待っても届かない。</b>上限を延ばしても直らない類である。
+     *
      * @return 書き出されたファイル
      */
     Path saveAs(FxRobot robot, Path output) throws Exception {
         dialogs.willSaveTo(output);
-        robot.clickOn("#tool-save");
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
         waitFor(() -> Files.exists(output) && Files.size(output) > 0);
         WaitForAsyncUtils.waitForFxEvents();
         return output;
