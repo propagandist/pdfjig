@@ -9,16 +9,29 @@ on:
   #
   # ★ 挙げてよいのは「変わってもビルドの結果が変わらない」ものだけ。
   #   .editorconfig は入れない——ktlint が読むので Spotless の挙動そのものが変わる。
+  #   .gitattributes も入れない——Spotless の lineEndings が GIT_ATTRIBUTES_FAST_ALLSAME
+  #   で読むので、同じく整形の判定そのものが変わる。
   #   docs/ の中身は 2026-08-23 時点ですべて .md なので、**/*.md で足りる。
+  #
+  # ★ 該当するもの全部を挙げるのではなく、**実際に踏んだものだけを足す。**
+  #   リストが伸びるほど、次に読む者が 1 行ずつ「これは関与しないのか」を確かめる手間が増える。
+  #   .github/dependabot.yml は 2026-08-23 に足した——コメントだけの変更で build が
+  #   5 分走ったためで、Gradle ビルドには一切関与しない。
+  #
+  # ★ workflow ファイルは挙げない。.github/workflows/** と書くとこのファイル自身が入り、
+  #   **CI の変更が検証されないまま通る**。個別に列挙する手もあるが、workflow を足すたびに
+  #   判断が要るようになるので採らない。
   push:
     branches: ["main", "develop"]
     paths-ignore:
       - "**/*.md"
       - "LICENSE"
+      - ".github/dependabot.yml"
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "LICENSE"
+      - ".github/dependabot.yml"
 
 permissions:
   contents: read
