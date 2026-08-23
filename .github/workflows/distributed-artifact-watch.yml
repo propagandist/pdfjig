@@ -105,7 +105,12 @@ jobs:
 
           # ---------------------------------------------------------- 配ったもの
           # 決め打ちで読む。無ければ赤にする（構造が変わったのに緑を出さない）。
-          unzip -p released.zip 'PDFjig/runtime/release' > released-release.txt
+          #
+          # ★ tr -d '\r' を外さないこと。この release は jlink が Windows で作るので
+          #   改行が CRLF であり、ubuntu で読むと行末に \r が残る。sed の `"$` が
+          #   マッチせず「JAVA_VERSION が無い」で落ちる。JAVAFX_VERSION のほうは
+          #   マッチするが値に \r が混ざり、版の比較が静かに狂う（#41）。
+          unzip -p released.zip 'PDFjig/runtime/release' | tr -d '\r' > released-release.txt
           rel_jdk=$(sed -n 's/^JAVA_VERSION="\(.*\)"$/\1/p' released-release.txt)
           if [ -z "$rel_jdk" ]; then
             echo "::error::配布物の release に JAVA_VERSION が無い"
