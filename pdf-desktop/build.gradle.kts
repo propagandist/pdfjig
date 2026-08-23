@@ -276,6 +276,7 @@ val jlinkRuntime =
         inputs.dir(jmodsDir)
         inputs.property("modules", runtimeModules)
         inputs.property("locales", includeLocales)
+        inputs.property("javafxVersion", javafxVersion)
         outputs.dir(runtimeDir)
 
         doFirst {
@@ -304,6 +305,13 @@ val jlinkRuntime =
                 "--no-header-files",
                 "--no-man-pages",
                 "--compress=zip-6",
+                // ★ 焼き込んだ JavaFX の版を release ファイルへ残す。
+                //   jlink が既定で書くのは JAVA_VERSION と MODULES だけで、JavaFX は
+                //   名前付きモジュールとしてイメージの中にいるのに版が分からない。
+                //   配布物は再リリースするまで利用者の PC に残るので、CVE が出たときに
+                //   「配ったものが何だったか」を成果物の側から辿れないと直しようがない。
+                "--release-info",
+                "add:JAVAFX_VERSION=$javafxVersion",
             )
         }
     }
