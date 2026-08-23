@@ -912,7 +912,22 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
 
 ## 未決事項
 
-実装中に判断が必要になった場合、勝手に決めずここに追記して確認を求めること。
+**未決のものは GitHub Issues で管理する**（2026-08-23 に移した）。実装中に判断が必要に
+なったら、**ここではなく issue を立てて確認を求めること**（`CLAUDE.md`「作業の進め方」）。
+**両方に書くと必ず片方が腐る。**
+
+| # | 何が決まっていないか | いつ決まるか |
+|---|---|---|
+| [#12](https://github.com/propagandist/pdfjig/issues/12) | 設定ファイルの置き場所。ダイアログのフォルダを覚える話もここで片づく | M1 |
+| [#13](https://github.com/propagandist/pdfjig/issues/13) | ログの出力先とローテーション方針 | M1 |
+| [#14](https://github.com/propagandist/pdfjig/issues/14) | POI を戻すとき `jdk.unsupported` / `jdk.xml.dom` も一緒に戻す | M1 |
+| [#15](https://github.com/propagandist/pdfjig/issues/15) | 権限フラグ「テキスト抽出禁止」の文書から抽出してよいか | M1 |
+| [#16](https://github.com/propagandist/pdfjig/issues/16) | コード署名証明書を取るか | 配布状況を見て |
+
+### 決まったことの記録
+
+未決から落ちた項目を、判断の経緯ごと残してある。**消さないこと**——
+「なぜそう決めたか」と「実測でこうだった」がここにしかない。
 
 - [x] パッケージ名は `io.github.propagandist.pdfjig` に統一した（Phase 1 で確定）。
       Maven Central 公開時の groupId と揃えてあり、後の改名は不要
@@ -922,14 +937,6 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
 - [x] Phase 4 の jpackage に必要な情報はすべて決まった（Phase 4）。表示名 `PDFjig`、
       ベンダー `PROPAGANDIST CORPORATION`、UpgradeCode は上の「確定している判断」を参照
 - [x] 対応する最小 Windows バージョンは 10 21H2 (x64) とした（Phase 4）
-- [ ] 設定ファイルの配置場所（`%APPDATA%\pdfjig\` を想定）。
-      保存する設定がまだ無いため M1 で決める。
-      **v0.1.0 の実機確認で「ダイアログのフォルダを再起動後も維持したい」という要望が挙がっており**、
-      置き場が決まればここも一緒に片づく（いまは起動中だけ覚える。上の「ダイアログを始めるフォルダ」）
-- [ ] ログ出力先とローテーション方針。同じく M1
-- [ ] **M1 で POI の依存を戻すこと。** 2026-08-22 に、使っていないのに配布物の 14 MB を
-      占めていたため外した（上の「使っていない POI を外した」）。**戻すときは
-      `jdk.unsupported` と `jdk.xml.dom` も一緒に戻す。** 忘れると jlink 後に実行時に落ちる
 - [x] ~~UI テストは CI でまだ実走していない~~ → **2026-08-22 に実走し、25 本すべて通った。**
       ただし `ReorderUiTest` が 19 分 20 秒かかり、`build` 全体が 23 分 2 秒になったため、
       同日そのテストを CI から外した（上の「UI テストの自動化」）
@@ -942,11 +949,6 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
       23 分 2 秒）。あわせて `timeout-minutes` を実測に合わせた（build 30 → 15 分、
       release 45 → 20 分）。**上限を実測より桁大きく取らないこと。**
       30 分の上限は、`uiTest` が 19 分かかっていた事実を隠していた
-- [ ] 権限フラグで「テキスト抽出禁止」が設定された文書から、pdfjig がテキストを
-      抽出してよいか。権限フラグは暗号学的に強制されず（`SPEC.md` §6.1）、PDFBox は
-      これを無視して抽出できてしまう。M1 の暗号化機能で態度を決める必要がある
-- [ ] コード署名証明書。v0.1.0 は未署名で出すため、初回起動時に SmartScreen の警告が出る。
-      README とリリースノートには断ってある。取得するかどうかは実際の配布状況を見て決めたい
 - [x] セキュリティ分類。**org 側に分類 P（利用者の手元で動くものを配る）が足された**ので、
       `CLAUDE.md` のセキュリティ節をそれへ揃えた（`propagandist/.github#22`、2026-08-22）。
       **「分類 D ＋ §5.3 も読む」という自前の運用は要らなくなった。**
