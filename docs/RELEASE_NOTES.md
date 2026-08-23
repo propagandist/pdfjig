@@ -85,6 +85,5 @@ EXE と MSI は同じ製品であり、**両方を同時にインストールす
 Get-FileHash .\PDFjig-0.1.0.exe -Algorithm SHA256
 ```
 
-## 報告
-
-不具合は Issue へ。**脆弱性は公開の Issue に書かないこと**（[SECURITY.md](../SECURITY.md)）。
+不具合は Issue へ。**脆弱性は公開の Issue に書かないこと**
+（[セキュリティポリシー](https://github.com/propagandist/pdfjig/security/policy)）。
