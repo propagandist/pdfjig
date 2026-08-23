@@ -11,6 +11,20 @@
 #
 # ★ pdfjig は public なので、Dependabot の update job も Actions の実行も org の枠を食わない。
 #   private へ変えるなら、ここの頻度は枠の観点で見直す対象になる。
+#
+# ★ GitHub 設定の「Dependabot rules」のプリセットは有効にしない。
+#   「Dismiss low-impact alerts for development-scoped dependencies」は、
+#   security-baseline.md §3.12 が「崩れる変更」として名指しする `--omit=dev` の UI 版である。
+#   **pdfjig は分類 P**——配布物はビルドの出力なので、ビルドツールの CVE がそのまま利用者へ
+#   届き、しかもランタイムごと焼き込まれて手元に残る（§5.3.2）。
+#
+#   2026-08-23 に有効になっているのを見つけて戻した。**そのとき実害は無かった**——SBOM の
+#   relationship は DEPENDS_ON だけで DEV_DEPENDENCY_OF が無く、alerts の
+#   dependency.scope も 3 件すべて null で、マッチする対象が存在しなかった。
+#   **dependency-submission が scope を載せるようになれば、黙って効き始める。**
+#
+#   「Dismiss package malware alerts」も無効のまま。有効にすると Dependabot malware alerts
+#   （2026-08-23 に有効化）が自動で消え、意味を失う。
 version: 2
 updates:
   # ---------------------------------------------------------------- GitHub Actions
