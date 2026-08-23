@@ -7,8 +7,8 @@ Claude Code への引き継ぎ文書。
 `pdf-desktop` はサムネイル一覧、ドラッグ&ドロップ並べ替え、削除・回転・範囲指定、
 結合・分割、パスワード入力までが動き、jpackage で MSI / EXE / ZIP を作れる。
 
-**残りは GitHub Issues のマイルストーンが持つ**（`CLAUDE.md`「作業の型」）。
-**ここに書くと、片づいた日に嘘になる。**
+**残りは GitHub Issues のマイルストーンが持つ**（`CLAUDE.md`「作業の型」。
+**ここに書かない理由は org `work-conventions.md` §2**）。
 
 - https://github.com/propagandist/pdfjig/milestones
 
@@ -291,7 +291,7 @@ CI 側の失敗を本番のタグで踏まずに済む。確認後にタグと�
 ## M1 以降の概要
 
 **期の定義は `SPEC.md` §8 が持ち、やることは GitHub Issues のマイルストーンが持つ**
-（`CLAUDE.md`「作業の型」）。**ここに一覧を置かない**——やった日に嘘になる。
+（`CLAUDE.md`「作業の型」）。**ここに一覧を置かない**（org `work-conventions.md` §2）。
 
 - https://github.com/propagandist/pdfjig/milestones
 
