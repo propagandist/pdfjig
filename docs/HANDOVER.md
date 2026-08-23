@@ -589,13 +589,21 @@ NoOp を最初に作ることで INV-3 が構造的に守られる。
       ランチャー exe のバージョン情報（タスクマネージャに出る）は日本語のまま
 - [ ] `.pdf` のファイル関連付け（`--file-associations`）は行わない。既定の PDF ビューアを
       奪う挙動であり、利用者の意図しない変更になる。起動引数で開く経路は既にある
-- [ ] POI は v0.1.0 では一切使われないが依存に残してある（約 14MB）。M1 の XLSX 出力で
-      要るものであり、外して戻すほうが build を余計に触ることになる
+- [x] ~~POI は v0.1.0 では一切使われないが依存に残してある（約 14MB）。M1 の XLSX 出力で
+      要るものであり、外して戻すほうが build を余計に触ることになる~~
+      → **2026-08-22 に外した**（上の「使っていない POI を外した」）。
+      「build を余計に触る」より、**使っていないものを配って CVE を見続ける**ほうが高くついた——
+      配布物の 14MB と Dependabot の警告 2 件が、すべてここから出ていた
 - [ ] `dist/` を出力先にした。`.gitignore` が `/dist/` と `*.msi` / `*.exe` を除外済み
-- [ ] ランタイムイメージからコンソールで動かすと
+- [x] ~~ランタイムイメージからコンソールで動かすと
       `ERROR Log4j API could not find a logging provider.` が stderr に出る。
-      commons-logging（PDFBox）が classpath 上の log4j-api を見つけ、その実装が無いため。
-      GUI アプリの stderr はどこにも出ないので利用者には見えない。ロギング方針を決める
+      commons-logging（PDFBox）が classpath 上の log4j-api を見つけ、その実装が無いため~~
+      → **2026-08-23 実測。POI を外したら消えた。**
+      **log4j-api は POI 経由で入っていた**（poi → log4j-api 2.24.3）。
+      いま同梱されるのは 7 本だけで、log4j 関連は 1 つも無い。
+      ランタイムイメージから `--add-modules=javafx.controls,javafx.swing -cp app/*` で
+      起動し、**stderr が空である**ことを確かめた。
+      **★ M1 で POI を戻すと再発する。** ロギング方針はそのときに決める
       M1 まで、実装を足して黙らせることはしない
 
 ### 使っていない POI を外した（2026-08-22）
@@ -627,7 +635,32 @@ CVE を見る責任があるという意味**である。使っていないも�
    （`gradle/libs.versions.toml` の `poi-ooxml` は座標として残してある）
 2. `pdf-desktop/build.gradle.kts` の `runtimeModules` に `jdk.unsupported` と
    `jdk.xml.dom` を足す。**これを忘れると jlink 後のアプリが実行時に落ちる**
-3. `XSSFWorkbook` ではなく **SXSSF を使う**（`CLAUDE.md` リソース管理節）
+3. **`ArchitectureTest` の入れ子クラス `Poi` から `@Disabled` を外す。**
+   POI がクラスパスに無い間、あのルールは常に真になる（下の「ルールの空振り」）
+4. `XSSFWorkbook` ではなく **SXSSF を使う**（`CLAUDE.md` リソース管理節）
+
+#### ★ 外したときに分かったこと ── ルールの空振り
+
+**`noClasses().should().dependOnClassesThat()` は、依存先が 1 つも無ければ常に真になる。**
+POI を外した時点で `poiMustNotLeakOutOfCore` は**緑のまま何も守らなくなっていた**。
+
+既存の番人（`importedClassesAreNotEmpty`）では捕まらない。あれが見ているのは
+**pdfjig 自身の取り込みが空になる場合**で、ライブラリを 1 つ外しても pdfjig のクラスは
+全部読み込まれるためである。**指摘は org 側から来た**（`propagandist/.github#43` →
+PR #46 のコミットメッセージ。`security-verification.md` §1.3 の
+「`-`（未走査）を 0 件と読むな」と同じ型だと書かれている）。
+
+外部ライブラリを対象にするルールには、**そのライブラリへの依存が 1 つ以上あることを
+確かめる対のテスト**（`...RuleHasSubject`）を隣に置いた。2026-08-23 に実際に
+`@Disabled` を外して確かめてあり、**ルールは PASSED のまま、ガードだけが FAILED になる**。
+
+```
+Apache POI の型が pdf-core の外から見えない  PASSED   ← 空振り
+POI のルールが空振りしていない              FAILED   ← ガードが検知
+```
+
+**★ 同じ形は PDFBox にもあり得る。** いまは使っているので空振りしていないが、
+外せば同じことが起きる。だから PDFBox 側にも対のガードを置いてある。
 
 ---
 
