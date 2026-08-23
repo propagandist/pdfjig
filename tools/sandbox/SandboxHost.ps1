@@ -52,7 +52,7 @@ function New-SandboxConfigFile {
         [Parameter(Mandatory)] [string] $Path,
         [Parameter(Mandatory)] [array] $MappedFolders,
         [Parameter(Mandatory)] [string] $LogonCommand,
-        [int] $MemoryInMB = 8192,
+        [int] $MemoryInMB = 4096,
         [bool] $Networking = $false,
         [bool] $VGpu = $true
     )
@@ -107,6 +107,32 @@ function New-GuestLogonCommand([string] $GuestScriptPath) {
         ' -ExecutionPolicy Bypass -NoProfile -File "' + $GuestScriptPath + '"')
 }
 
+<#
+    ホストに余力があるか。
+
+    ★ Sandbox に渡したぶんはホストのコミットチャージにそのまま乗る。開発機では
+      Docker / WSL2 が既に数十 GB をコミットしていることがあり、その上へ積むと
+      ホストごと不安定になる。2026-08-23 に、コミットが上限の 8 割まで来ている
+      状態で 8GB を渡して回したところ、テストが 26/29 落ち（クリックがまったく
+      届かない形）、その直後にホストが予期しない再起動をした。
+      **因果は確かめていない**が、余力を見ずに積む理由も無い。
+
+    足りなければ落とす。黙って続けて、原因の読めない落ち方をさせない。
+#>
+function Assert-HostHasHeadroom([int] $NeedMB) {
+    $os = Get-CimInstance Win32_OperatingSystem
+    # FreeVirtualMemory は KB。コミットできる残り。
+    $freeCommitMB = [int] ($os.FreeVirtualMemory / 1KB)
+    # Sandbox 本体のぶんも要る。VM に渡す量ちょうどでは足りない。
+    $marginMB = 2048
+    Write-Host ('==> ホストのコミット残り {0:N0}MB / Sandbox に渡す {1:N0}MB' -f $freeCommitMB, $NeedMB)
+    if ($freeCommitMB -lt ($NeedMB + $marginMB)) {
+        throw ('ホストの余力が足りない（コミット残り {0:N0}MB、要る目安 {1:N0}MB）。' -f
+            $freeCommitMB, ($NeedMB + $marginMB) +
+            '重いものを閉じるか、-MemoryInMB を下げること。')
+    }
+}
+
 <# Sandbox の窓が生きているか。 #>
 function Test-SandboxRunning {
     $procs = @(Get-Process -Name 'WindowsSandbox', 'WindowsSandboxClient' -ErrorAction SilentlyContinue)
@@ -140,12 +166,15 @@ function Invoke-Sandbox {
     param(
         [Parameter(Mandatory)] [string] $ConfigPath,
         [Parameter(Mandatory)] [string] $OutputDir,
+        # 余力の判定にだけ使う。実際に渡す量は .wsb 側が持つ。
+        [int] $MemoryInMB = 4096,
         [int] $TimeoutSeconds = 1800,
         # 中側が書き足していくログ。増えたぶんをここへ流し、待っている間を無言にしない。
         [string] $ProgressLogName = 'run.log'
     )
 
     $sandboxExe = Assert-SandboxAvailable
+    Assert-HostHasHeadroom -NeedMB $MemoryInMB
 
     # Sandbox は同時に 1 つしか動かない。前のが残っていると起動が黙って失敗する。
     $running = @(Get-Process -Name 'WindowsSandbox', 'WindowsSandboxClient' -ErrorAction SilentlyContinue)

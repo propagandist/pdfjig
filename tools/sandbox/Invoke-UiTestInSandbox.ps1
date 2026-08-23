@@ -41,6 +41,10 @@ param(
     # 上限が緩いほど、遅くなったことに気づくのが遅れる。
     [int] $TimeoutSeconds = 1800,
 
+    # Sandbox に渡すメモリ。ホストのコミットにそのまま乗るので、余力を見て決める
+    # （SandboxHost.ps1 の Assert-HostHasHeadroom）。
+    [int] $MemoryInMB = 4096,
+
     # 走らせる前に、起きている Sandbox を落とす。
     [switch] $Force
 )
@@ -102,6 +106,7 @@ $null = New-SandboxConfigFile `
     -Path $configPath `
     -MappedFolders $mapped `
     -LogonCommand $logon `
+    -MemoryInMB $MemoryInMB `
     -Networking ([bool] $AllowNetwork)
 
 Write-Host ('==> リポジトリ: {0}' -f $repoRoot)
@@ -113,7 +118,8 @@ if ($AllowNetwork) {
     Write-Host '==> ネットワークは遮断（INV-3 の確認を兼ねる）'
 }
 
-$code = Invoke-Sandbox -ConfigPath $configPath -OutputDir $outputDir -TimeoutSeconds $TimeoutSeconds
+$code = Invoke-Sandbox -ConfigPath $configPath -OutputDir $outputDir `
+    -MemoryInMB $MemoryInMB -TimeoutSeconds $TimeoutSeconds
 
 # レポートを手元へ持ってくる。build/ の下なので .gitignore に足す必要はない。
 $reportSource = Join-Path $outputDir 'reports'
