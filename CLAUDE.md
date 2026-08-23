@@ -253,6 +253,11 @@ CI と本番デプロイが同時に止まる（2026-08-09 に実際に起きた
 gh api repos/propagandist/.github/contents/docs/ci-strategy.md --jq .content | base64 -d
 ```
 
+**作業の型**（プランを起票で止める／起票の作法／着手前／本文／マージ）は同
+`docs/work-conventions.md`（**軸が違う。CI の有無と関係なく効く**）。
+**値**（既定ブランチ・ブランチ名・コミット規約・ラベル・merge 方式）は**このリポジトリが持つ**
+——下の `## 作業の型` に書く。org 正本には値が 1 つも無い。
+
 **規約の中身をここへ写さない。** 両方に書けば必ず片方が腐る。
 
 **★ pdfjig が public である限り、標準ランナーの消費は無料で org の枠を食わない。**
@@ -289,6 +294,29 @@ gh api repos/propagandist/.github/contents/docs/security-baseline.md --jq .conte
 **法務は区分 4**（預からない＝当社の設備が個人データを受け取らない）。
 **個人データの流れ・外部へ出る先・保存期間を変える前に** 同 `docs/legal-baseline.md`
 （**軸が違う。分類とは別に決まる**）。**★ BYOK は鍵の所在で区分が動く**（同 §1）。
+
+---
+
+## 作業の型
+
+**規律の正本は org の `docs/work-conventions.md`**（起票で止める／起票の作法／着手前／本文／マージ）:
+
+```
+gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .content | base64 -d
+```
+
+**規約の中身をここへ写さない。** ここが持つのは**このリポジトリの値**だけ:
+
+- **既定ブランチは `develop`**（`main` は無い。**2026-08-23 実測**）
+- ブランチ名は用途 ＋ 内容（英小文字ケバブ。**issue 番号は入れない**）。
+  実績は `docs/` `ci/` `test/` `probe/` と、Dependabot が作る `dependabot/`
+- コミットの subject は**日本語・Conventional Commits にスコープ付き**
+  （`docs(security):` `build(desktop):` `test(archtest):` `ci:`）
+- **merge 方式はマージコミット**（`Merge branch '<branch>' into develop`。**2026-08-23 実測**）
+- **ラベルは既定の 9 種だけ**（使った実績は `question` / `enhancement`）。
+  **マイルストーンは運用していない**（**2026-08-23 実測**）
+- **issue 本文の書式は #19 に揃える**（何が起きているか → 何が決まっていないか → 判断の材料）。
+  **未決事項の唯一の backlog は Issues**——`HANDOVER.md` へ書き足さない（上の `## 作業の進め方`）
 
 ---
 
