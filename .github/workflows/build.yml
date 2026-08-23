@@ -1,9 +1,24 @@
 name: build
 
 on:
+  # ★ paths-ignore は push と pull_request の両方に書く。on: にしか書けないため、
+  #   ジョブ側では絞れない。**片方だけ直さないこと。**
+  #   YAML アンカーで 1 か所にまとめる手はあるが採らない。アンカーが解釈されないと
+  #   workflow が invalid になって「起動しない」形で失敗し、それは枠切れと区別が付かない
+  #   （org の docs/ci-strategy.md §4）。
+  #
+  # ★ 挙げてよいのは「変わってもビルドの結果が変わらない」ものだけ。
+  #   .editorconfig は入れない——ktlint が読むので Spotless の挙動そのものが変わる。
+  #   docs/ の中身は 2026-08-23 時点ですべて .md なので、**/*.md で足りる。
   push:
     branches: ["main", "develop"]
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
 
 permissions:
   contents: read
