@@ -1,0 +1,198 @@
+name: distributed-artifact-watch
+
+# 配布済みの成果物が、いま develop から作れるものより古い版を焼き込んでいないかを週次で見る。
+# org の判断規約と基準の正本は propagandist/.github（docs/ci-strategy.md、docs/security-baseline.md）。
+# 中身はここへ写さない。
+#
+# ★ なぜ「依存の CVE を直接スキャンする」形にしないのか
+#   Gradle 側の依存は Dependabot alerts が連続で見ている（dependency-graph.yml で解決済み
+#   グラフを渡してあり、security updates も有効なので修正 PR まで自動で出る）。
+#   週に 1 回スキャンして issue を立てるより速い。**この層が足すべきものはそこではない。**
+#
+#   分類 P に足りないのは「**配ったものが古いまま利用者の PC に残る**」ほうである。
+#   develop が直っても、再リリースしなければ配布物は直らない。
+#   **だからここが見るのは develop ではなくリリース資産**で、比べる相手が
+#   「いま develop から作れるもの」になる。
+#
+# ★ 見るのは同梱物だけ。ベースイメージと秘密の混入は分類 A の話なので、ここへ写さない。
+#
+# ★ CVE が出たときに何をするか: **issue を立てる。再リリースするかは人が決める。**
+#   これを決めずに監視だけ置くと「守れていないのに緑が出る」形に近づく。
+#
+# ★ 構造が変わったら緑ではなく赤にする。zip の中の PDFjig/runtime/release と PDFjig/app/ は
+#   決め打ちで読む。find で探す形にすると、パスが変われば静かに 0 件マッチして
+#   「差分なし」の緑が出る——点検しているつもりで何も見ていない状態になる。
+
+on:
+  schedule:
+    # Asia/Tokyo 月曜 09:00 = UTC 日曜 00:00。Dependabot（週次・月曜 09:00 JST）と
+    # 同じ曜日へ寄せて、依存まわりの棚卸しを週 1 回で済ませる。
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # 差が見つかったときに issue を立てる／追記する。この 1 点のためだけに要る。
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    name: 配布済みと、いま作れるものを比べる
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # uses は SHA でピンしてある。末尾の版コメントは Dependabot が SHA と一緒に
+    # 書き換えるので消さないこと（理由は .github/dependabot.yml）。
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 配布物が無いなら比べる相手が無い。ここで抜ければ Gradle も動かさずに済む。
+      - name: 配布済みのリリースがあるか
+        id: released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if rel=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null); then
+            {
+              echo "found=true"
+              echo "tag=$(jq -r .tag_name <<<"$rel")"
+            } >> "$GITHUB_OUTPUT"
+            jq -r '.assets[] | select(.name | endswith("-win-x64.zip")) | .browser_download_url' \
+              <<<"$rel" > asset-url.txt
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo '配布済みのリリースが無い。比べる相手が無いので何もしない。' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up JDK 21
+        if: steps.released.outputs.found == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        if: steps.released.outputs.found == 'true'
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # jlink も jpackage も要らない。同梱する jar を集めるだけなので ubuntu で足りる。
+      # 版は比較に使わないので固定値でよい（自前の jar は下で除外する）。
+      - name: いま作れる同梱物を出す
+        if: steps.released.outputs.found == 'true'
+        run: ./gradlew :pdf-desktop:jpackageInput -Pversion=0.0.0 --stacktrace
+
+      - name: 比べて、古ければ issue を立てる
+        if: steps.released.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.released.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          url=$(cat asset-url.txt)
+          if [ -z "$url" ]; then
+            echo "::error::${TAG} に -win-x64.zip が無い"
+            exit 1
+          fi
+          curl -fsSL -o released.zip "$url"
+
+          # ---------------------------------------------------------- 配ったもの
+          # 決め打ちで読む。無ければ赤にする（構造が変わったのに緑を出さない）。
+          unzip -p released.zip 'PDFjig/runtime/release' > released-release.txt
+          rel_jdk=$(sed -n 's/^JAVA_VERSION="\(.*\)"$/\1/p' released-release.txt)
+          if [ -z "$rel_jdk" ]; then
+            echo "::error::配布物の release に JAVA_VERSION が無い"
+            exit 1
+          fi
+          # JAVAFX_VERSION はこの仕組みを入れた版から入る。それより前の配布物には無い。
+          rel_fx=$(sed -n 's/^JAVAFX_VERSION=\(.*\)$/\1/p' released-release.txt)
+
+          unzip -Z1 released.zip \
+            | sed -n 's|^PDFjig/app/\(.*\.jar\)$|\1|p' \
+            | grep -vE '^pdf-(ai|core|desktop)-' | sort > released-jars.txt
+          if [ ! -s released-jars.txt ]; then
+            echo "::error::配布物の app/ に第三者の jar が無い"
+            exit 1
+          fi
+
+          # ------------------------------------------------ いま作れるもの
+          ls pdf-desktop/build/jpackage/input/*.jar \
+            | xargs -n1 basename \
+            | grep -vE '^pdf-(ai|core|desktop)-' | sort > current-jars.txt
+          cur_fx=$(sed -n 's/^javafx = "\(.*\)"$/\1/p' gradle/libs.versions.toml)
+          latest_jdk=$(curl -fsSL "https://api.adoptium.net/v3/assets/feature_releases/21/ga?architecture=x64&image_type=jdk&os=windows&jvm_impl=hotspot&page_size=1&sort_method=DEFAULT&sort_order=DESC" \
+            | jq -r '.[0].version_data.openjdk_version' | sed 's/-LTS$//; s/+.*//')
+
+          # -------------------------------------------------------------- 比べる
+          # 版の前後は sort -V で見る。21.0.8 と 21.0.12 を文字列で比べると逆になる。
+          older() {
+            [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
+          }
+
+          : > findings.md
+          if older "$rel_jdk" "$latest_jdk"; then
+            echo "- **JDK**: 配布物は \`${rel_jdk}\` / 最新の Temurin 21 は \`${latest_jdk}\`" >> findings.md
+          fi
+          if [ -z "$rel_fx" ]; then
+            echo "- **JavaFX**: 配布物から版が読めない（\`JAVAFX_VERSION\` を入れる前の成果物）。develop は \`${cur_fx}\`" >> findings.md
+          elif older "$rel_fx" "$cur_fx"; then
+            echo "- **JavaFX**: 配布物は \`${rel_fx}\` / develop は \`${cur_fx}\`" >> findings.md
+          fi
+          if ! diff -q released-jars.txt current-jars.txt >/dev/null; then
+            {
+              echo "- **同梱 jar** が develop と違う:"
+              echo ""
+              echo '```diff'
+              diff released-jars.txt current-jars.txt || true
+              echo '```'
+            } >> findings.md
+          fi
+
+          {
+            echo "### 配布済み \`${TAG}\` と develop の比較"
+            echo ""
+            echo "| | 配布物 | いま作れるもの |"
+            echo "|---|---|---|"
+            echo "| JDK | \`${rel_jdk}\` | 最新 Temurin 21: \`${latest_jdk}\` |"
+            echo "| JavaFX | \`${rel_fx:-（読めない）}\` | \`${cur_fx}\` |"
+            echo "| 同梱 jar | $(wc -l < released-jars.txt) 本 | $(wc -l < current-jars.txt) 本 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ! -s findings.md ]; then
+            printf '\n**差は無い。**\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          cat findings.md >> "$GITHUB_STEP_SUMMARY"
+
+          # ------------------------------------------ issue を立てる／追記する
+          # 週ごとに新しい issue を積まない。本文の印で既存を探して、あれば追記する。
+          {
+            echo "<!-- distributed-artifact-watch -->"
+            echo ""
+            echo "配布済みの \`${TAG}\` が、いま develop から作れるものより古い版を焼き込んでいる（$(date -u +%Y-%m-%d) 実測）。"
+            echo ""
+            cat findings.md
+            echo ""
+            echo "**配布物は再リリースしない限り、古いまま利用者の PC に残る。**"
+            echo "直すかどうか（＝再リリースするか）は人が決めること。この仕組みは知らせるだけである。"
+            echo ""
+            echo "run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > issue-body.md
+
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 50 \
+            --search "distributed-artifact-watch in:body" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file issue-body.md
+            printf '\n既存の issue #%s へ追記した。\n' "$existing" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "配布済みの ${TAG} が古い版を焼き込んでいる" --body-file issue-body.md
+          fi
