@@ -160,6 +160,13 @@ Public リポジトリであり、一度コミットされた機密文書は取�
 置き場は `pdf-desktop/src/uiTest`（`./gradlew :pdf-desktop:uiTest`）。
 デスクトップセッションを要するため `build` には含めない。
 
+★ **直に叩くと、実行中は開発機のマウスとキーボードを取り上げられる。**
+TestFX の Glass Robot が実入力を使うためで、画面をロックしていると落ちる。
+`tools/sandbox/Invoke-UiTestInSandbox.ps1` を通すと、ホストの `build/` と `~/.gradle` を汚さず、
+ロック中でも走る。**ただしカーソルは奪われたままである**——
+1 つの Windows セッションの中では避けられない（`HANDOVER.md`「uiTest を手元で隔離しようとして、
+できないと分かった」に 3 構成の実測がある。**同じ道を掘る前に読むこと**）。
+
 **書く前に `HANDOVER.md`「UI テストの自動化」を読むこと。**
 理由の分からない落ち方をする罠がいくつかある。
 

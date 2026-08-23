@@ -47,8 +47,18 @@ final class StubFileDialogs implements FileDialogs {
         openMultiple = List.of(paths);
     }
 
+    /** 「追加」に仕込んだ答えがまだ使われていないか。用途は {@link #openPending()} と同じ。 */
+    boolean openMultiplePending() {
+        return openMultiple != null;
+    }
+
     void willSaveTo(Path path) {
         save = path;
+    }
+
+    /** 「保存」に仕込んだ答えがまだ使われていないか。用途は {@link #openPending()} と同じ。 */
+    boolean savePending() {
+        return save != null;
     }
 
     void willChooseFolder(Path path) {
