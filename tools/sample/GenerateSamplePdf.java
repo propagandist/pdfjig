@@ -69,7 +69,7 @@ public final class GenerateSamplePdf {
         }
 
         List<Sheet> sheets = sheets();
-        byte[] pdf = build(sheets);
+        byte[] pdf = serialize(objects(sheets));
         Files.write(target, pdf);
 
         System.out.println("wrote " + target + " (" + sheets.size() + " pages, " + pdf.length + " bytes)");
@@ -87,11 +87,11 @@ public final class GenerateSamplePdf {
     }
 
     /**
-     * PDF のバイト列を組み立てる。
+     * 間接オブジェクトを番号順に組み立てる。
      *
      * <p>オブジェクト番号を配列の添字にそのまま使うため、添字 0 は空けてある。
      */
-    private static byte[] build(List<Sheet> sheets) {
+    private static String[] objects(List<Sheet> sheets) {
         int total = sheets.size();
         int firstContent = FIRST_PAGE + total;
 
@@ -119,11 +119,19 @@ public final class GenerateSamplePdf {
                     "<< /Length " + latin1(stream).length + " >>\nstream\n" + stream + "\nendstream";
         }
 
+        return objects;
+    }
+
+    /**
+     * 組み上がったオブジェクトを 1 つのファイルに並べる。
+     *
+     * <p>xref に書くオフセットは、書きながら実測する。
+     */
+    private static byte[] serialize(String[] objects) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         // 2 行目のバイナリマーカーは「このファイルはテキストではない」の合図。中身に意味はない。
         push(out, "%PDF-1.7\n%âãÏÓ\n");
 
-        // xref に書くオフセットは、組み立てながら実測する。
         int size = objects.length;
         int[] offsets = new int[size];
         for (int i = 1; i < size; i++) {
@@ -196,6 +204,9 @@ public final class GenerateSamplePdf {
      * <p>整数値は小数点を落とす。移植元の JS には数値型が 1 つしかなく {@code 300} は
      * {@code "300"} になるが、Java の {@code double} をそのまま文字列にすると {@code "300.0"} に
      * なって出力がずれる。ここで JS 側の表記に合わせている。
+     *
+     * <p>整数として扱うのは {@code long} で表せる範囲だけにしてある。範囲外は {@code (long)} の
+     * キャストが飽和して別の数になるためで、ページの座標でそこへ届くことはない。
      */
     private static String num(double value) {
         if (value == Math.rint(value) && Math.abs(value) < 1e15) {
