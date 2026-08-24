@@ -1107,6 +1107,30 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
   **次のリリースでは、そのタグのコミットまで `main` を進める。**
   保護は ruleset id 21228747（`deletion` / `non_fast_forward`）。理由は下の記録にある
 
+### 撮影用サンプルの生成器（2026-08-24）
+
+アイキャッチや説明用の画を撮るための PDF を `tools/sample/GenerateSamplePdf.java` で作る。
+
+```bash
+java tools/sample/GenerateSamplePdf.java [出力先]
+```
+
+出力先を省くと `tmp/sample-scan-bundle-12p.pdf` に書く。DELIVERY NOTE 3 枚 /
+INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわざと不揃いにしてある**——
+区切り → 分割のデモがそのまま撮れる。中身はダミー文字列だけで機密は含まない。
+
+- ★ **生成物は追跡しない**（INV-6）。このツールは乱数も日付も使わないので、何度回しても
+  同じバイト列が出る。**PDF を置かなくても同じ画を撮り直せる**から、`.gitignore` の `*.pdf` に
+  穴を開けずに済んでいる。**乱数や日付を入れた時点でこの理屈が崩れる**ので、入れないこと
+- **元は JS で書かれていた。** リポジトリに Node の資産が 1 つも無く、Spotless の管轄外に
+  1 ファイル残ることになるので、`tools/icon/GenerateIcon.java` と同じ単一ファイル Java へ移した。
+  移植で**出力は 1 バイトも変えていない**（JS 版の出力と `cmp` が完全一致。**2026-08-24 実測**）
+- **PDFBox を使わずバイト列を手で組んでいる。** `tools/` は Gradle のビルドグラフの外にあり、
+  単一ファイル起動では外部 jar を引けない。`GenerateIcon.java` も JDK 標準だけで書かれている
+- ★ 手組みなので、**PDF として妥当かは PDFBox の目で見る**——`pdf-cli info` が `pages: 12` /
+  `encrypted: false` を返すこと（**2026-08-24 実測**）。**xref が壊れていても開けてしまう
+  ビューアがある**ので、画面で開けたことは根拠にならない
+
 ---
 
 ## 未決事項
