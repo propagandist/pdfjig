@@ -179,8 +179,10 @@ function Invoke-Sandbox {
     # Sandbox は同時に 1 つしか動かない。前のが残っていると起動が黙って失敗する。
     $running = @(Get-Process -Name 'WindowsSandbox', 'WindowsSandboxClient' -ErrorAction SilentlyContinue)
     if ($running.Count -gt 0) {
-        throw ('Windows Sandbox が既に動いている（PID {0}）。閉じてからにすること。' -f
-            ($running | ForEach-Object { $_.Id }) -join ', ')
+        # -join を先に済ませる。-f のほうが強く束縛するので、後ろへ置くと
+        # 出来上がった 1 つの文字列に -join が掛かり、PID が 1 つしか出ない（2026-08-24 実測）。
+        $ids = ($running | ForEach-Object { $_.Id }) -join ', '
+        throw ('Windows Sandbox が既に動いている（PID {0}）。閉じてからにすること。' -f $ids)
     }
 
     if (Test-Path $OutputDir) {
