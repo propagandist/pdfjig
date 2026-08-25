@@ -724,6 +724,13 @@ public final class MainWindow {
      * 上書きを利用者に確認するが、pdf-core は既存の出力を拒む。先に消してしまうと
      * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
      * 元のファイルはそのまま残る。
+     *
+     * <p><b>この経路だけが pdf-core の「既存の出力を拒む」約束の上に層を重ねている。</b>
+     * ダイアログで確認が取れているので置き換えてよい、という判断であり、
+     * 画面の<b>分割</b>は層を重ねずに拒むほうを保っている（{@code splitInto}）。
+     * 約束が 2 段になっていることの正本は {@code docs/SPEC.md} §4.2 にある。
+     * <b>確認を出すのは OS のダイアログなので、出ていることを自動テストでは確かめられない</b>
+     * （{@link FileDialogs} の向こう側。{@code docs/HANDOVER.md} 4-4 の 10 番）。
      */
     private static List<Warning> assemble(List<Path> sources, List<PageSelection> pages, Path output) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
