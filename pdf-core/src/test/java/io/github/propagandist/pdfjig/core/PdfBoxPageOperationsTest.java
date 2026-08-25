@@ -488,6 +488,26 @@ class PdfBoxPageOperationsTest {
                             .filter(warning -> warning == Warning.ENCRYPTION_NOT_PROPAGATED)
                             .toList());
         }
+
+        @Test
+        @DisplayName("出力に 1 ページも使わない入力については警告しない")
+        void staysSilentAboutInputsThatDoNotReachTheOutput() throws Exception {
+            // 画面で「PDF を追加」したあと、足したほうのページを 1 枚残らず消してから保存すると
+            // この形になる。出て来た PDF に署名は無いのに「署名が無効になる」と言えば、
+            // 次に本物の署名済み文書を編集したとき、利用者は警告を無視する。
+            Path plain = TestPdfs.withText(tempDir.resolve("plain.pdf"), "A1", "A2");
+            Path signedInput = TestPdfs.signed(tempDir.resolve("signed.pdf"), 2);
+
+            List<Warning> collected = new ArrayList<>();
+            PageOperations warned = new PdfBoxPageOperations(collected::add);
+
+            warned.assemble(
+                    List.of(plain, signedInput),
+                    List.of(PageSelection.of(0, 1), PageSelection.of(0, 2)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertFalse(collected.contains(Warning.SIGNATURE_INVALIDATED), "出力に含まれない入力について、署名が無効になると伝えている。");
+        }
     }
 
     @Nested
