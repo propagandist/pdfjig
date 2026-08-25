@@ -713,6 +713,32 @@ class PdfBoxPageOperationsTest {
             assertEquals(List.of("ALSOKEPT", "KEEPME"), textsOf(output));
             assertNotReachable(output, "SECRETA");
         }
+
+        @Test
+        @DisplayName("タグ付き文書でも、取り出さなかったページの内容が出力に残らない")
+        void extractLeavesNothingBehindInTaggedDocuments() throws Exception {
+            // タグ付き PDF は /StructTreeRoot の構造要素が /Pg でページを直接指す。
+            // ページツリーから外しても指したままなので、参照を辿って書き出せば中身が残る。
+            // Word / PowerPoint / Google Docs が既定で作るのはこの形である。
+            Path input = TestPdfs.withStructTree(tempDir.resolve("tagged.pdf"), "KEEPME", "SECRETA", "SECRETB");
+
+            Path output = operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertEquals(List.of("KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA", "SECRETB");
+        }
+
+        @Test
+        @DisplayName("タグ付き文書を並べ替えても、捨てたページの内容が出力に残らない")
+        void assembleLeavesNothingBehindInTaggedDocuments() throws Exception {
+            Path input = TestPdfs.withStructTree(tempDir.resolve("tagged.pdf"), "KEEPME", "SECRETA", "ALSOKEPT");
+
+            Path output = operations.assemble(
+                    input, List.of(PageSelection.of(3), PageSelection.of(1)), tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("ALSOKEPT", "KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA");
+        }
     }
 
     /**

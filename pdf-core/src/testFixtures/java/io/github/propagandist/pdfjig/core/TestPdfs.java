@@ -77,6 +77,9 @@ public final class TestPdfs {
     /** {@link #rich} が添付するファイルの中身。 */
     public static final String ATTACHMENT_BODY = "attached";
 
+    /** {@link #withStructTree} が各ページに与える構造要素の型。 */
+    public static final String STRUCT_ELEMENT_TYPE = "P";
+
     /** {@link #withNestedOutline} の親項目の表題。2 ページ目を指す。 */
     public static final String NESTED_PARENT_TITLE = "Parent";
 
@@ -386,6 +389,45 @@ public final class TestPdfs {
     }
 
     /** 各ページの回転角を先頭から順に返す。 */
+    /**
+     * タグ付き PDF を作る。{@code /StructTreeRoot} の構造要素が {@code /Pg} でページを直接指す。
+     *
+     * <p><b>この形は珍しくない。</b> Word / PowerPoint / InDesign / Google Docs は
+     * 既定でタグ付き PDF を出力する。アクセシビリティ準拠が要る文書はどれもこの形になる。
+     *
+     * <p>ページツリーから外しても {@code /Pg} は指したままになるため、
+     * <b>参照を辿って書き出す限り、外したページの中身が出力に残る経路</b>になる。
+     */
+    public static Path withStructTree(Path target, String... pageTexts) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            COSArray kids = new COSArray();
+            for (int i = 0; i < pageTexts.length; i++) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+                page.getCOSObject().setInt(COSName.STRUCT_PARENTS, i);
+                try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                    content.beginText();
+                    content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), FONT_SIZE);
+                    content.newLineAtOffset(TEXT_LEFT, page.getMediaBox().getHeight() - TEXT_TOP);
+                    content.showText(pageTexts[i]);
+                    content.endText();
+                }
+                COSDictionary element = new COSDictionary();
+                element.setItem(COSName.TYPE, COSName.getPDFName("StructElem"));
+                element.setItem(COSName.S, COSName.getPDFName(STRUCT_ELEMENT_TYPE));
+                element.setItem(COSName.PG, page.getCOSObject());
+                element.setInt(COSName.K, i);
+                kids.add(element);
+            }
+            COSDictionary root = new COSDictionary();
+            root.setItem(COSName.TYPE, COSName.getPDFName("StructTreeRoot"));
+            root.setItem(COSName.K, kids);
+            document.getDocumentCatalog().getCOSObject().setItem(COSName.STRUCT_TREE_ROOT, root);
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
     public static List<Integer> rotationsOf(Path pdf) throws IOException {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
             List<Integer> rotations = new ArrayList<>();
