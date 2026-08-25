@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.IntStream;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -138,9 +139,10 @@ public final class PdfBoxPageOperations implements PageOperations {
         try (OpenDocuments sources = new OpenDocuments()) {
             List<PdfDocument> documents = new ArrayList<>(inputs.size());
             for (Path input : inputs) {
-                documents.add(sources.open(input));
+                documents.add(sources.openQuietly(input));
             }
             requireSelectable(pages, documents);
+            warnAboutContributing(documents, pages);
             write(inputs, documents, pages, output);
         }
         return output;
@@ -237,6 +239,37 @@ public final class PdfBoxPageOperations implements PageOperations {
      * すべての指定が 1 つの入力から来ていて、同じページを二度使っていなければ、
      * その出どころの添字を返す。そうでなければ {@code -1}。
      */
+    /**
+     * 出力に寄与する入力についてだけ、暗号化と署名を伝える。
+     *
+     * <p><b>開いた時点では伝えない。</b> 画面で「PDF を追加」したあと、足したほうのページを
+     * 1 枚残らず消してから保存すると、その入力は出力に 1 バイトも寄与しないまま
+     * {@code inputs} に残る（{@code deleteSelected} は並びから外すだけで、
+     * ファイル一覧からは外さない）。そこで開いた時点で警告すると、
+     * <b>署名の無い出力について「署名が無効になる」と告げる</b>ことになる。
+     *
+     * <p>中身と食い違う警告は、次に本物の署名済み文書を編集したときに無視される
+     * （{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p>寄与する入力が複数あれば<b>その数だけ伝える</b>。1 つにまとめない——
+     * どれが暗号化されていたのかは、数が合っていないと利用者から辿れない。
+     */
+    private void warnAboutContributing(List<PdfDocument> documents, List<PageSelection> pages) {
+        Set<Integer> contributing = new TreeSet<>();
+        for (PageSelection selection : pages) {
+            contributing.add(selection.sourceIndex());
+        }
+        for (int index : contributing) {
+            PdfDocument document = documents.get(index);
+            if (document.encrypted()) {
+                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+            }
+            if (document.signed()) {
+                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+            }
+        }
+    }
+
     private static int singleSourceIndexOf(List<PageSelection> pages) {
         int sourceIndex = pages.get(0).sourceIndex();
         Set<Integer> seen = new HashSet<>(pages.size());
