@@ -441,12 +441,33 @@ public final class MainWindow {
             return;
         }
 
-        List<Path> sources = session.paths();
-        List<PageSelection> pages = session.order().toPageSelections();
+        DocumentSession saving = session;
+        List<Path> sources = saving.paths();
+        List<PageSelection> pages = saving.order().toPageSelections();
         Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
-        runAsync(() -> assemble(sources, pages, output), this::showWarnings);
+        runAsync(() -> assemble(sources, pages, output), warnings -> {
+            markSaved(saving, pages);
+            showWarnings(warnings);
+        });
+    }
+
+    /**
+     * 書き出しが済んだので、その並びを基準にする。状態行から「未保存の変更があります」が消える。
+     *
+     * <p>書き出し中に別の文書を開かれていることがある。始めたときと同じ文書のままでなければ、
+     * 基準を動かしてはならない。渡すのは <b>書き出した並び</b> であって今の並びではない。
+     * 書き出している間に並べ替えられていれば、その分はまだ書き出されていない。
+     *
+     * <p>完了は JavaFX スレッドで走るため、比べるだけなら同期は要らない。
+     */
+    private void markSaved(DocumentSession saving, List<PageSelection> pages) {
+        if (session != saving) {
+            return;
+        }
+        session.order().markSaved(pages);
+        updateStatus();
     }
 
     private void deleteSelected() {
@@ -761,8 +782,19 @@ public final class MainWindow {
                 throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
             }
         }
-        for (int i = 0; i < segments.size(); i++) {
-            operations.assemble(sources, segments.get(i), outputs.get(i));
+        // 途中で失敗したら、それまでに書いたものを消す。何個できたのか分からないまま
+        // 失敗だけを伝えると、利用者は出力先を自分で見に行くしかない。
+        // 上で存在を確かめているため、消してよいのはここで作ったものだけである。
+        List<Path> written = new ArrayList<>(outputs.size());
+        try {
+            for (int i = 0; i < segments.size(); i++) {
+                // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
+                written.add(outputs.get(i));
+                operations.assemble(sources, segments.get(i), outputs.get(i));
+            }
+        } catch (RuntimeException e) {
+            written.forEach(MainWindow::deleteQuietly);
+            throw e;
         }
         return new SplitResult(segments.size(), List.copyOf(warnings));
     }
@@ -940,6 +972,10 @@ public final class MainWindow {
             }
             if (session.encrypted()) {
                 text.append("（暗号化されています）");
+            }
+            if (session.signed()) {
+                // 編集を始める前に知らせる。保存後の警告では遅い。
+                text.append("（電子署名があります）");
             }
         }
         // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、

@@ -211,6 +211,57 @@ class PageOrderTest {
     }
 
     @Test
+    @DisplayName("書き出した並びを基準にすると、変更は無いことになる")
+    void markingSavedClearsTheModifiedFlag() {
+        PageOrder order = PageOrder.of(3);
+        order.move(0, 2);
+        assertTrue(order.modified());
+
+        order.markSaved(order.toPageSelections());
+
+        assertFalse(order.modified());
+    }
+
+    @Test
+    @DisplayName("基準にした後にまた動かせば、変更ありに戻る")
+    void movingAfterSaveIsAModificationAgain() {
+        PageOrder order = PageOrder.of(3);
+        order.markSaved(order.toPageSelections());
+
+        order.move(0, 2);
+
+        assertTrue(order.modified());
+    }
+
+    @Test
+    @DisplayName("書き出している間の並べ替えは、書き出されていないままになる")
+    void keepsEditsMadeWhileWritingAsUnsaved() {
+        PageOrder order = PageOrder.of(3);
+        // 書き出しに渡した並びを控えてから、書き出しの最中に動かした状況。
+        List<PageSelection> written = order.toPageSelections();
+        order.move(0, 2);
+
+        order.markSaved(written);
+
+        assertTrue(order.modified(), "書き出していない並べ替えが保存済みになっている。");
+    }
+
+    @Test
+    @DisplayName("元に戻すと、最後に書き出した並びに戻る")
+    void resetReturnsToTheLastSavedOrder() {
+        PageOrder order = PageOrder.of(3);
+        order.move(0, 2);
+        order.markSaved(order.toPageSelections());
+        List<Integer> saved = pageNumbersOf(order);
+
+        order.move(0, 2);
+        order.reset();
+
+        assertEquals(saved, pageNumbersOf(order));
+        assertFalse(order.modified());
+    }
+
+    @Test
     @DisplayName("元に戻すと、追加した文書を含んだまま各文書の元の順に並ぶ")
     void resetKeepsAddedDocuments() {
         PageOrder order = PageOrder.of(2);

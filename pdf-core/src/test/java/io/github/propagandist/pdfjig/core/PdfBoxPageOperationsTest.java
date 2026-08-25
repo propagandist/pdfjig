@@ -2,14 +2,37 @@ package io.github.propagandist.pdfjig.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDPageLabels;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -51,6 +74,42 @@ class PdfBoxPageOperationsTest {
 
             assertEquals(List.of("A1", "A2"), textsOf(first));
             assertEquals(List.of("B1"), textsOf(second));
+        }
+
+        @Test
+        @DisplayName("文書情報は先頭の入力のものが残り、その旨を伝える")
+        void keepsDocumentInformationOfFirstInput() throws Exception {
+            Path first = TestPdfs.rich(tempDir.resolve("a.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
+
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(merged));
+            assertTrue(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+
+        @Test
+        @DisplayName("2 つ目にしか題名が無くても、先頭の入力の文書情報が使われる")
+        void alwaysTakesInformationFromTheFirstInput() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1");
+            Path second = TestPdfs.rich(tempDir.resolve("b.pdf"), "B1");
+
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertNull(titleOf(merged), "先頭の入力に題名が無いのに題名が付いている。");
+        }
+
+        @Test
+        @DisplayName("入力が 1 つなら、文書情報の警告は出ない")
+        void doesNotWarnAboutMetadataForSingleInput() throws Exception {
+            Path only = TestPdfs.rich(tempDir.resolve("a.pdf"), "A1", "A2");
+
+            Path merged = operations.merge(List.of(only), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(merged));
+            assertFalse(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
         }
 
         @Test
@@ -151,6 +210,32 @@ class PdfBoxPageOperationsTest {
                                     () -> operations.split(input, SplitStrategy.everyNPages(1), outputDir))
                             .errorCode());
             assertFalse(Files.exists(outputDir.resolve("doc_001.pdf")));
+        }
+
+        @Test
+        @DisplayName("書き出しの途中で失敗したら、それまでに書いたものも残さない")
+        void removesPartialOutputOnFailure() throws Exception {
+            // 出力先が既にある場合は書き出しに入る前に弾かれるため、この経路は通らない。
+            // 実際に途中で落ちるのはディスクが尽きた・権限を失ったといった場合であり、
+            // それは環境に依らせて起こせない。警告の通知を故意に失敗させて代わりにする。
+            //
+            // ページどうしがリンクで繋がった文書を 1 ページずつに切ると、宛先を失った
+            // 参照の警告が出力ごとに 1 度ずつ出る。その 2 度目で落とせば、
+            // 1 つ目を書き終えて 2 つ目を書く前という狙った位置で失敗する。
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            Path outputDir = tempDir.resolve("out");
+
+            AtomicInteger notified = new AtomicInteger();
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                if (notified.incrementAndGet() == 2) {
+                    throw new IllegalStateException("書き出しの途中で失敗させる");
+                }
+            });
+
+            assertThrows(
+                    IllegalStateException.class, () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir));
+
+            assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
         }
     }
 
@@ -396,7 +481,32 @@ class PdfBoxPageOperationsTest {
                     List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
                     tempDir.resolve("assembled.pdf"));
 
-            assertEquals(List.of(Warning.ENCRYPTION_NOT_PROPAGATED), collected);
+            // 他の警告も出るが、ここで見たいのは暗号化の警告が入力 1 つにつき 1 度であること。
+            assertEquals(
+                    List.of(Warning.ENCRYPTION_NOT_PROPAGATED),
+                    collected.stream()
+                            .filter(warning -> warning == Warning.ENCRYPTION_NOT_PROPAGATED)
+                            .toList());
+        }
+
+        @Test
+        @DisplayName("出力に 1 ページも使わない入力については警告しない")
+        void staysSilentAboutInputsThatDoNotReachTheOutput() throws Exception {
+            // 画面で「PDF を追加」したあと、足したほうのページを 1 枚残らず消してから保存すると
+            // この形になる。出て来た PDF に署名は無いのに「署名が無効になる」と言えば、
+            // 次に本物の署名済み文書を編集したとき、利用者は警告を無視する。
+            Path plain = TestPdfs.withText(tempDir.resolve("plain.pdf"), "A1", "A2");
+            Path signedInput = TestPdfs.signed(tempDir.resolve("signed.pdf"), 2);
+
+            List<Warning> collected = new ArrayList<>();
+            PageOperations warned = new PdfBoxPageOperations(collected::add);
+
+            warned.assemble(
+                    List.of(plain, signedInput),
+                    List.of(PageSelection.of(0, 1), PageSelection.of(0, 2)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertFalse(collected.contains(Warning.SIGNATURE_INVALIDATED), "出力に含まれない入力について、署名が無効になると伝えている。");
         }
     }
 
@@ -576,6 +686,407 @@ class PdfBoxPageOperationsTest {
             operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
 
             assertTrue(warnings.isEmpty());
+        }
+    }
+
+    /**
+     * 出力に含めなかったページが、出力ファイルの中に残っていないことを確かめる。
+     *
+     * <p>ページ数や見えている本文を数えるだけでは捕まらない。ページツリーから外れていても、
+     * 生き残ったページの参照から辿れるオブジェクトは保存時に書き出されるため、
+     * 捨てたはずのページが「見えないが在る」状態になりうる。
+     * 目次や相互参照を持つ文書から機密ページを取り除いて渡す、という使い方で実害が出る。
+     */
+    @Nested
+    class NoLeakage {
+
+        @Test
+        @DisplayName("取り出さなかったページの内容が出力に残らない")
+        void extractLeavesNothingBehind() throws Exception {
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "KEEPME", "SECRETA", "SECRETB");
+
+            Path output = operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertEquals(List.of("KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA", "SECRETB");
+        }
+
+        @Test
+        @DisplayName("削除したページの内容が出力に残らない")
+        void deleteLeavesNothingBehind() throws Exception {
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "KEEPME", "SECRETA", "SECRETB");
+
+            Path output = operations.deletePages(input, PageRange.of(2, 3), tempDir.resolve("deleted.pdf"));
+
+            assertEquals(List.of("KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA", "SECRETB");
+        }
+
+        @Test
+        @DisplayName("並べ替えても捨てたページの内容が出力に残らない")
+        void assembleLeavesNothingBehind() throws Exception {
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "KEEPME", "SECRETA", "ALSOKEPT");
+
+            Path output = operations.assemble(
+                    input, List.of(PageSelection.of(3), PageSelection.of(1)), tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("ALSOKEPT", "KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA");
+        }
+
+        @Test
+        @DisplayName("タグ付き文書でも、取り出さなかったページの内容が出力に残らない")
+        void extractLeavesNothingBehindInTaggedDocuments() throws Exception {
+            // タグ付き PDF は /StructTreeRoot の構造要素が /Pg でページを直接指す。
+            // ページツリーから外しても指したままなので、参照を辿って書き出せば中身が残る。
+            // Word / PowerPoint / Google Docs が既定で作るのはこの形である。
+            Path input = TestPdfs.withStructTree(tempDir.resolve("tagged.pdf"), "KEEPME", "SECRETA", "SECRETB");
+
+            Path output = operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertEquals(List.of("KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA", "SECRETB");
+        }
+
+        @Test
+        @DisplayName("タグ付き文書を並べ替えても、捨てたページの内容が出力に残らない")
+        void assembleLeavesNothingBehindInTaggedDocuments() throws Exception {
+            Path input = TestPdfs.withStructTree(tempDir.resolve("tagged.pdf"), "KEEPME", "SECRETA", "ALSOKEPT");
+
+            Path output = operations.assemble(
+                    input, List.of(PageSelection.of(3), PageSelection.of(1)), tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("ALSOKEPT", "KEEPME"), textsOf(output));
+            assertNotReachable(output, "SECRETA");
+        }
+    }
+
+    /**
+     * 書き出しで文書全体の構造が失われないこと。
+     *
+     * <p>ページを新しい文書に詰め替えると、しおり・文書情報・添付ファイル・ページラベルは
+     * ページに属さないためすべて落ちる。出力が入力より劣化する経路を作らないための担保である。
+     */
+    @Nested
+    class StructurePreserved {
+
+        @Test
+        @DisplayName("範囲を取り出しても、しおり・文書情報・添付・ページラベルが残る")
+        void extractKeepsDocumentStructure() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.extractPages(input, PageRange.of(1, 2), tempDir.resolve("extracted.pdf"));
+
+            assertEquals(
+                    List.of(TestPdfs.OUTLINE_TITLE_PREFIX + 1, TestPdfs.OUTLINE_TITLE_PREFIX + 2),
+                    outlineTitlesOf(output));
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertEquals(List.of(TestPdfs.ATTACHMENT_NAME), attachmentNamesOf(output));
+            assertEquals(List.of("i", "ii"), pageLabelsOf(output));
+        }
+
+        @Test
+        @DisplayName("並べ替えても、しおりと文書情報が残る")
+        void assembleKeepsDocumentStructure() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(3), PageSelection.of(1), PageSelection.of(2)),
+                    tempDir.resolve("assembled.pdf"));
+
+            assertEquals(List.of("P3", "P1", "P2"), textsOf(output));
+            // どのページも捨てていないため、しおりは 3 つとも残る。
+            assertEquals(3, outlineTitlesOf(output).size());
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertEquals(List.of(TestPdfs.ATTACHMENT_NAME), attachmentNamesOf(output));
+        }
+
+        @Test
+        @DisplayName("何も変えずに書き出しても構造は残る")
+        void writingUnchangedKeepsDocumentStructure() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(1), PageSelection.of(2), PageSelection.of(3)),
+                    tempDir.resolve("saved.pdf"));
+
+            assertEquals(3, outlineTitlesOf(output).size());
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertEquals(List.of(TestPdfs.ATTACHMENT_NAME), attachmentNamesOf(output));
+            assertEquals(List.of("i", "ii", "iii"), pageLabelsOf(output));
+            assertTrue(warnings.isEmpty(), "何も捨てていないのに警告が出ている。");
+        }
+
+        @Test
+        @DisplayName("並べ替えても、中間ノードから継承していた寸法が失われない")
+        void reorderKeepsInheritedMediaBox() throws Exception {
+            PDRectangle box = new PDRectangle(200f, 400f);
+            Path input = TestPdfs.withInheritedMediaBox(tempDir.resolve("doc.pdf"), box, 3);
+
+            Path output = operations.reorder(input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of(200f, 200f, 200f), widthsOf(output));
+            assertEquals(List.of(400f, 400f, 400f), heightsOf(output));
+        }
+
+        @Test
+        @DisplayName("複数の入力を混ぜると、両方のしおりが残り、文書情報の出どころを断る")
+        void mergingKeepsBothOutlines() throws Exception {
+            Path first = TestPdfs.rich(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.rich(tempDir.resolve("second.pdf"), "B1", "B2");
+
+            Path output = operations.assemble(
+                    List.of(first, second),
+                    List.of(
+                            PageSelection.of(0, 1),
+                            PageSelection.of(1, 1),
+                            PageSelection.of(0, 2),
+                            PageSelection.of(1, 2)),
+                    tempDir.resolve("mixed.pdf"));
+
+            assertEquals(List.of("A1", "B1", "A2", "B2"), textsOf(output));
+            assertEquals(4, outlineTitlesOf(output).size());
+            assertEquals(TestPdfs.DOCUMENT_TITLE, titleOf(output));
+            assertTrue(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+
+        @Test
+        @DisplayName("混ぜても、文書情報は先頭の入力のものだけになる")
+        void takesDocumentInformationFromTheFirstInputOnly() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1");
+            Path second = TestPdfs.rich(tempDir.resolve("second.pdf"), "B1");
+
+            Path output = operations.assemble(
+                    List.of(first, second),
+                    List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                    tempDir.resolve("mixed.pdf"));
+
+            // 先頭に題名が無いのだから、2 つ目のものを拾ってはならない。
+            assertNull(titleOf(output), "先頭の入力に題名が無いのに題名が付いている。");
+        }
+
+        @Test
+        @DisplayName("1 つの入力しか使わないなら、文書情報の警告は出ない")
+        void doesNotWarnAboutMetadataForSingleInput() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2");
+
+            operations.assemble(input, List.of(PageSelection.of(1), PageSelection.of(1)), tempDir.resolve("twice.pdf"));
+
+            assertFalse(warnings.contains(Warning.METADATA_FROM_FIRST_INPUT));
+        }
+    }
+
+    /** 宛先を失った参照の扱い。 */
+    @Nested
+    class DanglingReferences {
+
+        @Test
+        @DisplayName("宛先の消えたしおりは落ち、その子は繰り上がる")
+        void promotesChildrenOfRemovedBookmarks() throws Exception {
+            Path input = TestPdfs.withNestedOutline(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.deletePages(input, PageRange.singlePage(2), tempDir.resolve("deleted.pdf"));
+
+            // 親は消えた 2 ページ目を指していた。子はまだ生きている 3 ページ目を指す。
+            assertEquals(List.of(TestPdfs.NESTED_CHILD_TITLE), outlineTitlesOf(output));
+            assertTrue(warnings.contains(Warning.DANGLING_REFERENCES_REMOVED));
+        }
+
+        @Test
+        @DisplayName("ページを捨てれば、宛先を失った参照を取り除いたことを伝える")
+        void warnsWhenReferencesAreRemoved() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertTrue(warnings.contains(Warning.DANGLING_REFERENCES_REMOVED));
+        }
+
+        @Test
+        @DisplayName("すべてのページを残すなら、何も取り除かない")
+        void keepsEveryReferenceWhenNoPageIsDropped() throws Exception {
+            Path input = TestPdfs.rich(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            operations.reorder(input, List.of(2, 3, 1), tempDir.resolve("reordered.pdf"));
+
+            assertFalse(warnings.contains(Warning.DANGLING_REFERENCES_REMOVED));
+        }
+    }
+
+    /**
+     * 電子署名は保てない。保てないことを黙っていない、という担保。
+     *
+     * <p>署名はページの並びに紐づくため、並べ替えれば必ず壊れる。pdfjig は署名を作らず
+     * 検証もしないが、既にあるものを黙って壊すのは別の話である。
+     */
+    @Nested
+    class SignatureWarning {
+
+        @Test
+        @DisplayName("電子署名のある入力を扱うと、署名が無効になることを伝える")
+        void warnsForSignedInput() throws Exception {
+            Path input = TestPdfs.signed(tempDir.resolve("signed.pdf"), 3);
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertTrue(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+
+        @Test
+        @DisplayName("回転でも署名は壊れるため、同じように伝える")
+        void warnsOnRotate() throws Exception {
+            Path input = TestPdfs.signed(tempDir.resolve("signed.pdf"), 2);
+
+            operations.rotate(input, Map.of(1, Rotation.CLOCKWISE_90), tempDir.resolve("rotated.pdf"));
+
+            assertTrue(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+
+        @Test
+        @DisplayName("署名欄があるだけの入力では警告しない")
+        void doesNotWarnForEmptySignatureField() throws Exception {
+            Path input = TestPdfs.withEmptySignatureField(tempDir.resolve("field.pdf"), 2);
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertFalse(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+
+        @Test
+        @DisplayName("署名のない入力では警告しない")
+        void doesNotWarnForPlainInput() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("plain.pdf"), 2);
+
+            operations.extractPages(input, PageRange.singlePage(1), tempDir.resolve("extracted.pdf"));
+
+            assertFalse(warnings.contains(Warning.SIGNATURE_INVALIDATED));
+        }
+    }
+
+    /** しおりの表題を、木を上から辿った順に並べる。 */
+    private static List<String> outlineTitlesOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            PDDocumentOutline outline = document.getDocumentCatalog().getDocumentOutline();
+            List<String> titles = new ArrayList<>();
+            if (outline != null) {
+                collectTitles(outline, titles);
+            }
+            return titles;
+        }
+    }
+
+    private static void collectTitles(PDOutlineNode node, List<String> into) {
+        for (PDOutlineItem item : node.children()) {
+            into.add(item.getTitle());
+            collectTitles(item, into);
+        }
+    }
+
+    private static String titleOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            return document.getDocumentInformation().getTitle();
+        }
+    }
+
+    private static List<String> attachmentNamesOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            PDDocumentNameDictionary names = document.getDocumentCatalog().getNames();
+            if (names == null || names.getEmbeddedFiles() == null) {
+                return List.of();
+            }
+            Map<String, PDComplexFileSpecification> files =
+                    names.getEmbeddedFiles().getNames();
+            return files == null ? List.of() : List.copyOf(files.keySet());
+        }
+    }
+
+    private static List<String> pageLabelsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            PDPageLabels labels = document.getDocumentCatalog().getPageLabels();
+            return labels == null ? List.of() : List.of(labels.getLabelsByPageIndices());
+        }
+    }
+
+    private static List<Float> widthsOf(Path pdf) throws IOException {
+        return mediaBoxSizesOf(pdf, true);
+    }
+
+    private static List<Float> heightsOf(Path pdf) throws IOException {
+        return mediaBoxSizesOf(pdf, false);
+    }
+
+    private static List<Float> mediaBoxSizesOf(Path pdf, boolean width) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            List<Float> sizes = new ArrayList<>(document.getNumberOfPages());
+            for (PDPage page : document.getPages()) {
+                sizes.add(
+                        width
+                                ? page.getMediaBox().getWidth()
+                                : page.getMediaBox().getHeight());
+            }
+            return sizes;
+        }
+    }
+
+    /** 出力から辿り着けるどのストリームにも、与えた文字列が現れないこと。 */
+    private static void assertNotReachable(Path pdf, String... absent) throws IOException {
+        String reachable = reachableStreamsOf(pdf);
+        for (String needle : absent) {
+            assertFalse(reachable.contains(needle), "出力に含めなかったページの内容 '" + needle + "' が出力ファイルに残っている。");
+        }
+    }
+
+    /**
+     * 出力の trailer から辿り着けるストリームをすべて連結して返す。
+     *
+     * <p>{@code COSWriter} が書き出す対象と同じ到達可能性を、こちらでも辿る。
+     * ページツリーに現れないオブジェクトも、参照さえあればここに現れる。
+     */
+    private static String reachableStreamsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            StringBuilder collected = new StringBuilder();
+            collect(document.getDocument().getTrailer(), Collections.newSetFromMap(new IdentityHashMap<>()), collected);
+            return collected.toString();
+        }
+    }
+
+    private static void collect(COSBase base, Set<COSBase> seen, StringBuilder collected) throws IOException {
+        if (base == null) {
+            return;
+        }
+        if (base instanceof COSObject reference) {
+            collect(reference.getObject(), seen, collected);
+            return;
+        }
+        if (!seen.add(base)) {
+            return;
+        }
+        if (base instanceof COSStream stream) {
+            // 復号したうえで見る。圧縮されたままの生バイト列を探しても見つからない。
+            try (InputStream in = stream.createInputStream()) {
+                collected.append(new String(in.readAllBytes(), StandardCharsets.ISO_8859_1));
+            }
+        }
+        if (base instanceof COSDictionary dictionary) {
+            for (COSBase value : dictionary.getValues()) {
+                collect(value, seen, collected);
+            }
+        } else if (base instanceof COSArray array) {
+            for (int i = 0; i < array.size(); i++) {
+                collect(array.get(i), seen, collected);
+            }
+        }
+    }
+
+    /** そのディレクトリにあるファイル名。ディレクトリが無ければ空。 */
+    private static List<String> listFilesIn(Path directory) throws IOException {
+        if (!Files.isDirectory(directory)) {
+            return List.of();
+        }
+        try (var entries = Files.list(directory)) {
+            return entries.map(path -> path.getFileName().toString()).sorted().toList();
         }
     }
 

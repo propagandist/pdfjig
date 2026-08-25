@@ -122,6 +122,10 @@ class MainWindowUiTest extends DesktopUiTest {
 
         Path output = saveAs(robot, dir.resolve("out.pdf"));
 
+        // 書き出したのだから、状態行から「未保存の変更があります」が消えていること。
+        // 消えないと、どのファイルが最新なのか利用者に分からなくなる（#47）。
+        assertEquals("2 / 3 ページ", statusText(robot));
+
         try (PdfDocument saved = PdfDocument.open(output)) {
             assertEquals(2, saved.pageCount());
         }

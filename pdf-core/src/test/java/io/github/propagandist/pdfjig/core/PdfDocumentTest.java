@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import org.junit.jupiter.api.DisplayName;
@@ -22,6 +23,36 @@ class PdfDocumentTest {
         try (PdfDocument document = PdfDocument.open(pdf)) {
             assertEquals(3, document.pageCount());
             assertFalse(document.encrypted());
+        }
+    }
+
+    @Test
+    @DisplayName("平文の PDF に電子署名はない")
+    void reportsNoSignatureForPlainDocument() throws Exception {
+        Path pdf = TestPdfs.plain(tempDir.resolve("plain.pdf"), 2);
+
+        try (PdfDocument document = PdfDocument.open(pdf)) {
+            assertFalse(document.signed());
+        }
+    }
+
+    @Test
+    @DisplayName("電子署名のある PDF は署名済みと分かる")
+    void detectsSignature() throws Exception {
+        Path pdf = TestPdfs.signed(tempDir.resolve("signed.pdf"), 2);
+
+        try (PdfDocument document = PdfDocument.open(pdf)) {
+            assertTrue(document.signed());
+        }
+    }
+
+    @Test
+    @DisplayName("署名欄があるだけでは署名済みとしない")
+    void doesNotTreatEmptySignatureFieldAsSigned() throws Exception {
+        Path pdf = TestPdfs.withEmptySignatureField(tempDir.resolve("field.pdf"), 2);
+
+        try (PdfDocument document = PdfDocument.open(pdf)) {
+            assertFalse(document.signed());
         }
     }
 
