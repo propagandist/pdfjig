@@ -68,6 +68,43 @@ final class PageReferences {
     }
 
     /**
+     * 出力に含めないページの辞書を空にする。
+     *
+     * <p><b>これは取りこぼしへの備えである。</b> {@link #removeDangling} が畳むのは
+     * こちらが知っている参照——しおり・リンク注釈・名前付き宛先・{@code /OpenAction}——だけで、
+     * <b>ページを指しうる場所はそれで尽きない</b>。タグ付き PDF の {@code /StructTreeRoot} は
+     * 構造要素の {@code /Pg} でページ辞書を直接掴んでおり、Word / PowerPoint / Google Docs が
+     * 既定で作るのはこの形である。ほかに {@code /Threads} や {@code /PieceInfo} もある。
+     *
+     * <p><b>参照の種類を数え上げて潰す形にはしない。</b> 数え上げは必ず漏れ、
+     * 漏れたものは「取り除いたはずの内容が出力に残る」——守りたい性質そのものを破る。
+     * <b>守りたいのは「中身が辿れないこと」であって「参照が残らないこと」ではない</b>ので、
+     * ページ辞書のほうを空にする。どこから指されていても、辿り着く先に中身が無い。
+     *
+     * <p>空にするのは<b>辞書の項目だけ</b>である。{@code /Resources} のように残すページと
+     * 共有しているオブジェクトは、残すページの側から参照されたままなので消えない。
+     *
+     * <p><b>警告は出さない。</b> {@link Warning#DANGLING_REFERENCES_REMOVED} が伝えるのは
+     * 「しおりやリンクを落とした」ことであり、こちらは出力に含めないページを捨てているだけで、
+     * 利用者が知って何かを判断できるものではない。
+     *
+     * @param all 取り除く前の全ページ
+     * @param kept 出力に含めるページ
+     */
+    static void discard(List<PDPage> all, List<PDPage> kept) {
+        Set<COSDictionary> keeping = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (PDPage page : kept) {
+            keeping.add(page.getCOSObject());
+        }
+        for (PDPage page : all) {
+            COSDictionary dictionary = page.getCOSObject();
+            if (!keeping.contains(dictionary)) {
+                dictionary.clear();
+            }
+        }
+    }
+
+    /**
      * 継承していたページ属性を、そのページ自身の辞書に書き込む。
      *
      * <p>ページを並べ替えるとページツリーが 1 階層に均されるため、中間ノードから

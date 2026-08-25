@@ -255,6 +255,9 @@ public final class PdfBoxPageOperations implements PageOperations {
         // 並べ替えでページツリーが 1 階層に均される。継承していた属性を先に固定する。
         PageReferences.fixInherited(document.getPages());
 
+        List<PDPage> all = new ArrayList<>();
+        document.getPages().forEach(all::add);
+
         List<PDPage> ordered = new ArrayList<>(pages.size());
         for (PageSelection selection : pages) {
             ordered.add(document.getPage(selection.pageNumber() - 1));
@@ -265,6 +268,9 @@ public final class PdfBoxPageOperations implements PageOperations {
         if (PageReferences.removeDangling(document)) {
             warnings.onWarning(Warning.DANGLING_REFERENCES_REMOVED);
         }
+        // 参照を畳んだ後に、出力に含めないページの中身を捨てる。
+        // これは利用者に伝えることではない——警告は「しおりやリンクを落とした」ことを指す。
+        PageReferences.discard(all, ordered);
 
         // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
         // M0 が扱うのは EncryptionPropagation.NONE のみであり、
@@ -360,6 +366,9 @@ public final class PdfBoxPageOperations implements PageOperations {
         PDDocument delegate = document.delegate();
         PageReferences.fixInherited(delegate.getPages());
 
+        List<PDPage> all = new ArrayList<>();
+        delegate.getPages().forEach(all::add);
+
         List<PDPage> kept = new ArrayList<>(wanted.size());
         for (int pageNumber : wanted) {
             kept.add(delegate.getPage(pageNumber - 1));
@@ -369,6 +378,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         if (PageReferences.removeDangling(delegate)) {
             warnings.onWarning(Warning.DANGLING_REFERENCES_REMOVED);
         }
+        PageReferences.discard(all, kept);
     }
 
     /** 結合後の文書から、指定の順に並べたページを取り出す。 */
