@@ -367,6 +367,9 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
   閉じたものを外すと記録ではなくなる。進捗の分母も実態と合わなくなる
 - **着手が見えていない版のマイルストーンは作らない**（org §6）
 - **期日は置かない**（org §0）
+- **公開して `main` を進めたら、その版のマイルストーンも閉じる**（手順は `HANDOVER.md` 4-3）。
+  ★ **issue の open / closed の数はマイルストーンの状態ではない。**
+  数が 0 になっても、閉じるのは別の操作である
 
 #### 「vX.Y.Z をリリースする」issue
 
