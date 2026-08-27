@@ -1,0 +1,21 @@
+# issue 作成画面に出す導線。
+#
+# ★ ここに SECURITY.md の中身を写さない。about は 1 行で、正本を指すだけにする。
+#   写せば、その日から正本が 2 つになる。
+#
+# ★ blank_issues_enabled は true のままにする。分類しづらいものを立てる道を塞がない。
+#   内部の起票は gh issue create --body-file で立てており、そもそもここを通らない。
+blank_issues_enabled: true
+
+contact_links:
+  - name: セキュリティ上の問題を報告する
+    url: https://github.com/propagandist/pdfjig/security/advisories/new
+    about: 脆弱性は公開の issue に書かないこと。ここから非公開で報告できる。
+
+  - name: セキュリティポリシー
+    url: https://github.com/propagandist/pdfjig/security/policy
+    about: 何を脆弱性として扱うか、報告してから修正版が届くまでの流れ。
+
+  - name: その他の問合せ
+    url: https://www.propagandist.co.jp/contact/
+    about: 不具合でも脆弱性でもないもの。ファイルは添付できない。

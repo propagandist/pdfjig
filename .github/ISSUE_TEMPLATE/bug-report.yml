@@ -1,0 +1,72 @@
+name: 不具合の報告
+description: 期待した動きにならなかったときはこちら。
+labels: [bug]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **脆弱性はここに書かないこと。** 修正前に詳細が公開されると利用者が危険に晒される。
+        [セキュリティポリシー](https://github.com/propagandist/pdfjig/security/policy)
+        の手順で非公開で報告してほしい。
+
+  - type: checkboxes
+    id: attachments
+    attributes:
+      label: 添付についての確認
+      description: |
+        **public リポジトリに一度上がった添付は取り消せない。**
+      options:
+        - label: 再現用の PDF に実業務の書類を使っていない（自作の最小サンプルである）
+          required: true
+        - label: 本文にも添付にもパスワード・鍵素材を含んでいない
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 使っている版
+      description: ヘルプメニューの「バージョン情報」からコピーできる。
+      placeholder: "0.1.1"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows の版
+      placeholder: "Windows 11 24H2 (x64)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 何が起きたか
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: どうなるはずだったか
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: どのファイルを開き、どの操作をしたか。
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 補足
+      description: ログやスクリーンショットがあれば。
