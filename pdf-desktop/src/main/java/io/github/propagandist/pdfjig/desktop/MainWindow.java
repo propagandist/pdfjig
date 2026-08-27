@@ -741,7 +741,7 @@ public final class MainWindow {
     /**
      * ページ列を書き出す。
      *
-     * <p>一時ファイルに書いてから置き換える。保存先を選ぶダイアログは既存ファイルへの
+     * <p>{@link OutputWorkspace} に書いてから置き換える。保存先を選ぶダイアログは既存ファイルへの
      * 上書きを利用者に確認するが、pdf-core は既存の出力を拒む。先に消してしまうと
      * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
      * 元のファイルはそのまま残る。
@@ -757,12 +757,9 @@ public final class MainWindow {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        Path temporary = temporaryNextTo(output);
-        try {
-            operations.assemble(sources, pages, temporary);
-            move(temporary, output);
-        } finally {
-            deleteQuietly(temporary);
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
+            operations.assemble(sources, pages, workspace.file());
+            move(workspace.file(), output);
         }
         return List.copyOf(warnings);
     }
@@ -805,17 +802,6 @@ public final class MainWindow {
     private void showSplitResult(SplitResult result) {
         show(AlertType.INFORMATION, result.fileCount() + " 個のファイルを書き出しました。");
         showWarnings(result.warnings());
-    }
-
-    private static Path temporaryNextTo(Path output) {
-        try {
-            Path temporary = Files.createTempFile(output.toAbsolutePath().getParent(), ".pdfjig-", ".tmp");
-            // pdf-core は既存の出力を拒む。名前だけ押さえて実体は消しておく。
-            Files.delete(temporary);
-            return temporary;
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
-        }
     }
 
     private static void move(Path from, Path to) {
