@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -87,10 +88,12 @@ final class OutputWorkspace implements AutoCloseable {
      */
     private static void discardAbandoned(Path directory) {
         try (Stream<Path> entries = Files.list(directory)) {
-            entries.filter(Files::isDirectory)
-                    .filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
+            // 名前で絞ってから種別を見る。isDirectory は 1 件ごとに stat を投げるので、
+            // 逆にすると出力先フォルダの全エントリぶん走る。絞り込みの意味は変わらない。
+            entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
+                    .filter(Files::isDirectory)
                     .forEach(OutputWorkspace::discard);
-        } catch (IOException e) {
+        } catch (IOException | UncheckedIOException e) {
             // 片づけられなくても、これから書くものの成否は変わらない。
         }
     }
@@ -99,8 +102,11 @@ final class OutputWorkspace implements AutoCloseable {
     private static void discard(Path directory) {
         try (Stream<Path> entries = Files.walk(directory)) {
             entries.sorted(Comparator.reverseOrder()).forEach(OutputWorkspace::deleteQuietly);
-        } catch (IOException e) {
+        } catch (IOException | UncheckedIOException e) {
             // 消せなくても、保存の成否は変わらない。
+            // ★ Files.walk と Files.list は、返した後の反復で起きた失敗を UncheckedIOException で
+            //   包む。IOException を継承しないので、並記しないとここを素通りする——置き換えが
+            //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
         }
     }
 
