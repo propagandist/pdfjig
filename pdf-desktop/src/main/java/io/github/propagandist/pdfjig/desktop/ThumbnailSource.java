@@ -225,29 +225,27 @@ public final class ThumbnailSource implements AutoCloseable {
         }
     }
 
-    @Override
-    public void close() {
-        renderer.shutdownNow();
-        try {
-            // 描画中のスレッドが文書を触っている間に文書を閉じると壊れる。
-            renderer.awaitTermination(RENDERING_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
     /**
      * 走っている描画が終わるまで待つ。待機中のものは捨てる。
      *
+     * <p><b>複数の状態をまとめて変える呼び出し側は、変え始める前にこれを呼ぶこと。</b>
+     * {@link #removeSource(int)} も内部で呼ぶが、あちらが投げる時点で呼び出し側が既に
+     * 別の状態を変えていると、待てなかったときに食い違いが残る。先に呼んでおけば、
+     * 投げる時点ではまだ何も変わっていない。
+     *
      * <p>待たずに捨てるのは、この後どのみちキャッシュごと捨てられるためである。可視範囲ぶんが
      * 溜まっているときに全部を走らせてから戻ると、待ちがそのまま JavaFX スレッドの固まりになる。
-     * 捨てたぶんは一覧が組み直されるときに出し直される。
+     * 捨てられた描画は取り消しとして呼び出し側に届くので、まだ要るなら頼み直せる
+     * （{@link ThumbnailTile}）。
      *
      * <p><b>待てなかったときは進まない。</b> 黙って進むと、呼び出し側が描画中の文書を閉じる——
      * それはいま直そうとしている状態そのものである。{@link #close()} が待てなくても進むのとは
      * 非対称だが、あちらは終了処理であり、戻って続ける先が無い。
+     *
+     * @throws PdfjigException 上限までに描画が終わらない場合は
+     *                         {@link ErrorCode#THUMBNAIL_RENDERING_BUSY}
      */
-    private void awaitRendering() {
+    public void awaitRendering() {
         List<Runnable> waiting = new ArrayList<>();
         renderer.getQueue().drainTo(waiting);
         for (Runnable runnable : waiting) {
@@ -265,6 +263,17 @@ public final class ThumbnailSource implements AutoCloseable {
             throw new PdfjigException(ErrorCode.THUMBNAIL_RENDERING_BUSY);
         } catch (ExecutionException | TimeoutException e) {
             throw PdfjigException.wrapping(ErrorCode.THUMBNAIL_RENDERING_BUSY, e);
+        }
+    }
+
+    @Override
+    public void close() {
+        renderer.shutdownNow();
+        try {
+            // 描画中のスレッドが文書を触っている間に文書を閉じると壊れる。
+            renderer.awaitTermination(RENDERING_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

@@ -2,12 +2,15 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageRendering;
 import io.github.propagandist.pdfjig.core.PdfDocument;
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -117,6 +120,26 @@ class ThumbnailSourceUiTest {
 
         // 失敗として返れば、呼び出し側が「（表示できません）」を出せる。
         assertThrows(ExecutionException.class, () -> drawing.get(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void 描画が止まらないときは何も外さずに失敗する(@TempDir Path directory) throws Exception {
+        // 解放しない。描画は上限まで止まったままになる。
+        GatedRendering rendering = new GatedRendering();
+        source = new ThumbnailSource(EDGE_PIXELS, rendering);
+        source.addSource(open(directory, 0));
+        source.addSource(open(directory, 1));
+
+        source.request(0, 1);
+        assertTrue(rendering.started.await(TIMEOUT_SECONDS, TimeUnit.SECONDS), "描画が始まらない");
+
+        PdfjigException failure = assertThrows(PdfjigException.class, () -> source.removeSource(0));
+
+        assertAll(
+                () -> assertEquals(ErrorCode.THUMBNAIL_RENDERING_BUSY, failure.errorCode()),
+                // 外れていない。次に足すものが 3 つ目になる。呼び出し側は自分の状態を
+                // 変える前にこれを受け取り、食い違いを残さずに済む。
+                () -> assertEquals(2, source.addSource(open(directory, 2))));
     }
 
     private PdfDocument open(Path directory, int index) throws IOException {
