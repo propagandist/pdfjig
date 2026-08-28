@@ -93,14 +93,20 @@ public final class DocumentSession implements AutoCloseable {
      * <p>最初のファイルも外せる。外すと {@link #path()} は次のファイルになる。
      *
      * @param sourceIndex 外す出どころ番号
-     * @throws PdfjigException 残りが空になる場合は {@link io.github.propagandist.pdfjig.core.ErrorCode#EMPTY_RESULT}
+     * @throws PdfjigException 残りが空になる場合は {@link io.github.propagandist.pdfjig.core.ErrorCode#EMPTY_RESULT}。
+     *                         サムネイルの描画が終わるのを待てなかった場合は
+     *                         {@link io.github.propagandist.pdfjig.core.ErrorCode#THUMBNAIL_RENDERING_BUSY}
      */
     public void remove(int sourceIndex) {
         order.removeSource(sourceIndex);
 
         paths.remove(sourceIndex);
         PdfDocument removed = documents.remove(sourceIndex);
+        // 描画が文書を触っている間に閉じると壊れる。removeSource は走っている描画が
+        // 終わるまで戻らないので、この順で閉じてよい（ThumbnailSource の契約）。
         thumbnails.removeSource(sourceIndex);
+        // 待てずに上が投げたときは、ここへ来ない。描画中の文書を閉じるより、
+        // 閉じられないまま残るほうが害が小さい。
         removed.close();
     }
 
