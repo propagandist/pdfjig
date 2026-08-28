@@ -217,6 +217,15 @@ final class ThumbnailTile {
                 Tooltip.install(root, new Tooltip(grid.describe(shown) + "（表示できません）"));
             }
         });
+        task.setOnCancelled(event -> {
+            // ファイルを外すとき、まだ始まっていない描画は捨てられる
+            // （ThumbnailSource#awaitRendering）。このタイルがまだ同じページを受け持っていれば、
+            // 絵の無いまま取り残される——一覧の組み直しは、中身の変わらなかった行を描き直さない。
+            // タイルが別のページへ回されて取り消したときは、下の条件で外れる。
+            if (stillShowing(sourceIndex, pageNumber)) {
+                show(pageIndex, entry);
+            }
+        });
         pending = task;
     }
 

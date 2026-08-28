@@ -87,19 +87,27 @@ public final class DocumentSession implements AutoCloseable {
     /**
      * 文書を 1 つ外す。そのファイルのページは並びから消える。
      *
-     * <p>並びを先に直す。取り除くとページが 1 枚も残らない場合はそこで失敗し、
-     * 文書は開いたままで何も壊れない。
+     * <p><b>失敗するときは、何も変わっていない。</b> 走っている描画を待つのも、取り除くと
+     * ページが 1 枚も残らないかを見るのも、状態を触る前に済ませる。ここが崩れると、
+     * 並びと {@link ThumbnailSource} の出どころ番号が食い違ったまま残る。
      *
      * <p>最初のファイルも外せる。外すと {@link #path()} は次のファイルになる。
      *
      * @param sourceIndex 外す出どころ番号
-     * @throws PdfjigException 残りが空になる場合は {@link io.github.propagandist.pdfjig.core.ErrorCode#EMPTY_RESULT}
+     * @throws PdfjigException 残りが空になる場合は {@link io.github.propagandist.pdfjig.core.ErrorCode#EMPTY_RESULT}。
+     *                         サムネイルの描画が終わるのを待てなかった場合は
+     *                         {@link io.github.propagandist.pdfjig.core.ErrorCode#THUMBNAIL_RENDERING_BUSY}
      */
     public void remove(int sourceIndex) {
+        // ★ 何かを変える前に待つ。ここで投げたときは、並びも文書一覧もまだ元のままである。
+        //   変えた後に待つと、待てなかったときに出どころ番号の食い違いが残る。
+        thumbnails.awaitRendering();
         order.removeSource(sourceIndex);
 
         paths.remove(sourceIndex);
         PdfDocument removed = documents.remove(sourceIndex);
+        // 描画が文書を触っている間に閉じると壊れる。removeSource も走っている描画を待つので、
+        // この順で閉じてよい（ThumbnailSource の契約）。上で待っているため、ここでは待たされない。
         thumbnails.removeSource(sourceIndex);
         removed.close();
     }

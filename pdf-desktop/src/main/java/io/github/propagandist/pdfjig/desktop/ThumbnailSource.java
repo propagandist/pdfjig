@@ -1,14 +1,18 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageRendering;
 import io.github.propagandist.pdfjig.core.PdfBoxPageRendering;
 import io.github.propagandist.pdfjig.core.PdfDocument;
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
@@ -32,19 +36,24 @@ import javafx.scene.image.Image;
  *
  * <p><b>文書を閉じる前に、必ずこのオブジェクトを閉じること。</b>
  * 描画の最中に文書が閉じられると、その描画は壊れた状態を読むことになる。
+ * 1 つだけ外すときも同じであり、{@link #removeSource(int)} は走っている描画が終わるまで戻らない。
  */
 public final class ThumbnailSource implements AutoCloseable {
 
     /** 保持する枚数。メモリ量ではなく枚数で切る（HANDOVER.md 3-1）。 */
     private static final int CACHE_CAPACITY = 200;
 
-    /** 描画スレッドの停止を待つ上限。 */
-    private static final long SHUTDOWN_TIMEOUT_SECONDS = 5L;
+    /**
+     * 描画スレッドの応答を待つ上限。
+     *
+     * <p>閉じるときと、受け持っている文書を 1 つ外すときの両方で使う。
+     */
+    private static final long RENDERING_TIMEOUT_SECONDS = 5L;
 
     /** キャッシュの鍵。同じページ番号でも文書が違えば別のサムネイルになる。 */
     private record PageKey(int sourceIndex, int pageNumber) {}
 
-    private final PageRendering rendering = new PdfBoxPageRendering();
+    private final PageRendering rendering;
 
     private final int edgePixels;
 
@@ -55,24 +64,55 @@ public final class ThumbnailSource implements AutoCloseable {
      */
     private final List<PdfDocument> documents = new ArrayList<>();
 
-    /** 描画スレッドと JavaFX スレッドの双方から触るため、これ自身をロックに使う。 */
+    /**
+     * サムネイルの保持。
+     *
+     * <p><b>同期の責任はこのクラスが持つ。</b> {@link LruCache} は自分では守らない。
+     * 描画スレッドと JavaFX スレッドの双方から触るため、触る箇所はすべてこれ自身をロックにして包む。
+     * {@link LruCache#get} も内部の順序を書き換えるので、引くだけの箇所も例外ではない。
+     */
     private final LruCache<PageKey, Image> cache = new LruCache<>(CACHE_CAPACITY);
 
-    private final ExecutorService renderer = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "pdfjig-thumbnail");
-        // ウィンドウを閉じてもプロセスが残らないようにする。
-        thread.setDaemon(true);
-        return thread;
-    });
+    /**
+     * 描画を 1 本のスレッドに直列化する実行器。
+     *
+     * <p>{@code Executors.newSingleThreadExecutor} で包まないのは、待機中の描画を捨てるために
+     * キューへ触る必要があるためである（{@link #awaitRendering()}）。あちらが返す実装はキューを隠す。
+     */
+    private final ThreadPoolExecutor renderer =
+            new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(), runnable -> {
+                Thread thread = new Thread(runnable, "pdfjig-thumbnail");
+                // ウィンドウを閉じてもプロセスが残らないようにする。
+                thread.setDaemon(true);
+                return thread;
+            });
 
     /**
      * @param edgePixels サムネイルの長辺の画素数
      */
     public ThumbnailSource(int edgePixels) {
+        this(edgePixels, new PdfBoxPageRendering());
+    }
+
+    /**
+     * 描画を差し替えられる形。
+     *
+     * <p>テストが描画を止めたまま、外す操作との待ち合わせを確かめるために使う。
+     * 実際の描画の速さで当てにいくと、落ちるかどうかが機械の速さで決まる
+     * （CLAUDE.md「不安定なテストの扱い」）。
+     *
+     * @param edgePixels サムネイルの長辺の画素数
+     * @param rendering  ページを描く実装
+     */
+    ThumbnailSource(int edgePixels, PageRendering rendering) {
         if (edgePixels < 1) {
             throw new IllegalArgumentException("edgePixels は 1 以上でなければなりません。");
         }
+        if (rendering == null) {
+            throw new IllegalArgumentException("rendering は null にできません。");
+        }
         this.edgePixels = edgePixels;
+        this.rendering = rendering;
     }
 
     /**
@@ -115,6 +155,10 @@ public final class ThumbnailSource implements AutoCloseable {
      * {@link Task#cancel(boolean)} を呼ぶこと。まだ始まっていない描画は取り消され、
      * 高速なスクロールで見えないページを描き続けることがなくなる。
      *
+     * <p><b>受け持っていない出どころ番号でも例外を投げない。</b> 一覧が組み直される前に、
+     * 外した文書の番号で依頼が来ることがある。その場合は失敗する {@link Task} を返すので、
+     * {@code setOnFailed} が拾う。
+     *
      * @param sourceIndex 出どころ番号
      * @param pageNumber  その文書の中でのページ番号（1 始まり）
      * @return 実行中または待機中の描画
@@ -123,7 +167,7 @@ public final class ThumbnailSource implements AutoCloseable {
         PageKey key = new PageKey(sourceIndex, pageNumber);
         // 依頼した時点の文書を捕まえておく。描画のときに番号から引くと、その間に
         // 文書が外されて番号が繰り下がっていた場合、別の文書を描いてしまう。
-        PdfDocument document = documentAt(sourceIndex);
+        Optional<PdfDocument> document = documentAt(sourceIndex);
 
         Task<Image> task = new Task<>() {
             @Override
@@ -136,7 +180,11 @@ public final class ThumbnailSource implements AutoCloseable {
                     return hit.get();
                 }
 
-                Image image = SwingFXUtils.toFXImage(rendering.renderThumbnail(document, pageNumber, edgePixels), null);
+                // 素の IndexOutOfBoundsException を JavaFX スレッドへ出さない。
+                // 描けないことは失敗として返し、呼び出し側に伝える。
+                PdfDocument target = document.orElseThrow(() -> new PdfjigException(ErrorCode.PAGE_OUT_OF_RANGE));
+
+                Image image = SwingFXUtils.toFXImage(rendering.renderThumbnail(target, pageNumber, edgePixels), null);
                 synchronized (cache) {
                     cache.put(key, image);
                 }
@@ -150,13 +198,20 @@ public final class ThumbnailSource implements AutoCloseable {
     /**
      * 受け持っている文書を 1 つ外す。このオブジェクトは文書を閉じない。
      *
+     * <p><b>走っている描画が終わるまで戻らない。</b> 描画は依頼した時点の鍵で結果を入れるため、
+     * 番号が繰り下がった後に入り直すと、別の文書の絵がその鍵で引けるようになる。
+     * 呼び出し側はこの直後に文書を閉じるので、待つのはここでなければならない。
+     *
      * <p><b>キャッシュは丸ごと捨てる。</b> 鍵は (出どころ, ページ番号) であり、
      * 外したぶん後ろの番号が繰り下がると鍵の意味が変わる。付け替えるより捨てるほうが確実で、
      * 描き直す費用は可視範囲だけに収まる。
      *
      * @param sourceIndex 外す出どころ番号
+     * @throws PdfjigException 描画が終わるのを待てなかった場合は
+     *                         {@link ErrorCode#THUMBNAIL_RENDERING_BUSY}。文書は外れない
      */
     public void removeSource(int sourceIndex) {
+        awaitRendering();
         synchronized (documents) {
             documents.remove(sourceIndex);
         }
@@ -170,20 +225,70 @@ public final class ThumbnailSource implements AutoCloseable {
         }
     }
 
+    /**
+     * 走っている描画が終わるまで待つ。待機中のものは捨てる。
+     *
+     * <p><b>複数の状態をまとめて変える呼び出し側は、変え始める前にこれを呼ぶこと。</b>
+     * {@link #removeSource(int)} も内部で呼ぶが、あちらが投げる時点で呼び出し側が既に
+     * 別の状態を変えていると、待てなかったときに食い違いが残る。先に呼んでおけば、
+     * 投げる時点ではまだ何も変わっていない。
+     *
+     * <p>待たずに捨てるのは、この後どのみちキャッシュごと捨てられるためである。可視範囲ぶんが
+     * 溜まっているときに全部を走らせてから戻ると、待ちがそのまま JavaFX スレッドの固まりになる。
+     * 捨てられた描画は取り消しとして呼び出し側に届くので、まだ要るなら頼み直せる
+     * （{@link ThumbnailTile}）。
+     *
+     * <p><b>待てなかったときは進まない。</b> 黙って進むと、呼び出し側が描画中の文書を閉じる——
+     * それはいま直そうとしている状態そのものである。{@link #close()} が待てなくても進むのとは
+     * 非対称だが、あちらは終了処理であり、戻って続ける先が無い。
+     *
+     * @throws PdfjigException 上限までに描画が終わらない場合は
+     *                         {@link ErrorCode#THUMBNAIL_RENDERING_BUSY}
+     */
+    public void awaitRendering() {
+        List<Runnable> waiting = new ArrayList<>();
+        renderer.getQueue().drainTo(waiting);
+        for (Runnable runnable : waiting) {
+            if (runnable instanceof Task<?> task) {
+                task.cancel(false);
+            }
+        }
+
+        try {
+            // 描画は 1 本のスレッドに直列化されている。これが動いたときには、
+            // 走っていた描画は終わっている。
+            renderer.submit(() -> {}).get(RENDERING_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PdfjigException(ErrorCode.THUMBNAIL_RENDERING_BUSY);
+        } catch (ExecutionException | TimeoutException e) {
+            throw PdfjigException.wrapping(ErrorCode.THUMBNAIL_RENDERING_BUSY, e);
+        }
+    }
+
     @Override
     public void close() {
         renderer.shutdownNow();
         try {
             // 描画中のスレッドが文書を触っている間に文書を閉じると壊れる。
-            renderer.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            renderer.awaitTermination(RENDERING_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
     }
 
-    private PdfDocument documentAt(int sourceIndex) {
+    /**
+     * 出どころ番号から文書を引く。
+     *
+     * @param sourceIndex 出どころ番号
+     * @return 受け持っていればその文書。範囲外なら空
+     */
+    private Optional<PdfDocument> documentAt(int sourceIndex) {
         synchronized (documents) {
-            return documents.get(sourceIndex);
+            if (sourceIndex < 0 || sourceIndex >= documents.size()) {
+                return Optional.empty();
+            }
+            return Optional.of(documents.get(sourceIndex));
         }
     }
 }
