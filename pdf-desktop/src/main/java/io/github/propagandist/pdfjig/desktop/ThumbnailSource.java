@@ -44,7 +44,7 @@ public final class ThumbnailSource implements AutoCloseable {
     /** キャッシュの鍵。同じページ番号でも文書が違えば別のサムネイルになる。 */
     private record PageKey(int sourceIndex, int pageNumber) {}
 
-    private final PageRendering rendering = new PdfBoxPageRendering();
+    private final PageRendering rendering;
 
     private final int edgePixels;
 
@@ -69,10 +69,28 @@ public final class ThumbnailSource implements AutoCloseable {
      * @param edgePixels サムネイルの長辺の画素数
      */
     public ThumbnailSource(int edgePixels) {
+        this(edgePixels, new PdfBoxPageRendering());
+    }
+
+    /**
+     * 描画を差し替えられる形。
+     *
+     * <p>テストが描画を止めたまま、外す操作との待ち合わせを確かめるために使う。
+     * 実際の描画の速さで当てにいくと、落ちるかどうかが機械の速さで決まる
+     * （CLAUDE.md「不安定なテストの扱い」）。
+     *
+     * @param edgePixels サムネイルの長辺の画素数
+     * @param rendering  ページを描く実装
+     */
+    ThumbnailSource(int edgePixels, PageRendering rendering) {
         if (edgePixels < 1) {
             throw new IllegalArgumentException("edgePixels は 1 以上でなければなりません。");
         }
+        if (rendering == null) {
+            throw new IllegalArgumentException("rendering は null にできません。");
+        }
         this.edgePixels = edgePixels;
+        this.rendering = rendering;
     }
 
     /**
