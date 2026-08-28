@@ -211,7 +211,7 @@ TestFX の Glass Robot が実入力を使うためで、画面をロックして
 
 ### pdf-core
 
-確定的処理のみ。外部ネットワーク通信を一切行わない。
+確定的処理のみ。外部ネットワーク通信を一切行わない。**ArchUnit テストで機械的に検証すること。**
 PDFBox / tabula-java / Apache POI への依存はこのモジュールに閉じる。
 
 主要インタフェース: `PageOperations` / `TextExtraction` / `TableExtraction` / `Encryption` / `Exporter`
