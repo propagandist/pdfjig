@@ -151,4 +151,33 @@ class ArchitectureTest {
                 .because("AI はファイルを変更しない。適用は pdf-core が行う（CLAUDE.md INV-2）")
                 .check(classes);
     }
+
+    /**
+     * pdf-core から外へ出る経路を塞ぐ。
+     *
+     * <p><b>対の {@code ...RuleHasSubject} は足さない。</b> あれが要るのは、依存から外せる
+     * ライブラリを対象にするときである（PDFBox / POI）。ここでの依存先は JDK の
+     * {@code java.net} / {@code javax.net} であり、<b>クラスパスから外れることがない。</b>
+     * 対象（pdf-core）が読み込まれていることは {@link #importedClassesAreNotEmpty} が見ている。
+     * {@link #aiMustNotTouchTheFileSystem} が対を持たないのと同じ理由である。
+     *
+     * <p><b>★ 縛るのは pdf-core だけである。</b> pdf-ai は通信するのが仕事であり
+     * （{@code v0.4.0} の {@code AnthropicProvider}）、pdf-cli はそれを呼ぶ。
+     * {@code CLAUDE.md} が「一切行わない」と書いているのは pdf-core だけなので、
+     * <b>規約が言っている以上のことを機械に守らせない。</b>
+     */
+    @Test
+    @DisplayName("pdf-core は外部ネットワーク通信を行わない")
+    void coreMustNotReachTheNetwork() {
+        noClasses()
+                .that()
+                .resideInAPackage("..pdfjig.core..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("java.net..", "javax.net..")
+                .because("pdf-core は確定的処理のみを行う。"
+                        + "外への通信が初めて入るのは pdf-ai であり、その都合がこちらへ滲むのを止める"
+                        + "（CLAUDE.md「モジュール別の責務」）")
+                .check(classes);
+    }
 }
