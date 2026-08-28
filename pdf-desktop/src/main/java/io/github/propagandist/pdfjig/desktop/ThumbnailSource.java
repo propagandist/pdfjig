@@ -64,7 +64,13 @@ public final class ThumbnailSource implements AutoCloseable {
      */
     private final List<PdfDocument> documents = new ArrayList<>();
 
-    /** 描画スレッドと JavaFX スレッドの双方から触るため、これ自身をロックに使う。 */
+    /**
+     * サムネイルの保持。
+     *
+     * <p><b>同期の責任はこのクラスが持つ。</b> {@link LruCache} は自分では守らない。
+     * 描画スレッドと JavaFX スレッドの双方から触るため、触る箇所はすべてこれ自身をロックにして包む。
+     * {@link LruCache#get} も内部の順序を書き換えるので、引くだけの箇所も例外ではない。
+     */
     private final LruCache<PageKey, Image> cache = new LruCache<>(CACHE_CAPACITY);
 
     /**
