@@ -124,7 +124,12 @@ public interface PageOperations {
      * @param segments  かたまりごとのページ指定。先頭から順に連番で書き出す
      * @param outputDir 出力先ディレクトリ
      * @return 生成されたファイル。かたまりの順
-     * @throws PdfjigException 出力先に同名のファイルが既にある、読み書きに失敗した場合
+     * @throws PdfjigException          入力が空（{@link ErrorCode#NO_INPUT}）、かたまりが 1 つも無い
+     *                                  （{@link ErrorCode#EMPTY_RESULT}）、指定したページが範囲外
+     *                                  （{@link ErrorCode#PAGE_OUT_OF_RANGE}）、出力先に同名の
+     *                                  ファイルが既にある（{@link ErrorCode#OUTPUT_ALREADY_EXISTS}）、
+     *                                  読み書きに失敗した場合
+     * @throws IllegalArgumentException {@code outputDir} が {@code null} の場合
      */
     List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir);
 

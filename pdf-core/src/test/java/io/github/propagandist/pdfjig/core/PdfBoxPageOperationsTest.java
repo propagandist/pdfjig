@@ -596,6 +596,24 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("かたまりの 1 つが範囲外を指していたら、何も書かずに失敗する")
+        void writesNothingWhenAnySegmentIsOutOfRange() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
+            Path outputDir = tempDir.resolve("out");
+
+            // 1 つ目は書ける。2 つ目が範囲外である。いまは書き出しごとに検証されるので
+            // 1 つ目を書いた後に落ちるが、後始末で消える。
+            assertThrows(
+                    PdfjigException.class,
+                    () -> operations.assembleEach(
+                            List.of(input),
+                            List.of(List.of(PageSelection.of(0, 1)), List.of(PageSelection.of(0, 3))),
+                            outputDir));
+
+            assertEquals(List.of(), listFilesIn(outputDir), "範囲外で落ちたのに、1 つ目が残っている。");
+        }
+
+        @Test
         @DisplayName("入力もかたまりも、空なら書き出さずに失敗する")
         void rejectsEmptyInput() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
