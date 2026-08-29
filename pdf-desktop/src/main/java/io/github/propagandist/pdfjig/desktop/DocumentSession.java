@@ -117,6 +117,19 @@ public final class DocumentSession implements AutoCloseable {
         return paths.get(0);
     }
 
+    /**
+     * 最初に開いたファイルの、拡張子を除いた名前。
+     *
+     * <p>保存名の既定と、画面に出す名前に使う。<b>書き出すファイルの連番の付け方は
+     * ここに無い</b>——それは {@code pdf-core} の
+     * {@link io.github.propagandist.pdfjig.core.PageOperations#assembleEach} が持つ。
+     */
+    public String baseName() {
+        String fileName = path().getFileName().toString();
+        int extension = fileName.lastIndexOf('.');
+        return extension > 0 ? fileName.substring(0, extension) : fileName;
+    }
+
     /** 出どころのファイル。書き出しのとき入力一覧としてそのまま渡す。 */
     public List<Path> paths() {
         return List.copyOf(paths);
