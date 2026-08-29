@@ -789,14 +789,6 @@ public final class MainWindow {
         }
     }
 
-    private static void deleteQuietly(Path path) {
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException e) {
-            // 置き換えに成功していれば既に無い。残っていても保存の成否は変わらない。
-        }
-    }
-
     private String suggestedFileName() {
         return session.baseName() + "-edited.pdf";
     }
