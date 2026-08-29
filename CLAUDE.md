@@ -14,11 +14,17 @@
 
 依存の向きは一方通行である。
 
-```
-pdf-desktop ──┐
-              ├──> pdf-ai ──> pdf-core
-pdf-cli ──────┘
-              └────────────> pdf-core
+```mermaid
+%% ★ 同じ図が README.md / docs/SPEC.md / CLAUDE.md の 3 箇所にある。
+%%   1 つ直したら 3 つとも直す。片方だけ直さないこと。
+%%   1 箇所へまとめてリンクにする手は採らない——README は初めて見る人の入口であり、
+%%   CLAUDE.md の INV-1 は作業前に全文を読む対象なので、飛ばすと目的を損ねる。
+flowchart LR
+    desktop["pdf-desktop"] --> ai["pdf-ai"]
+    cli["pdf-cli"] --> ai
+    desktop --> core["pdf-core"]
+    cli --> core
+    ai --> core
 ```
 
 `pdf-core` の `build.gradle.kts` に `pdf-ai` が現れることは絶対にない。
