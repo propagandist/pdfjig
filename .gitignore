@@ -56,3 +56,9 @@ Desktop.ini
 # 撮影用サンプルの既定の出力先（tools/sample/GenerateSamplePdf.java）。
 # 中身は生成物であり、要るときに作り直せる。上の *.pdf と合わせて二重に効く。
 /tmp/
+
+# --- エージェントの設定 ---
+# ★ .claude/ を丸ごと無視しない。settings.json と hooks は commit する側であり、
+#   丸ごと無視すると、それらを足したときに黙って効かなくなる。
+# 手元の permissions が入るこれだけを外す。
+.claude/settings.local.json
