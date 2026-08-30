@@ -1585,3 +1585,51 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
 - [x] **法務の区分は 4 のまま**（同上、2026-08-30 に org `legal-baseline.md` §1 で確認）。
       判断する側へ開くモードでは**当社の設備が何も受け取らず、鍵も持たない。**
       ★ **崩れるのは BYOK で鍵の所在が動いたときである**（`CLAUDE.md`「セキュリティ」）
+- [x] ★ **Code scanning を入れた**（#23、2026-08-30）。**default setup。ワークフローは 1 本も足していない。**
+      期限は「M1 の着手前」であり、**M1 は `v0.2.0` から始まるので、`v0.1.2` が最後の機会だった。**
+      **枠を根拠に断れない**——public の標準ランナーは org の 2,000 分を消費しない
+      （org `ci-strategy.md` §1、`security-verification.md` §0 の★★の 1 つ目）。
+  - **advanced setup（ワークフローを置く形）を採らなかった。主たる理由はワークフローを
+    1 本も増やさないことである**——org `ci-strategy.md` が「足す前に読む」と言う対象そのものが
+    増えない。設定は API 1 回で済み、SHA ピンも `timeout-minutes` も `permissions` も要らない。
+    ★ **副次的に、org `security-verification.md` §3 が「default setup を選ぶなら
+    SARIF の POST（`/code-scanning/sarifs`）を経由しない」と書いている**ので、
+    あちらが未実走として残している経路を踏まない側にはなる。
+    **ただし内部で同じ経路を通るかどうかは確かめていない。**
+    **今回の実走で分かったのは「default setup では alert がちゃんと出る」ことまでである**
+    ——この根拠に寄りかからないこと。
+    `paths-ignore` が使えず**文書だけの PR でも走る**のが代償だが、
+    **絞る根拠（枠）が public では効かない**ので、残るのは待ち時間だけである
+  - ★★ **`threat_model` を `remote_and_local` にした。既定の `remote` では足りない。**
+    CodeQL の既定はネットワーク入力を汚染源とみなすが、**この道具の脅威は手元のディスクから
+    開く細工 PDF である**（`SECURITY.md`「対象範囲」がそう書いている）。
+    **`remote` のままだとローカルのファイルが汚染源にならず、対象範囲に書いてあるものを
+    ちょうど見逃す。** 分類 P で既定をそのまま採らない実例
+  - **実測（2026-08-30、初回 run 33288121015）** — `Analyze (actions)` **40 秒**、
+    `Analyze (java-kotlin)` **2 分 20 秒**。**`build` は直近 6 本で 3 分 41 秒〜6 分 38 秒**
+    （2026-08-28〜30 実測）なので、**いちばん速い `build` よりまだ短い。**
+    `languages` は `[actions, java-kotlin]` で、**ワークフローの側も見られている**。
+    ★ **`schedule` は `weekly` が入った**（PATCH の直後は `null` に見えるので、後から読み直すこと）
+  - **出た alert は 5 件。全部 `java/path-injection` で、全部 `tools/`。**
+    **`pdf-core` / `pdf-desktop` / `pdf-cli` は 0 件である。**
+    ★ **却下した**（`won't fix`）——**`tools/` は配布物に入らない**（#69 の軸）うえ、
+    汚染源は**開発者自身が打つ `main` の `args[0]`** で、出力先を決めるのも同じ開発者である。
+    `CLAUDE.md` セキュリティ節の §3.3 の読み替えがそのまま当たる。
+    ★★ **この軸を配布物へ持ち込まないこと。** 却下の理由は各 alert のコメントにも書いてある
+  - **Copilot Autofix が効き始めた**（それまでは On のまま何もしていなかった）。
+    **提案を中身を読まずにマージしない**を `CLAUDE.md` のセキュリティ節に書いた。
+    ★ **org `security-baseline.md` §5.2 の全体が効き始めたわけではない**——
+    あちらは pdfjig 自身が AI を組み込む日の話で、**そちらは #80 が持つ**（`v0.5.0`）。
+    今回当たったのは「**モデルの出力を信頼された入力として扱わない**」の 1 行だけで、
+    **対象は製品ではなく開発の道具である**
+  - **#22 の Check runs failure threshold は、これで対象になる check run が生まれた。
+    ただし空振りは終わっていない。** ruleset 21228747 は `deletion` と `non_fast_forward` の
+    2 つのままで、**閾値そのものを設定していない。**
+    ★★ **そして `develop` には rule が 1 本も無い**（`rules/branches/develop` が `[]`。
+    2026-08-30 実測）。**High の alert が出ても、いま何も止まらない。**
+    **無くなったのは 2 つある原因のうちの 1 つだけである**
+  - ★ **org 正本の実測表が、この変更で古くなった。** `security-verification.md` §3 は
+    pdfjig について `alerts → 404 no analysis found` ／ `default-setup → state: not-configured` と
+    書いているが、**どちらも今日から偽である。**
+    **`propagandist/.github#103` へ起票した。ここへ写さない**——
+    #23 のコメントが使った順序（**org → pdfjig**）と同じである
