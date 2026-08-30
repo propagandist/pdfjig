@@ -39,6 +39,63 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 . (Join-Path $PSScriptRoot 'AppLaunch.ps1')
 
+<#
+.SYNOPSIS
+    同梱ランタイムに、外れても誰も赤くならないモジュールが入っているかを検める。
+
+.DESCRIPTION
+    jlink はモジュールを削る仕掛けであり、削られたものを使う経路は配布物でしか壊れない。
+    手元の JDK で走る単体テストも uiTest もフルのモジュールを持つので、全部緑のまま通る。
+    2026-08-30 に実際に踏んだ——jdk.crypto.ec が漏れており、配布物でだけ TLS が握手できず
+    「更新を確認」が必ず失敗する状態で緑だった（#72）。
+
+    ★ runtimeModules の全部は数えない。pdf-desktop/build.gradle.kts が正本であり、
+      写せば必ず片方が腐る。ここが見るのは「jdeps が挙げないので手で足してあるもの」だけ
+      ——コンパイルもテストも落ちない種類がそこに集まっている。
+
+    ★ 足すときは build.gradle.kts の runtimeModules 側にも理由を書くこと。
+#>
+function Assert-RuntimeHasModules {
+    param(
+        # 展開した PDFjig.exe のあるフォルダ。隣に runtime\ がある。
+        [Parameter(Mandatory)]
+        [string] $AppDir
+    )
+
+    $required = @(
+        # TLS の鍵交換（SunEC）。無いと HTTPS が握手で落ちる（#72 の「更新を確認」）。
+        'jdk.crypto.ec',
+        # 日本語ロケール。無いと日付・数値の書式が英語圏のものに化ける。
+        'jdk.localedata'
+    )
+
+    $javaExe = Join-Path $AppDir 'runtime\bin\java.exe'
+    if (-not (Test-Path $javaExe)) {
+        throw "同梱ランタイムが見つからない: $javaExe"
+    }
+
+    Write-Step '同梱ランタイムのモジュールを検める'
+
+    # --list-modules は stdout へ出る。2>&1 でまとめない——native の stderr を
+    # ErrorActionPreference = 'Stop' の下でパイプへ流すと終端エラーになる
+    # （tools/sandbox/SandboxHost.ps1 の Invoke-Native と同じ罠）。
+    $listed = & $javaExe --list-modules
+    if ($LASTEXITCODE -ne 0) {
+        throw "java --list-modules が失敗した（終了コード $LASTEXITCODE）"
+    }
+
+    # 出力は "jdk.crypto.ec@21.0.8" の形。版は見ない。
+    $present = $listed | ForEach-Object { ($_ -split '@')[0] }
+
+    $missing = $required | Where-Object { $present -notcontains $_ }
+    if ($missing) {
+        throw ("同梱ランタイムに次のモジュールが無い: " + ($missing -join ', ') +
+            "（pdf-desktop/build.gradle.kts の runtimeModules から漏れている）")
+    }
+
+    Write-Step ("モジュールの確認は通った: " + ($required -join ', '))
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 $ZipPath = (Resolve-Path $ZipPath).Path
@@ -57,6 +114,8 @@ try {
     if (-not $exe) {
         throw 'ZIP の中に PDFjig.exe が無い'
     }
+
+    Assert-RuntimeHasModules $exe.Directory.FullName
 
     Assert-AppLaunches $exe.FullName $TimeoutSeconds $ArtifactDir
     Write-Step '起動の確認は通った'

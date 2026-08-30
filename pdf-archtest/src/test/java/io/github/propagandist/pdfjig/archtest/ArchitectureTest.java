@@ -272,6 +272,10 @@ class ArchitectureTest {
      * {@code java.net} が現れない</b>。{@code openConnection} は {@code URLConnection} を返すので
      * 上のルールに掛かる。<b>ここへ挙げるのは「型に現れないもの」だけである</b>ので、
      * 増やすときは戻り値の型を先に見ること。
+     *
+     * <p><b>★ {@code callMethod} は多重定義を 1 つずつ指す。</b>引数まで照合するため、
+     * {@code getContent()} を挙げても {@code getContent(Class[])} は素通りする。
+     * <b>名指しするメソッドに多重定義があるなら、全部を挙げること。</b>
      */
     @Test
     @DisplayName("URL から直に開かない（java.net.URL は識別子として使うので型では縛れない）")
@@ -283,6 +287,8 @@ class ArchitectureTest {
                 .callMethod(java.net.URL.class, "openStream")
                 .orShould()
                 .callMethod(java.net.URL.class, "getContent")
+                .orShould()
+                .callMethod(java.net.URL.class, "getContent", Class[].class)
                 .because("URL#openStream と URL#getContent は型に現れないまま外へ出る。" + "資源の読み出しと同じ形をしており、差分を読んだだけでは見分けがつかない（#72）")
                 .check(classes);
     }

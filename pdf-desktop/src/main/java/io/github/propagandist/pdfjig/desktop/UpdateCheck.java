@@ -164,6 +164,13 @@ final class UpdateCheck {
      * <b>後者は実際に起きる</b>: TLS を傍受するプロキシや、ログインページへ 302 を返す
      * キャプティブポータルの内側がそれに当たり、<b>そこはまさに届けたい層の環境である</b>。
      * 記録しないと、画面の 1 行以外に手がかりが無くなる。
+     *
+     * <p><b>★★ その 2 通りを分けるために、状態行を先に読む。</b>
+     * {@link HttpURLConnection#getHeaderField} は<b>内部の {@code IOException} を握り潰して
+     * {@code null} を返す</b>ので、読み取りの時間切れ・途中の切断・4xx / 5xx が
+     * <b>「応答の形違い」に化けて、原因が記録から消える</b>。
+     * {@link HttpURLConnection#getResponseCode()} は同じ失敗を投げ直すため、上の約束が保たれる。
+     * <b>戻り値は使わない。読むこと自体が目的である。</b>
      */
     private static Optional<ReleaseVersion> ask() {
         HttpURLConnection connection = null;
@@ -175,7 +182,7 @@ final class UpdateCheck {
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);
             connection.setRequestProperty("User-Agent", "");
-            connection.connect();
+            connection.getResponseCode();
             Optional<ReleaseVersion> published = published(connection.getHeaderField("Location"));
             if (published.isEmpty()) {
                 Logs.warn(LogEvent.UPDATE_NOT_CHECKED);
