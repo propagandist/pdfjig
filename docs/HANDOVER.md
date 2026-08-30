@@ -1571,8 +1571,10 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
       JDK 21.0.8+9 で `jpackage --help`）。`--add-launcher <名前>=<プロパティファイル>` は
       `main-jar` / `main-class` / `java-options` / `win-console` / `win-shortcut` / `win-menu` を
       取る。`pdf-desktop/build.gradle.kts` の `jpackageAppImage` に足すだけでよく、
-      **インストーラ 3 種は `--app-image` を渡しているのでランチャがそのまま乗り、
-      jlink ランタイムも共有される。配布系統は増えない。**
+      **MSI と EXE は `--app-image` にそのアプリイメージを渡し、ZIP は同じものを
+      固めるだけなので、3 種ともランチャがそのまま乗る。jlink ランタイムも共有される。
+      配布系統は増えない。**（★ `packageZip` は jpackage を呼ばない Gradle の `Zip` である。
+      **「3 種とも `--app-image` を渡している」ではない**）
       ★ **残る未確認が 1 つある**——stdio には `win-console=true`（コンソールサブシステム）が
       要り、**ホストが起動したときにコンソール窓が瞬く可能性がある。実装するときに実測すること**
 - [x] **塗り潰しの下のテキスト検出は `extractWithPositions` では足りない**（同上、2026-08-30）。
