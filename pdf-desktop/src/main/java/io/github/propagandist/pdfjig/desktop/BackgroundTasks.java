@@ -19,7 +19,7 @@ import javafx.concurrent.Task;
  * <p><b>★★ 止まらない入口が実際にある。</b>{@link #busy()} を見ているのは {@link Action} から
  * 作られた節点だけであり、<b>一覧の「×」（{@code SourceLegend}）・サムネイルの DELETE キー
  * （{@code ThumbnailGrid}）・タイルのドラッグ・「終了」・「バージョン情報」は素通りする。</b>
- * <b>「走っている間は何も起きない」と読まないこと。</b>塞ぎ方は #113 が持つ。
+ * <b>「走っている間は何も起きない」と読まないこと。</b>塞ぎ方は #114 が持つ。
  *
  * <p><b>★ 書き込みできる口を外へ出さない。</b>{@link #busy()} が返すのは読み取り専用であり、
  * <b>立てるのも下ろすのもここだけ</b>である。誰かが外から下ろせると、
@@ -32,7 +32,7 @@ final class BackgroundTasks {
      *
      * <p><b>数えていない。真偽 1 つでは 2 つ以上を表せない</b>——重なれば<b>先に終わったほうが
      * 下ろす</b>ので、まだ書いている最中に操作が通る。<b>いまは重ならない</b>が、それは
-     * {@code run} が縛っているからではなく、呼ぶ側がたまたま重ねていないだけである（#113）。
+     * {@code run} が縛っているからではなく、呼ぶ側がたまたま重ねていないだけである（#114）。
      */
     private final ReadOnlyBooleanWrapper busy = new ReadOnlyBooleanWrapper(false);
 
