@@ -46,6 +46,20 @@ final class DocumentWriter {
      * <b>確認を出すのは OS のダイアログなので、出ていることを自動テストでは確かめられない</b>
      * （{@link FileDialogs} の向こう側。{@code docs/HANDOVER.md} 4-4 の 10 番）。
      *
+     * <p><b>★★ 呼ぶ側は、書き出し先が利用者の確認を通っていることを保証すること。</b>
+     * {@code MainWindow} の中に private で置いてあった間は呼べる相手が 1 つしか無かったので、
+     * <b>ここへ出したぶんは ArchUnit で縛ってある</b>（{@code assembleIsCalledOnlyByMainWindow}）。
+     *
+     * <p><b>★ 確認を出しているのは {@link NativeFileDialogs} だけである。</b>
+     * {@link FileDialogs} は差し替えられる口で、<b>「選ばれたファイル」としか約束していない</b>
+     * ——{@code StubFileDialogs} は確認を 1 度も出さずに決め打ちのパスを返す。
+     * <b>「{@link FileDialogs} を通った」は「利用者が上書きを承知した」ではない。</b>
+     *
+     * <p><b>確認を取れない経路から 1 つのファイルへ書くなら、ここではなく
+     * {@link PageOperations#assemble} を直に呼ぶこと。</b>あちらは既存の出力を拒む。
+     * <b>{@link #splitInto} は代わりにならない</b>——書き出し先はフォルダで、
+     * 名前を決めるのは pdf-core である。
+     *
      * @param sources 元のファイル
      * @param pages   書き出すページの指定
      * @param output  書き出し先

@@ -15,9 +15,15 @@ import javafx.scene.input.KeyCombination;
  * （{@link #menuItem()} / {@link #toolButton()}）——<b>id の付け方が定義の隣にある</b>ほうが、
  * 「テストが掴む名前」と「その名前が付く節点」を同時に読める。
  *
- * <p><b>★ 作りは変えない。</b>{@code MainWindow} から出したのは置き場所だけである（#57）。
+ * <p><b>★ 持ち物は変えていない。</b>7 つの成分も、それぞれの意味も {@code MainWindow} に
+ * あったときのままである（#57）。<b>足したのは節点を作る 2 つの手だけ</b>——
+ * あれは {@code MainWindow} の private メソッドだった。
  * JavaFX の {@code Action} 相当のクラス階層にはしない——型を増やすと、
  * <b>メニューとツールバーが同じ定義から作られていることが読みにくくなる</b>。
+ *
+ * <p><b>★ {@code toolText} が {@code null} のものに {@link #toolButton()} を呼ばないこと。</b>
+ * 名前も絵も無いボタンができる。<b>どれをツールバーに出すかを決めているのは
+ * {@link Actions#toolBar()} の並び</b>であり、この型ではない。
  *
  * @param id           節点に付ける識別子。{@code menu-} / {@code tool-} を冠して使う。
  *                     テストが文言ではなくこれで節点を掴めるようにするためのもので、

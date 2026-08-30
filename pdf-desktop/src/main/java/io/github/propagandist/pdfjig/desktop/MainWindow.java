@@ -521,7 +521,7 @@ public final class MainWindow {
      * 切り分けたページ列を書き出す。
      *
      * <p>保存先を尋ねてから非同期で書く。既に同名のファイルがあれば 1 つも書かずに
-     * 失敗する（{@link #splitInto}）。上書きするかどうかは利用者の判断である。
+     * 失敗する（{@link DocumentWriter#splitInto}）。上書きするかどうかは利用者の判断である。
      *
      * @param segments かたまりごとのページ指定。先頭から順に連番で書き出す
      */

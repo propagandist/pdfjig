@@ -29,7 +29,13 @@ final class Messages {
         this.owner = owner;
     }
 
-    /** 済んだことを伝える。 */
+    /**
+     * 済んだこと、あるいは<b>できない理由</b>を伝える。
+     *
+     * <p><b>失敗ではないものをここへ通す。</b>区切りが 1 つも無いのに分割を押した、のような
+     * <b>利用者に打つ手がある断り</b>がそれである——{@link #failure} へ流すと、
+     * 何も壊れていないのに {@code OPERATION_FAILED} が記録に残る。
+     */
     void information(String message) {
         show(AlertType.INFORMATION, message);
     }

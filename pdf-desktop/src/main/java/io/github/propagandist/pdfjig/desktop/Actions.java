@@ -15,22 +15,10 @@ import javafx.scene.control.ToolBar;
  *
  * <p><b>★ ツールバーに出るのは一部である。</b>メニューは全部を持ったまま残す。
  *
- * @param open        開く
- * @param save        名前を付けて保存
- * @param close       閉じる
- * @param quit        終了
- * @param delete      選択したページを削除
- * @param rotateRight 右に 90 度回転
- * @param rotateLeft  左に 90 度回転
- * @param keepRange   範囲を指定して残す
- * @param toggleBreak ここで区切る / 区切りを外す
- * @param breakEveryN N ページごとに区切る
- * @param clearBreaks 区切りをすべて外す
- * @param reset       編集を元に戻す
- * @param add         PDF を追加
- * @param split       この文書を分割
- * @param splitPages  1 ページずつに分割
- * @param about       バージョン情報
+ * <p><b>★ 成分の説明は書かない。</b>文言も処理も {@code MainWindow#buildActions()} が持っており、
+ * ここへ写せば必ず片方が腐る（実際、最初に書いたとき「バージョン情報」が
+ * {@code AppInfo.NAME + " について"} とずれた）。<b>成分の名前が指しているものは、
+ * あちらを 1 度読めば分かる。</b>
  */
 record Actions(
         Action open,
