@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p><b>{@code check()} は呼ばない。</b>実際に GitHub へ出るテストを {@code build} に載せると、
  * 手元でもネットワークの都合で赤くなる。<b>経路そのものは画面のテストが通す</b>
- * （{@code MainWindowUiTest#checksForUpdate}。あちらは遮断されていても緑になる形で書いてある）。
+ * （{@code UpdateCheckUiTest}。あちらは遮断されていても緑になる形で書いてある）。
  */
 class UpdateCheckTest {
 

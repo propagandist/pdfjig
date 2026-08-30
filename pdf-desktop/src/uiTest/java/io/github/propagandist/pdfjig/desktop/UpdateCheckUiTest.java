@@ -24,7 +24,7 @@ import org.testfx.util.WaitForAsyncUtils;
  *
  * <ul>
  *   <li><b>押したときだけ通信する。</b>窓を開けただけでは答えの行が出ない
- *   <li><b>JavaFX スレッドを塞がない。</b>遮断された環境では 10 秒返らないので、
+ *   <li><b>JavaFX スレッドを塞がない。</b>遮断された環境では通信が長く返らないので、
  *       同期で呼んでいれば窓ごと固まり、ここが時間切れになる
  *   <li><b>失敗しても例外にならない。</b>投げれば
  *       {@code LogEvent.UNCAUGHT} まで抜け、答えの行は出ないままになる
@@ -76,7 +76,6 @@ class UpdateCheckUiTest extends DesktopUiTest {
 
         clickWhenReady(robot, "#about-check-update");
         waitForAnswer(robot);
-        String first = result(robot).getText();
 
         // 遮断は一時的なこともある。押せる状態に戻っていなければ、確認できなかった人は
         // 窓を閉じて開き直すしかない。
@@ -85,7 +84,13 @@ class UpdateCheckUiTest extends DesktopUiTest {
         clickWhenReady(robot, "#about-check-update");
         waitForAnswer(robot);
 
-        assertEquals(first, result(robot).getText());
+        // ★ 1 回目と 2 回目の答えが一致することは求めない。1 回目が一時的に失敗して
+        //   2 回目が通れば（逆も）変わるのが正しく、そこで赤くするのは環境の揺れを
+        //   判断の揺れとして扱うことになる（CLAUDE.md「不安定なテストの扱い」）。
+        //   ここが見たいのは「押し直せて、また答えが出る」ことだけである。
+        String again = result(robot).getText();
+        assertFalse(again.isBlank(), "押し直したのに答えの行が空である");
+        assertEquals(1, again.lines().count(), again);
 
         clickWhenReady(robot, "#about-close");
     }
@@ -107,8 +112,11 @@ class UpdateCheckUiTest extends DesktopUiTest {
      * <b>そこで読むと通信の結果ではないものを読む。</b>文言で見分けないのは、
      * 文言を変えたときに黙って通るテストになるためである。
      *
-     * <p>上限は {@link #TIMEOUT_SECONDS}。接続と読み取りの待ち（合わせて 10 秒）より長い。
+     * <p>上限は {@link #TIMEOUT_SECONDS}。接続と読み取りの待ち（5 秒ずつ）より長い。
      * <b>超えたら落とす</b>——遅いのではなく、答えが返る経路が壊れているということである。
+     * ★ <b>名前解決はその待ちの外である</b>ので、<b>DNS を黙って落とす遮断のしかたでは
+     * ここも超えうる</b>（{@link UpdateCheck#check()}）。遮断された Sandbox は即座に失敗を
+     * 返すため当たらない（2026-08-30 実測。35 本すべて緑）。
      *
      * <p><b>押せる状態に戻ったことを印にできるのは、{@code AboutDialog#settle} が
      * ボタンを最後に戻すからである。</b>逆順だった間、この待ちは「確認しています…」のまま

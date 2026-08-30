@@ -57,8 +57,14 @@ final class UpdateCheck {
     /**
      * 待つ時間（ミリ秒）。接続と読み取りに別々にかかる。
      *
-     * <p>遮断された環境では接続の側で待つことになる。<b>押した人が待つ上限は合わせて 10 秒</b>で、
-     * その間ボタンは「確認しています…」に変わる。
+     * <p><b>★ 全体の上限ではない。名前解決はこの外である</b>——{@code HttpURLConnection} は
+     * 解決してからでないと接続を始められず、{@link HttpURLConnection#setConnectTimeout} が
+     * 効くのはその後である。<b>DNS を黙って落とすファイアウォールの内側では、
+     * 解決だけで 10 秒を超えうる。</b>
+     *
+     * <p><b>「合わせて 10 秒」とは書かない</b>——実際に守れない数字を書くと、次に読む者が
+     * それを根拠に何かを決める（{@link Logs} の世代数と同じ判断）。押している間ボタンは
+     * 「確認しています…」に変わり、<b>窓は固まらない</b>（通信は背景スレッドである）。
      */
     private static final int TIMEOUT_MS = 5_000;
 
@@ -68,9 +74,13 @@ final class UpdateCheck {
      * 確認する。
      *
      * <p><b>バックグラウンドスレッドから呼ぶこと</b>（{@code CLAUDE.md}「JavaFX」）。
-     * 遮断された環境では {@link #TIMEOUT_MS} の 2 倍まで返らない。
+     * 遮断された環境では長く返らない（{@link #TIMEOUT_MS}）。
      *
      * <p><b>例外を投げない。</b>失敗はすべて {@link UpdateStatus.Unavailable} になる。
+     *
+     * <p><b>★ {@link UpdateStatus.Unavailable} を返すときは必ず記録を残す。</b>
+     * 画面に出るのは 1 行だけなので、<b>「押しても何も起きない」という報告を受けたときに
+     * 読む側の手がかりがそこにしか無い</b>（{@link LogEvent#UPDATE_NOT_CHECKED}）。
      *
      * @return 確認の結果
      */
@@ -79,6 +89,7 @@ final class UpdateCheck {
         if (installed.isEmpty()) {
             // 版数が読めないのは、焼き込みが壊れているとき（BuildInfo は "unknown" を返す)。
             // ★ 問い合わせる前にやめる——比べられない答えのために外へ出ない。
+            Logs.warn(LogEvent.UPDATE_NOT_CHECKED);
             return new UpdateStatus.Unavailable();
         }
         return ask().<UpdateStatus>map(latest -> compare(installed.get(), latest))
@@ -147,6 +158,12 @@ final class UpdateCheck {
      * 空でも 302 は返る（同日実測。curl の {@code -A ""} / {@code -H "User-Agent:"} でも同じ）。
      *
      * <p><b>本文を読まない。</b>{@code HEAD} で投げ、302 のヘッダだけを見る。
+     *
+     * <p><b>★ 失敗は 2 通りあり、どちらも記録する。</b>例外になるもの（遮断・DNS 不達・証明書）と、
+     * <b>例外にならないもの</b>——通信はできたが返ってきたものが想定と違う場合である。
+     * <b>後者は実際に起きる</b>: TLS を傍受するプロキシや、ログインページへ 302 を返す
+     * キャプティブポータルの内側がそれに当たり、<b>そこはまさに届けたい層の環境である</b>。
+     * 記録しないと、画面の 1 行以外に手がかりが無くなる。
      */
     private static Optional<ReleaseVersion> ask() {
         HttpURLConnection connection = null;
@@ -159,10 +176,13 @@ final class UpdateCheck {
             connection.setReadTimeout(TIMEOUT_MS);
             connection.setRequestProperty("User-Agent", "");
             connection.connect();
-            return published(connection.getHeaderField("Location"));
+            Optional<ReleaseVersion> published = published(connection.getHeaderField("Location"));
+            if (published.isEmpty()) {
+                Logs.warn(LogEvent.UPDATE_NOT_CHECKED);
+            }
+            return published;
         } catch (IOException | RuntimeException e) {
-            // 遮断・DNS 不達・証明書・応答の形違い——どれも「確認できなかった」に倒す。
-            // 記録は残す。押しても何も起きないという報告を受けたときの手がかりになる（#13）。
+            // 遮断・DNS 不達・証明書——どれも「確認できなかった」に倒す（#13）。
             Logs.warn(LogEvent.UPDATE_NOT_CHECKED, e);
             return Optional.empty();
         } finally {
