@@ -511,6 +511,132 @@ class PdfBoxPageOperationsTest {
     }
 
     @Nested
+    class AssembleEach {
+
+        @Test
+        @DisplayName("かたまりごとに、最初の入力の名前で連番を振って書き出す")
+        void writesEachSegmentWithSequentialNames() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("doc.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("other.pdf"), "B1");
+            Path outputDir = tempDir.resolve("out");
+
+            List<Path> outputs = operations.assembleEach(
+                    List.of(first, second),
+                    List.of(List.of(PageSelection.of(1, 1), PageSelection.of(0, 2)), List.of(PageSelection.of(0, 1))),
+                    outputDir);
+
+            // 名前は split と同じ規則であり、最初の入力から作る。
+            assertEquals("doc_001.pdf", outputs.get(0).getFileName().toString());
+            assertEquals("doc_002.pdf", outputs.get(1).getFileName().toString());
+            // 受け取った並びをそのまま切る。元の並びには戻さない。
+            assertEquals(List.of("B1", "A2"), textsOf(outputs.get(0)));
+            assertEquals(List.of("A1"), textsOf(outputs.get(1)));
+        }
+
+        @Test
+        @DisplayName("かたまりが 1 つでも連番で書き出す")
+        void writesSingleSegment() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
+            Path outputDir = tempDir.resolve("out");
+
+            List<Path> outputs =
+                    operations.assembleEach(List.of(input), List.of(List.of(PageSelection.of(0, 2))), outputDir);
+
+            assertEquals(1, outputs.size());
+            assertEquals("doc_001.pdf", outputs.get(0).getFileName().toString());
+            assertEquals(List.of("P2"), textsOf(outputs.get(0)));
+        }
+
+        @Test
+        @DisplayName("出力名が 1 つでも既存なら、何も書かずに失敗する")
+        void writesNothingWhenAnyOutputExists() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
+            Path outputDir = Files.createDirectory(tempDir.resolve("out"));
+            Files.createFile(outputDir.resolve("doc_002.pdf"));
+
+            assertEquals(
+                    ErrorCode.OUTPUT_ALREADY_EXISTS,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assembleEach(
+                                            List.of(input),
+                                            List.of(List.of(PageSelection.of(0, 1)), List.of(PageSelection.of(0, 2))),
+                                            outputDir))
+                            .errorCode());
+            assertFalse(Files.exists(outputDir.resolve("doc_001.pdf")));
+        }
+
+        @Test
+        @DisplayName("書き出しの途中で失敗したら、それまでに書いたものも残さない")
+        void removesPartialOutputOnFailure() throws Exception {
+            // 手法は Split の同名のテストと同じである。実際に途中で落ちるのはディスクが
+            // 尽きた・権限を失ったといった場合で、環境に依らせて起こせない。宛先を失った
+            // 参照の警告を 2 度目で失敗させ、1 つ目を書き終えて 2 つ目を書く前で落とす。
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            Path outputDir = tempDir.resolve("out");
+
+            AtomicInteger notified = new AtomicInteger();
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                if (notified.incrementAndGet() == 2) {
+                    throw new IllegalStateException("書き出しの途中で失敗させる");
+                }
+            });
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> failing.assembleEach(
+                            List.of(input),
+                            List.of(
+                                    List.of(PageSelection.of(0, 1)),
+                                    List.of(PageSelection.of(0, 2)),
+                                    List.of(PageSelection.of(0, 3))),
+                            outputDir));
+
+            assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
+        }
+
+        @Test
+        @DisplayName("かたまりの 1 つが範囲外を指していたら、何も書かずに失敗する")
+        void writesNothingWhenAnySegmentIsOutOfRange() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
+            Path outputDir = tempDir.resolve("out");
+
+            // 1 つ目は書ける。2 つ目が範囲外である。いまは書き出しごとに検証されるので
+            // 1 つ目を書いた後に落ちるが、後始末で消える。
+            assertThrows(
+                    PdfjigException.class,
+                    () -> operations.assembleEach(
+                            List.of(input),
+                            List.of(List.of(PageSelection.of(0, 1)), List.of(PageSelection.of(0, 3))),
+                            outputDir));
+
+            assertEquals(List.of(), listFilesIn(outputDir), "範囲外で落ちたのに、1 つ目が残っている。");
+        }
+
+        @Test
+        @DisplayName("入力もかたまりも、空なら書き出さずに失敗する")
+        void rejectsEmptyInput() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path outputDir = tempDir.resolve("out");
+
+            assertEquals(
+                    ErrorCode.NO_INPUT,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assembleEach(
+                                            List.of(), List.of(List.of(PageSelection.of(0, 1))), outputDir))
+                            .errorCode());
+            assertEquals(
+                    ErrorCode.EMPTY_RESULT,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assembleEach(List.of(input), List.of(), outputDir))
+                            .errorCode());
+            assertFalse(Files.exists(outputDir), "何も書かないのに出力先を作っている。");
+        }
+    }
+
+    @Nested
     class Rotate {
 
         @Test

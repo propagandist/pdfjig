@@ -149,6 +149,40 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
+    public List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir) {
+        if (inputs == null || inputs.isEmpty()) {
+            throw new PdfjigException(ErrorCode.NO_INPUT);
+        }
+        if (segments == null || segments.isEmpty()) {
+            throw new PdfjigException(ErrorCode.EMPTY_RESULT);
+        }
+        if (outputDir == null) {
+            throw new IllegalArgumentException("outputDir は null にできません。");
+        }
+
+        // 名前は最初の入力から作る。split と同じ規則を使う。
+        List<Path> outputs = splitOutputPaths(inputs.get(0), outputDir, segments.size());
+        // 1 つでも書けないなら、何も書かずに失敗させる。
+        outputs.forEach(PdfBoxPageOperations::requireAbsent);
+
+        createDirectories(outputDir);
+        // 途中で失敗したら、それまでに書いたものを消す。requireAbsent を通しているため、
+        // ここで消してよいのはこの呼び出しが作ったものだけである。
+        List<Path> written = new ArrayList<>(outputs.size());
+        try {
+            for (int i = 0; i < segments.size(); i++) {
+                // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
+                written.add(outputs.get(i));
+                assemble(inputs, segments.get(i), outputs.get(i));
+            }
+        } catch (RuntimeException e) {
+            written.forEach(PdfBoxPageOperations::deleteQuietly);
+            throw e;
+        }
+        return List.copyOf(outputs);
+    }
+
+    @Override
     public Path rotate(Path input, Map<Integer, Rotation> rotations, Path output) {
         if (rotations == null) {
             throw new IllegalArgumentException("rotations は null にできません。");

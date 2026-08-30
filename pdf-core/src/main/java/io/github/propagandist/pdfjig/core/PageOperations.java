@@ -105,6 +105,35 @@ public interface PageOperations {
     Path assemble(List<Path> inputs, List<PageSelection> pages, Path output);
 
     /**
+     * 組み立てた並びを、かたまりごとに連番のファイルとして書き出す。
+     *
+     * <p>出力ファイル名は {@code <最初の入力名>_001.pdf} の形で、かたまりの順に採番する。
+     * {@link #split} と同じ規則である。{@code outputDir} は存在しなければ作成する。
+     *
+     * <p><b>{@link #split} との違いは、何を切るかにある。</b> あちらは<b>元の並び</b>を
+     * 戦略で切る。こちらは<b>呼び出し側が組み立てた並び</b>——並べ替え・回転・削除・
+     * 複数ファイルの混在を反映したもの——をそのまま受け取って切る。編集の途中の並びを
+     * 分けたい呼び出し側は、元の並びを切られると惑わされる（docs/HANDOVER.md
+     * 「分割を『ここで区切る』に変えた」）。
+     *
+     * <p><b>1 つでも書けないなら、何も書かない。</b> 途中で失敗した場合も、それまでに
+     * 書いたものを消してから投げる。何個できたのか分からないまま失敗だけを伝えると、
+     * 呼び出し側は出力先を自分で見に行くしかない。
+     *
+     * @param inputs    入力ファイル。ページ指定の出どころ番号がこの並びの添字になる
+     * @param segments  かたまりごとのページ指定。先頭から順に連番で書き出す
+     * @param outputDir 出力先ディレクトリ
+     * @return 生成されたファイル。かたまりの順
+     * @throws PdfjigException          入力が空（{@link ErrorCode#NO_INPUT}）、かたまりが 1 つも無い
+     *                                  （{@link ErrorCode#EMPTY_RESULT}）、指定したページが範囲外
+     *                                  （{@link ErrorCode#PAGE_OUT_OF_RANGE}）、出力先に同名の
+     *                                  ファイルが既にある（{@link ErrorCode#OUTPUT_ALREADY_EXISTS}）、
+     *                                  読み書きに失敗した場合
+     * @throws IllegalArgumentException {@code outputDir} が {@code null} の場合
+     */
+    List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir);
+
+    /**
      * ページを回転する。
      *
      * <p><b>指定は現在の回転角への追加である。</b> {@link Rotation#CLOCKWISE_90} を指定すると、

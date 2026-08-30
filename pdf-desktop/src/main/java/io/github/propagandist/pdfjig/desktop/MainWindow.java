@@ -16,12 +16,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -63,9 +61,6 @@ import javafx.stage.Stage;
  * 「名前を付けて保存」で初めて書き出す。
  */
 public final class MainWindow {
-
-    /** 分割の出力ファイル名。pdf-core の分割と同じ形にそろえる。 */
-    private static final String SPLIT_NAME_FORMAT = "%s_%03d.pdf";
 
     private final Stage stage;
 
@@ -673,11 +668,10 @@ public final class MainWindow {
         }
 
         List<Path> sources = session.paths();
-        String baseName = baseNameOf(session.path());
         Path outputDir = directory.get();
         folders.rememberWrittenFolder(outputDir);
 
-        runAsync(() -> splitInto(sources, segments, outputDir, baseName), this::showSplitResult);
+        runAsync(() -> splitInto(sources, segments, outputDir), this::showSplitResult);
     }
 
     /** 選択中のページの区切りを付け外しする。 */
@@ -694,7 +688,7 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        PageCountPrompt.ask(stage, session.order().size(), baseNameOf(session.path()))
+        PageCountPrompt.ask(stage, session.order().size(), session.baseName())
                 .ifPresent(session.order()::applyEveryNPages);
     }
 
@@ -764,36 +758,19 @@ public final class MainWindow {
         return List.copyOf(warnings);
     }
 
-    private static SplitResult splitInto(
-            List<Path> sources, List<List<PageSelection>> segments, Path outputDir, String baseName) {
+    /**
+     * かたまりごとに書き出す。
+     *
+     * <p><b>連番の付け方も、書けないときの約束も pdf-core が持つ</b>
+     * （{@link PageOperations#assembleEach}）。ここに写すと、同じ「分割」という操作の
+     * 挙動が 2 か所に分かれ、しかも違いは失敗したときにしか出ない。
+     */
+    private static SplitResult splitInto(List<Path> sources, List<List<PageSelection>> segments, Path outputDir) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        List<Path> outputs = IntStream.rangeClosed(1, segments.size())
-                .mapToObj(number -> outputDir.resolve(String.format(Locale.ROOT, SPLIT_NAME_FORMAT, baseName, number)))
-                .toList();
-
-        // 1 つでも書けないなら、何も書かずに失敗させる。pdf-core の分割と同じ約束にする。
-        for (Path output : outputs) {
-            if (Files.exists(output)) {
-                throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
-            }
-        }
-        // 途中で失敗したら、それまでに書いたものを消す。何個できたのか分からないまま
-        // 失敗だけを伝えると、利用者は出力先を自分で見に行くしかない。
-        // 上で存在を確かめているため、消してよいのはここで作ったものだけである。
-        List<Path> written = new ArrayList<>(outputs.size());
-        try {
-            for (int i = 0; i < segments.size(); i++) {
-                // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
-                written.add(outputs.get(i));
-                operations.assemble(sources, segments.get(i), outputs.get(i));
-            }
-        } catch (RuntimeException e) {
-            written.forEach(MainWindow::deleteQuietly);
-            throw e;
-        }
-        return new SplitResult(segments.size(), List.copyOf(warnings));
+        List<Path> outputs = operations.assembleEach(sources, segments, outputDir);
+        return new SplitResult(outputs.size(), List.copyOf(warnings));
     }
 
     /** 分割の結果。書き出した数と、その途中で出た警告。 */
@@ -812,16 +789,8 @@ public final class MainWindow {
         }
     }
 
-    private static void deleteQuietly(Path path) {
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException e) {
-            // 置き換えに成功していれば既に無い。残っていても保存の成否は変わらない。
-        }
-    }
-
     private String suggestedFileName() {
-        return baseNameOf(session.path()) + "-edited.pdf";
+        return session.baseName() + "-edited.pdf";
     }
 
     /**
@@ -850,12 +819,6 @@ public final class MainWindow {
             return Optional.empty();
         }
         return Optional.ofNullable(session.path().getParent()).filter(Files::isDirectory);
-    }
-
-    private static String baseNameOf(Path path) {
-        String name = path.getFileName().toString();
-        int extension = name.lastIndexOf('.');
-        return extension > 0 ? name.substring(0, extension) : name;
     }
 
     private <T> void runAsync(Supplier<T> work, Consumer<T> onSucceeded) {
