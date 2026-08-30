@@ -131,7 +131,7 @@ final class AboutDialog {
         checkButton.addEventFilter(ActionEvent.ACTION, event -> {
             // 押した結果としてダイアログが閉じては、答えを読めない（「情報をコピー」と同じ）。
             event.consume();
-            checkForUpdate(dialog, checkButton, update, releases);
+            checkForUpdate(checkButton, update, releases);
         });
 
         Button copyButton = (Button) dialog.getDialogPane().lookupButton(copy);
@@ -156,10 +156,10 @@ final class AboutDialog {
      * <p><b>答えが出るまでボタンを押せなくする。</b>連打すると要求だけが増える。
      * 答えが出たら、失敗していても押せる状態へ戻す——遮断は一時的なこともある。
      */
-    private static void checkForUpdate(Dialog<?> dialog, Button button, Label result, Hyperlink link) {
+    private static void checkForUpdate(Button button, Label result, Hyperlink link) {
         button.setDisable(true);
         hide(link);
-        report(dialog, result, "確認しています…");
+        report(result, "確認しています…");
 
         Task<UpdateStatus> task = new Task<>() {
             @Override
@@ -167,10 +167,10 @@ final class AboutDialog {
                 return UpdateCheck.check();
             }
         };
-        task.setOnSucceeded(event -> settle(dialog, button, result, link, task.getValue()));
+        task.setOnSucceeded(event -> settle(button, result, link, task.getValue()));
         // UpdateCheck は投げない。それでも受けておく——ここで落とすと、押した人には
         // 「確認しています…」のまま何も起きない窓が残る（CLAUDE.md 優先順位 2）。
-        task.setOnFailed(event -> settle(dialog, button, result, link, new UpdateStatus.Unavailable()));
+        task.setOnFailed(event -> settle(button, result, link, new UpdateStatus.Unavailable()));
 
         Thread worker = new Thread(task, "pdfjig-update-check");
         worker.setDaemon(true);
@@ -178,19 +178,19 @@ final class AboutDialog {
     }
 
     /** 答えを出す。リンクを添えるのは、新しい版があったときだけである。 */
-    private static void settle(Dialog<?> dialog, Button button, Label result, Hyperlink link, UpdateStatus status) {
+    private static void settle(Button button, Label result, Hyperlink link, UpdateStatus status) {
         boolean available = status instanceof UpdateStatus.Available;
         link.setVisible(available);
         link.setManaged(available);
         button.setDisable(false);
-        report(dialog, result, UpdateCheck.describe(status));
+        report(result, UpdateCheck.describe(status));
     }
 
-    private static void report(Dialog<?> dialog, Label result, String text) {
+    private static void report(Label result, String text) {
         result.setText(text);
         result.setVisible(true);
         result.setManaged(true);
-        fitToContent(dialog);
+        fitToContent(result);
     }
 
     /**
@@ -201,8 +201,8 @@ final class AboutDialog {
      * <p><b>閉じた後に届くことがある。</b>確認している間に閉じられると、答えは行き先を失った
      * 部品に届く。<b>そこで落とさない</b>——窓が無いことは、失敗ではない。
      */
-    private static void fitToContent(Dialog<?> dialog) {
-        Scene scene = dialog.getDialogPane().getScene();
+    private static void fitToContent(Node node) {
+        Scene scene = node.getScene();
         if (scene == null) {
             return;
         }
