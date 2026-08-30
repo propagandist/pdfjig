@@ -177,13 +177,21 @@ final class AboutDialog {
         worker.start();
     }
 
-    /** 答えを出す。リンクを添えるのは、新しい版があったときだけである。 */
+    /**
+     * 答えを出す。リンクを添えるのは、新しい版があったときだけである。
+     *
+     * <p><b>★ ボタンを戻すのは最後である。順序に意味がある</b>——先に戻すと、
+     * <b>「確認しています…」のまま押せる一瞬</b>ができ、そこを押した人は自分が見ていない答えを
+     * 捨てて確認をやり直すことになる。<b>押せることが、答えが出そろった印である。</b>
+     * （画面のテストが実際にその窓に入り込んで落ちた。2026-08-30、Sandbox の遮断環境では
+     * 失敗が即座に返るため窓が広がる）
+     */
     private static void settle(Button button, Label result, Hyperlink link, UpdateStatus status) {
         boolean available = status instanceof UpdateStatus.Available;
         link.setVisible(available);
         link.setManaged(available);
-        button.setDisable(false);
         report(result, UpdateCheck.describe(status));
+        button.setDisable(false);
     }
 
     private static void report(Label result, String text) {

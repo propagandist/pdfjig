@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.testfx.api.FxRobot;
 import org.testfx.framework.junit5.Start;
 import org.testfx.framework.junit5.Stop;
+import org.testfx.util.WaitForAsyncUtils;
 
 /**
  * 更新の確認（#72）。
@@ -108,10 +109,18 @@ class UpdateCheckUiTest extends DesktopUiTest {
      *
      * <p>上限は {@link #TIMEOUT_SECONDS}。接続と読み取りの待ち（合わせて 10 秒）より長い。
      * <b>超えたら落とす</b>——遅いのではなく、答えが返る経路が壊れているということである。
+     *
+     * <p><b>押せる状態に戻ったことを印にできるのは、{@code AboutDialog#settle} が
+     * ボタンを最後に戻すからである。</b>逆順だった間、この待ちは「確認しています…」のまま
+     * 抜けた（2026-08-30、遮断された Sandbox で実際に落ちた）。
+     * <b>待ち時間を延ばして直すたぐいではない</b>——完了の条件が間違っていた
+     * （{@code CLAUDE.md}「不安定なテストの扱い」）。
      */
     private void waitForAnswer(FxRobot robot) throws Exception {
         waitFor(() -> result(robot).isVisible()
                 && !button(robot, "#about-check-update").isDisable());
+        // 読むのは別のスレッドである。掛け金を通してから読む（waitForNode と同じ作法）。
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     private static Label result(FxRobot robot) {
