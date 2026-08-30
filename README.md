@@ -139,3 +139,7 @@ Apache License 2.0. [LICENSE](LICENSE) を参照。
 ## セキュリティ
 
 脆弱性の報告は [SECURITY.md](SECURITY.md) を参照。公開の Issue に書かないこと。
+
+---
+
+Issue / PR は受け付けるが、対応は保証しない。
