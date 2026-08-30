@@ -88,6 +88,44 @@ class RecentFoldersTest {
     }
 
     @Test
+    @DisplayName("覚えていた状態に戻せる")
+    void restoresRememberedFolders(@TempDir Path source, @TempDir Path target) {
+        folders.restore(source, target);
+
+        assertEquals(source, folders.reading().orElseThrow());
+        assertEquals(target, folders.writing().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("戻すときに片方だけでもよい")
+    void restoresOnlyOneSide(@TempDir Path source) {
+        folders.restore(source, null);
+
+        assertEquals(source, folders.reading().orElseThrow());
+        assertTrue(folders.writing().isEmpty());
+    }
+
+    @Test
+    @DisplayName("保存のために取り出すときは存在を確かめない")
+    void keepsRememberedValueForSaving(@TempDir Path parent) throws IOException {
+        // 終了したその瞬間に USB が抜けていても、次に挿せば同じ場所である。
+        // 消えたものを落とすのは取り出すとき（reading()）でよい。
+        Path removable = Files.createDirectory(parent.resolve("removable"));
+        folders.rememberReadFile(removable.resolve("scan.pdf"));
+        Files.delete(removable);
+
+        assertTrue(folders.reading().isEmpty());
+        assertEquals(removable, folders.rememberedReading().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("何も覚えていなければ、取り出すものも無い")
+    void hasNothingToSaveWhenUnused() {
+        assertTrue(folders.rememberedReading().isEmpty());
+        assertTrue(folders.rememberedWriting().isEmpty());
+    }
+
+    @Test
     @DisplayName("親を持たないパスは覚えない")
     void ignoresPathWithoutParent(@TempDir Path directory) {
         folders.rememberReadFile(directory.resolve("scan.pdf"));
