@@ -1,9 +1,12 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import javafx.application.HostServices;
+import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
@@ -17,6 +20,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 
 /**
  * バージョン情報のダイアログ。
@@ -25,6 +29,11 @@ import javafx.stage.Stage;
  * 配布元と、実行中のランタイム。不具合の報告を受けたときに、利用者に環境を聞き直さずに済ませる。
  *
  * <p>「情報をコピー」は、その報告に貼るためのもの。開いている文書の名前や中身は<b>含めない</b>。
+ *
+ * <p><b>「更新を確認」だけが外へ出る。</b>押したときに 1 度 GitHub へ問い合わせるだけで、
+ * この窓を開いても、アプリを起動しても、何も送らない（{@link UpdateCheck}、#72）。
+ * <b>ここに置いたのは、版数のすぐ隣が答えの出る場所だからである</b>——
+ * 「手元のこれは古いのか」を確かめに来る人は、まずこの窓を開く。
  */
 final class AboutDialog {
 
@@ -50,6 +59,20 @@ final class AboutDialog {
         Label ai = detail(AppInfo.aiStatus(aiAvailable));
         ai.setId("about-ai");
 
+        // 押すまでは無い行として扱う。何も確かめていないのに何かが書いてあると、
+        // 起動しただけで確認されたように読める（CLAUDE.md 優先順位 2）。
+        Label update = detail("");
+        update.setId("about-update");
+        hide(update);
+
+        Hyperlink releases = new Hyperlink("Releases を開く");
+        releases.setId("about-update-link");
+        releases.getStyleClass().add("about-link");
+        releases.setPadding(Insets.EMPTY);
+        // 落とさない・実行しない。渡すのは既定のブラウザである（#16 / #72）。
+        releases.setOnAction(event -> hostServices.showDocument(AppInfo.LATEST_RELEASE));
+        hide(releases);
+
         Label copyright = new Label(AppInfo.COPYRIGHT);
         copyright.getStyleClass().add("about-detail");
 
@@ -69,6 +92,8 @@ final class AboutDialog {
                 name,
                 version,
                 ai,
+                update,
+                releases,
                 copyright,
                 license,
                 repository,
@@ -76,7 +101,7 @@ final class AboutDialog {
                 detail(AppInfo.javafxRuntime()),
                 detail(AppInfo.operatingSystem()));
         // 「名前と版数」「配布元とライセンス」「実行環境」の 3 つのまとまりに見せる。
-        // AI の有無は版数の補足なので、1 つ目のまとまりに入れる。
+        // AI の有無も更新の確認も版数の補足なので、1 つ目のまとまりに入れる。
         VBox.setMargin(copyright, new Insets(10, 0, 0, 0));
         VBox.setMargin(java, new Insets(10, 0, 0, 0));
 
@@ -87,6 +112,7 @@ final class AboutDialog {
         content.setAlignment(Pos.TOP_LEFT);
         content.setPadding(new Insets(12));
 
+        ButtonType check = new ButtonType("更新を確認", ButtonData.OTHER);
         ButtonType copy = new ButtonType("情報をコピー", ButtonData.OTHER);
 
         Dialog<Void> dialog = new Dialog<>();
@@ -95,10 +121,18 @@ final class AboutDialog {
         dialog.setHeaderText(null);
         dialog.getDialogPane().setId("about-dialog");
         dialog.getDialogPane().setContent(content);
-        dialog.getDialogPane().getButtonTypes().addAll(copy, ButtonType.CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(check, copy, ButtonType.CLOSE);
         dialog.getDialogPane().lookupButton(ButtonType.CLOSE).setId("about-close");
         // ボタンで閉じるには結果を返す必要がある。見せるだけのダイアログなので値は持たない。
         dialog.setResultConverter(button -> null);
+
+        Button checkButton = (Button) dialog.getDialogPane().lookupButton(check);
+        checkButton.setId("about-check-update");
+        checkButton.addEventFilter(ActionEvent.ACTION, event -> {
+            // 押した結果としてダイアログが閉じては、答えを読めない（「情報をコピー」と同じ）。
+            event.consume();
+            checkForUpdate(checkButton, update, releases);
+        });
 
         Button copyButton = (Button) dialog.getDialogPane().lookupButton(copy);
         copyButton.addEventFilter(ActionEvent.ACTION, event -> {
@@ -111,6 +145,86 @@ final class AboutDialog {
         });
 
         dialog.showAndWait();
+    }
+
+    /**
+     * 更新を確認する。
+     *
+     * <p><b>通信はバックグラウンドスレッドで行う</b>（{@code CLAUDE.md}「JavaFX」）。
+     * 遮断された環境では長く返らないため、JavaFX スレッドで待つと窓ごと固まる
+     * （待たされる上限は決まっていない。{@link UpdateCheck#check()}）。
+     *
+     * <p><b>答えが出るまでボタンを押せなくする。</b>連打すると要求だけが増える。
+     * 答えが出たら、失敗していても押せる状態へ戻す——遮断は一時的なこともある。
+     */
+    private static void checkForUpdate(Button button, Label result, Hyperlink link) {
+        button.setDisable(true);
+        hide(link);
+        report(result, "確認しています…");
+
+        Task<UpdateStatus> task = new Task<>() {
+            @Override
+            protected UpdateStatus call() {
+                return UpdateCheck.check();
+            }
+        };
+        task.setOnSucceeded(event -> settle(button, result, link, task.getValue()));
+        // UpdateCheck は投げない。それでも受けておく——ここで落とすと、押した人には
+        // 「確認しています…」のまま何も起きない窓が残る（CLAUDE.md 優先順位 2）。
+        task.setOnFailed(event -> settle(button, result, link, new UpdateStatus.Unavailable()));
+
+        Thread worker = new Thread(task, "pdfjig-update-check");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * 答えを出す。リンクを添えるのは、新しい版があったときだけである。
+     *
+     * <p><b>★ ボタンを戻すのは最後である。順序に意味がある</b>——先に戻すと、
+     * <b>「確認しています…」のまま押せる一瞬</b>ができ、そこを押した人は自分が見ていない答えを
+     * 捨てて確認をやり直すことになる。<b>押せることが、答えが出そろった印である。</b>
+     * （画面のテストが実際にその窓に入り込んで落ちた。2026-08-30、Sandbox の遮断環境では
+     * 失敗が即座に返るため窓が広がる）
+     */
+    private static void settle(Button button, Label result, Hyperlink link, UpdateStatus status) {
+        boolean available = status instanceof UpdateStatus.Available;
+        link.setVisible(available);
+        link.setManaged(available);
+        report(result, UpdateCheck.describe(status));
+        button.setDisable(false);
+    }
+
+    private static void report(Label result, String text) {
+        result.setText(text);
+        result.setVisible(true);
+        result.setManaged(true);
+        fitToContent(result);
+    }
+
+    /**
+     * 増えた行のぶん窓を広げる。
+     *
+     * <p>JavaFX は表示後の窓を自動では広げないため、書いた文が切れる。
+     *
+     * <p><b>閉じた後に届くことがある。</b>確認している間に閉じられると、答えは行き先を失った
+     * 部品に届く。<b>そこで落とさない</b>——窓が無いことは、失敗ではない。
+     */
+    private static void fitToContent(Node node) {
+        Scene scene = node.getScene();
+        if (scene == null) {
+            return;
+        }
+        Window window = scene.getWindow();
+        if (window != null) {
+            window.sizeToScene();
+        }
+    }
+
+    /** 押すまで無い行として扱う。場所も取らせない。 */
+    private static void hide(Node node) {
+        node.setVisible(false);
+        node.setManaged(false);
     }
 
     private static Label detail(String text) {

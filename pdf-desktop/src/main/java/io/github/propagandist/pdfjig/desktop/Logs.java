@@ -181,6 +181,19 @@ final class Logs {
     }
 
     /**
+     * 想定できる失敗を、原因の例外なしに記録する。
+     *
+     * <p><b>例外にならない失敗がある。</b>応答は返ったが中身が想定と違う、といった経路である
+     * （{@link UpdateCheck}）。<b>そこで例外をこしらえて渡さない</b>——
+     * 書かれるスタックフレームは「作った場所」でしかなく、読む者を偽の原因へ案内する。
+     *
+     * @param event 何が起きたか
+     */
+    static void warn(LogEvent event) {
+        write(Level.WARNING, event, null);
+    }
+
+    /**
      * 想定できる失敗を記録する。
      *
      * @param event 何が起きたか

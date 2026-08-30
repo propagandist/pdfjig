@@ -138,6 +138,21 @@ class LogsTest {
     }
 
     @Test
+    @DisplayName("原因の例外が無くても 1 行残る（偽のスタックトレースは足さない）")
+    void writesTheEventAloneWhenThereIsNoCause(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+
+        // 例外にならない失敗がある。応答は返ったが中身が想定と違う、といった経路である
+        // （UpdateCheck）。記録のために例外をこしらえると、書かれるフレームは
+        // 「作った場所」でしかなく、読む者を偽の原因へ案内する。
+        Logs.warn(LogEvent.UPDATE_NOT_CHECKED);
+
+        String written = readAll(logs);
+        assertTrue(written.contains(LogEvent.UPDATE_NOT_CHECKED.name()), written);
+        assertFalse(written.contains("\tat "), written);
+    }
+
+    @Test
     @DisplayName("見出しに、何を書いていないかが載る")
     void saysWhatItDoesNotWrite(@TempDir Path logs) {
         Logs.startIn(logs, 64 * 1024, 2);

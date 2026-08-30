@@ -162,6 +162,12 @@ val upgradeUuid = "3210BCE4-3635-4EFC-8EC1-DC77881091BB"
  *   javafx.swing 経由の推移に頼ると、依存が変わったとき黙って消える
  * - jdk.localedata — 日本語ロケール。サービス経由の読み込みなので jdeps では検出できない。
  *   外すと jlink 後に ja が消え、日付・数値の書式が英語圏のものに化ける
+ * - jdk.crypto.ec — TLS の鍵交換（SunEC）。JCA のサービス経由なので jdeps では検出できない。
+ *   ★★ 外すと HTTPS が握手で落ちる。「更新を確認」（#72）だけが使う経路であり、
+ *   **手元の JDK では全部緑になる**——単体テストも uiTest もフルの JDK で走るので、
+ *   壊れるのは配布物だけである。2026-08-30 に jlink したイメージで実測した:
+ *   無しは SSLHandshakeException（handshake_failure）、有りは 302 が返る。
+ *   ランタイムイメージは 60,683,709 → 60,792,795 バイト（+109,086）
  *
  * ★ jdk.unsupported（POI の sun.misc.Unsafe）と jdk.xml.dom（xmlbeans）は
  *   2026-08-22 に外した。POI の宣言そのものを M1 まで外したため
@@ -175,6 +181,7 @@ val runtimeModules =
         "java.xml",
         "java.security.jgss",
         "java.xml.crypto",
+        "jdk.crypto.ec",
         "jdk.localedata",
         "javafx.base",
         "javafx.graphics",
