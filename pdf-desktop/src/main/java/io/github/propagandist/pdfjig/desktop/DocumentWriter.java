@@ -130,7 +130,16 @@ final class DocumentWriter {
      * {@code Settings#replace} も同じ形だが、あちらは落とす条件が狭い。
      * <b>2 つを 1 つにするかは #113 では決めていない。</b>
      *
+     * <p><b>★ 落ちたことを記録しない。</b>落ちるのは<b>開いている文書へ上書き保存する</b>という
+     * ふつうの経路であり、<b>失敗ではない</b>。ログに書くのは {@code WARNING} 以上、つまり
+     * 失敗したことだけである（{@code docs/SPEC.md} §10.4）——ここで書くと、
+     * <b>正常に一巡しただけでログができる。</b>
+     * <b>どちらの経路を通ったかは、実行中も後からも分からない</b>ことになるが、
+     * <b>それを知るために正常な動作を失敗として記録するほうが高くつく。</b>
+     *
      * <p><b>package-private なのはテストのためである</b>（{@code DocumentWriterTest}）。
+     * <b>呼んでよいのはこのクラスの中だけである</b>——ArchUnit が縛っている
+     * （{@code replaceIsCalledOnlyByDocumentWriter}）。
      */
     static void move(Path from, Path to) {
         try {

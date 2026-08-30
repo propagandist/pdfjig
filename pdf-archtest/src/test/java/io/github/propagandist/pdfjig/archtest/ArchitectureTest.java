@@ -332,6 +332,33 @@ class ArchitectureTest {
     }
 
     /**
+     * 置き換えそのものも、確認を取れる経路の内側に閉じる。
+     *
+     * <p>{@code DocumentWriter#move} は<b>既にあるファイルを問答無用で置き換える</b>。
+     * #113 で {@code private} から package-private になった——<b>テストから呼ぶためであり、
+     * 他から呼んでよくなったわけではない。</b>
+     *
+     * <p><b>★ 上の {@link #assembleIsCalledOnlyByMainWindow} だけでは足りない。</b>
+     * あちらが縛るのは {@code assemble} で、<b>{@code move} は 2 つ目の入口になっている</b>
+     * ——確認を取っていないパスを渡せば、そこから同じことが起きる（優先順位 1）。
+     *
+     * <p>呼んでよいのは {@code DocumentWriter} 自身だけである（{@code assemble} の中から）。
+     * <b>テストは対象外である</b>——{@code DO_NOT_INCLUDE_TESTS} で取り込んでいない。
+     */
+    @Test
+    @DisplayName("置き換えを頼めるのは DocumentWriter の中だけである")
+    void replaceIsCalledOnlyByDocumentWriter() {
+        noClasses()
+                .that(not(named(DOCUMENT_WRITER)))
+                .should()
+                .callMethodWhere(target(owner(name(DOCUMENT_WRITER))).and(target(name("move"))))
+                .because("move は既にあるファイルを問答無用で置き換える。#113 で private を外したのは"
+                        + "テストから呼ぶためであり、他から呼んでよくなったわけではない"
+                        + "（CLAUDE.md 優先順位 1）")
+                .check(classes);
+    }
+
+    /**
      * 書き出しを画面から切り離したままにする。
      *
      * <p>{@code DocumentWriter} は<b>バックグラウンドスレッドから呼ばれる</b>
