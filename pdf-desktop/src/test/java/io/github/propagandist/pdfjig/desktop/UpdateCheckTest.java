@@ -144,4 +144,13 @@ class UpdateCheckTest {
         assertTrue(AppInfo.LATEST_RELEASE.startsWith(AppInfo.REPOSITORY), AppInfo.LATEST_RELEASE);
         assertEquals(AppInfo.REPOSITORY + "/releases/latest", AppInfo.LATEST_RELEASE);
     }
+
+    @Test
+    @DisplayName("★ 平文で出ていかない")
+    void neverLeavesInPlainText() {
+        // s を 1 文字消すだけで、問い合わせも「Releases を開く」も平文になる。
+        // TrustManager をいじる類の変更と違い、差分は 1 文字で、他のテストは全部緑のまま通る。
+        assertTrue(AppInfo.REPOSITORY.startsWith("https://"), AppInfo.REPOSITORY);
+        assertTrue(AppInfo.LATEST_RELEASE.startsWith("https://"), AppInfo.LATEST_RELEASE);
+    }
 }

@@ -266,6 +266,12 @@ class ArchitectureTest {
      * {@link java.net.HttpURLConnection} を使っており、これを呼ぶ理由が無い。
      * <b>対の {@code ...RuleHasSubject} を持たないのは、依存先が JDK であり、
      * クラスパスから外れることがないためである</b>（{@link #coreMustNotReachTheNetwork} と同じ）。
+     *
+     * <p><b>★ 名指しは 2 つある。{@code openStream} は {@code InputStream} を、
+     * {@code getContent} は {@code Object} を返す</b>——どちらも<b>戻り値の型に
+     * {@code java.net} が現れない</b>。{@code openConnection} は {@code URLConnection} を返すので
+     * 上のルールに掛かる。<b>ここへ挙げるのは「型に現れないもの」だけである</b>ので、
+     * 増やすときは戻り値の型を先に見ること。
      */
     @Test
     @DisplayName("URL から直に開かない（java.net.URL は識別子として使うので型では縛れない）")
@@ -275,7 +281,9 @@ class ArchitectureTest {
                 .resideInAPackage("..pdfjig..")
                 .should()
                 .callMethod(java.net.URL.class, "openStream")
-                .because("URL#openStream は型に現れないまま外へ出る。" + "資源の読み出しと同じ形をしており、差分を読んだだけでは見分けがつかない（#72）")
+                .orShould()
+                .callMethod(java.net.URL.class, "getContent")
+                .because("URL#openStream と URL#getContent は型に現れないまま外へ出る。" + "資源の読み出しと同じ形をしており、差分を読んだだけでは見分けがつかない（#72）")
                 .check(classes);
     }
 
