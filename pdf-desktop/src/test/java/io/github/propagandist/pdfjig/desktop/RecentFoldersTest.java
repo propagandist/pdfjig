@@ -90,7 +90,7 @@ class RecentFoldersTest {
     @Test
     @DisplayName("覚えていた状態に戻せる")
     void restoresRememberedFolders(@TempDir Path source, @TempDir Path target) {
-        folders.restore(source, target);
+        folders.restoreUnused(source, target);
 
         assertEquals(source, folders.reading().orElseThrow());
         assertEquals(target, folders.writing().orElseThrow());
@@ -99,10 +99,25 @@ class RecentFoldersTest {
     @Test
     @DisplayName("戻すときに片方だけでもよい")
     void restoresOnlyOneSide(@TempDir Path source) {
-        folders.restore(source, null);
+        folders.restoreUnused(source, null);
 
         assertEquals(source, folders.reading().orElseThrow());
         assertTrue(folders.writing().isEmpty());
+    }
+
+    @Test
+    @DisplayName("★ 復元は、その間に使われた側を塗り潰さない")
+    void doesNotOverwriteWhatWasUsedWhileRestoring(@TempDir Path opened, @TempDir Path remembered) {
+        // 復元は背景で走る。ファイルの関連付けから起動した経路では、戻る前に
+        // start が起動引数のファイルを開き、その置き場をここへ覚えている。
+        folders.rememberReadFile(opened.resolve("scan.pdf"));
+
+        folders.restoreUnused(remembered, remembered);
+
+        // いま開いた文書の隣が残る。塗り潰すと、古い値が保存されて残ってしまう。
+        assertEquals(opened, folders.reading().orElseThrow());
+        // 使われていない側には入る。
+        assertEquals(remembered, folders.writing().orElseThrow());
     }
 
     @Test

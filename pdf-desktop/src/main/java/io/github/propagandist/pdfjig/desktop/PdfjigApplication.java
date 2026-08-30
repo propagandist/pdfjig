@@ -76,6 +76,10 @@ public final class PdfjigApplication extends Application {
      * あちらは直前に実際へ届いている。
      *
      * <p>覚えていたフォルダが 1 拍遅れて効くのは、<b>いま（そもそも覚えない）と比べて悪くならない。</b>
+     *
+     * <p><b>★ 遅れて届くので、届いた先が空とは限らない。</b>{@code start} は復元を待たずに
+     * 起動引数のファイルを開く（ファイルの関連付けの経路）。だから
+     * {@link RecentFolders#restoreUnused} は<b>まだ使われていない側だけを戻す。</b>
      */
     private static void restore(MainWindow window, Optional<Path> settingsFile) {
         if (settingsFile.isEmpty()) {
@@ -91,7 +95,7 @@ public final class PdfjigApplication extends Application {
                 () -> {
                     Path reachableReading = reachable(reading);
                     Path reachableWriting = reachable(writing);
-                    Platform.runLater(() -> window.folders().restore(reachableReading, reachableWriting));
+                    Platform.runLater(() -> window.folders().restoreUnused(reachableReading, reachableWriting));
                 },
                 "restore-folders");
         worker.setDaemon(true);
