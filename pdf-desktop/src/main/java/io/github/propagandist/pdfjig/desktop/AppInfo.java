@@ -28,6 +28,15 @@ final class AppInfo {
 
     static final String REPOSITORY = "https://github.com/propagandist/pdfjig";
 
+    /**
+     * 最新の公開版のページ。
+     *
+     * <p>更新の確認もここへ問い合わせる（{@link UpdateCheck}）。<b>見せる先と問い合わせ先を
+     * 同じ 1 つにしてある</b>——別々に持つと、片方だけ直したときに「新しい版がある」と言いながら
+     * 違う場所へ案内することになる。
+     */
+    static final String LATEST_RELEASE = REPOSITORY + "/releases/latest";
+
     /** 値を読めなかった項目に出す文言。 */
     private static final String UNKNOWN = "不明";
 
