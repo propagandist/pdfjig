@@ -65,11 +65,18 @@ pdfjig/
 
 依存の向き:
 
-```
-pdf-desktop ──┐
-              ├──> pdf-ai ──> pdf-core
-pdf-cli ──────┘
-              └────────────> pdf-core
+```mermaid
+%% ★ 同じ図が README.md / docs/SPEC.md / CLAUDE.md の 3 箇所にある。
+%%   1 つ直したら 3 つとも直す。片方だけ直さないこと。
+%%   1 箇所へまとめてリンクにする手は採らない——README は初めて見る人の入口、
+%%   CLAUDE.md の INV-1 は作業前に全文を読む対象、docs/SPEC.md の §3.1 は
+%%   モジュール構成を説明する節そのものであり、どれも飛ばすと目的を損ねる。
+flowchart LR
+    desktop["pdf-desktop"] --> ai["pdf-ai"]
+    cli["pdf-cli"] --> ai
+    desktop --> core["pdf-core"]
+    cli --> core
+    ai --> core
 ```
 
 **不変条件: `pdf-core` は `pdf-ai` に依存してはならない。** これは Gradle の依存宣言と ArchUnit テストの双方で強制する。この依存方向が崩れると設計全体が意味を失う。
