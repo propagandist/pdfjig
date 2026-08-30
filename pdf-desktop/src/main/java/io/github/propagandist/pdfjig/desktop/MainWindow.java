@@ -878,8 +878,12 @@ public final class MainWindow {
      * <p>例外そのもののメッセージは決して出さない。依存ライブラリの例外には入力値が
      * 埋め込まれていることがあり、そこにパスワードが混ざりうる（CLAUDE.md INV-5）。
      * 出してよいのは {@link ErrorCode} の定型文だけである。
+     *
+     * <p><b>同じものを {@link Logs} にも残す。</b>画面の定型文は「何が起きたか」までしか言わず、
+     * <b>利用者が窓を閉じた時点で消える</b>。後から報告を受ける側には型と行が要る。
      */
     private void showFailure(Throwable failure) {
+        Logs.warn(LogEvent.OPERATION_FAILED, failure);
         String message =
                 failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
         show(AlertType.ERROR, message);

@@ -61,7 +61,7 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * 作業場所を中身ごと片づける。消せなくても黙っている。
+     * 作業場所を中身ごと片づける。消せなくても保存は失敗させない。
      *
      * <p>置き換えに成功していれば中は空である。残っていても保存の成否は変わらない。
      */
@@ -95,10 +95,11 @@ final class OutputWorkspace implements AutoCloseable {
                     .forEach(OutputWorkspace::discard);
         } catch (IOException | UncheckedIOException e) {
             // 片づけられなくても、これから書くものの成否は変わらない。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
     }
 
-    /** ディレクトリを中身ごと消す。消せなくても黙っている。 */
+    /** ディレクトリを中身ごと消す。消せなくても保存は失敗させない（{@link Logs} には残す）。 */
     private static void discard(Path directory) {
         try (Stream<Path> entries = Files.walk(directory)) {
             entries.sorted(Comparator.reverseOrder()).forEach(OutputWorkspace::deleteQuietly);
@@ -107,6 +108,7 @@ final class OutputWorkspace implements AutoCloseable {
             // ★ Files.walk と Files.list は、返した後の反復で起きた失敗を UncheckedIOException で
             //   包む。IOException を継承しないので、並記しないとここを素通りする——置き換えが
             //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
     }
 
@@ -114,7 +116,8 @@ final class OutputWorkspace implements AutoCloseable {
         try {
             Files.deleteIfExists(path);
         } catch (IOException e) {
-            // 同上。
+            // 同上。出力先に .pdfjig-* が残るのは利用者から見えるので、理由を追える先を残す。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
     }
 }

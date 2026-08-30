@@ -18,6 +18,10 @@ import javafx.stage.Stage;
  * <p>スレッド規約: {@code PDFRenderer} の呼び出しは必ずバックグラウンドスレッド
  * （{@code Task} / {@code Service}）で行う。JavaFX Application Thread では
  * レンダリング済みの {@code Image} の差し込みのみを行う（CLAUDE.md JavaFX 節）。
+ *
+ * <p><b>利用者の PC に置くものの読み書きは、すべてここが持つ。</b>設定も {@link Logs} も、
+ * 起こすのはこのクラスだけである——画面がファイルの置き場を知ると #57 が重くなり、
+ * <b>副作用として、{@code MainWindow} を直に組む uiTest が実物に触れない</b>。
  */
 public final class PdfjigApplication extends Application {
 
@@ -33,6 +37,10 @@ public final class PdfjigApplication extends Application {
 
     @Override
     public void start(Stage stage) {
+        // ★ 何よりも先に。配布物には標準エラーが無く、ここより前で落ちると手がかりが残らない。
+        //   置き場が無い環境（Windows 以外）では何もしない。
+        Logs.start();
+
         MainWindow window = new MainWindow(stage, aiProvider, getHostServices());
 
         // 設定の読み書きはここが持つ。画面はフォルダを覚えるだけで、置き場も書き方も知らない。
