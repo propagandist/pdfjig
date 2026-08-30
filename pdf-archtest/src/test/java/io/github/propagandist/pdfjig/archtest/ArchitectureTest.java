@@ -35,6 +35,9 @@ class ArchitectureTest {
     /** ログの書き手。{@code java.util.logging} を触ってよい唯一のクラスである。 */
     private static final String LOGS = "io.github.propagandist.pdfjig.desktop.Logs";
 
+    /** 外へ出る唯一の経路。pdf-desktop で {@code java.net} の通信 API を触ってよい唯一のクラスである。 */
+    private static final String UPDATE_CHECK = "io.github.propagandist.pdfjig.desktop.UpdateCheck";
+
     private static JavaClasses classes;
 
     @BeforeAll
@@ -170,9 +173,14 @@ class ArchitectureTest {
      * {@link #aiMustNotTouchTheFileSystem} が対を持たないのと同じ理由である。
      *
      * <p><b>★ 縛るのは pdf-core だけである。</b> pdf-ai は通信するのが仕事であり
-     * （{@code v0.4.0} の {@code AnthropicProvider}）、pdf-cli はそれを呼ぶ。
+     * （{@code AnthropicProvider}）、pdf-cli はそれを呼ぶ。
      * {@code CLAUDE.md} が「一切行わない」と書いているのは pdf-core だけなので、
      * <b>規約が言っている以上のことを機械に守らせない。</b>
+     *
+     * <p><b>★ 訂正（#72、2026-08-30）——外への通信が初めて入るのは pdf-ai ではなかった。</b>
+     * pdf-desktop の {@code UpdateCheck} が先に入り、pdf-ai はまだ実装が無い。
+     * <b>そちらは経路を 1 つに絞る形で別に縛ってある</b>（{@link
+     * #desktopReachesTheNetworkOnlyThroughUpdateCheck}）——このルールは何も変わっていない。
      *
      * <p><b>★ {@code java.net} を丸ごと禁じない。</b> {@link java.net.URI} と符号化の道具は
      * <b>識別子を扱うだけで通信しない</b>。{@code Path#toUri} を呼ぶような真っ当な変更まで
@@ -196,8 +204,78 @@ class ArchitectureTest {
                 .dependOnClassesThat(resideInAnyPackage("java.net..", "javax.net..")
                         .and(not(nameMatching("java\\.net\\.(URI|URISyntaxException|URLEncoder|URLDecoder)"))))
                 .because("pdf-core は確定的処理のみを行う。"
-                        + "外への通信が初めて入るのは pdf-ai であり、その都合がこちらへ滲むのを止める"
-                        + "（CLAUDE.md「モジュール別の責務」）")
+                        + "外へ出る経路は pdf-desktop の UpdateCheck にあり、pdf-ai にも入る。"
+                        + "その都合がこちらへ滲むのを止める（CLAUDE.md「モジュール別の責務」）")
+                .check(classes);
+    }
+
+    /**
+     * 画面から外へ出る経路を 1 つに絞る。
+     *
+     * <p>{@code README.md} が「<b>外への通信は、更新を確認したときだけである</b>」と公開している
+     * （#72）。<b>その約束は、誰かが別の場所で通信を始めた瞬間に嘘になる</b>——
+     * 想定利用者にはクラウド送信が社内規程で禁じられている現場が含まれており、
+     * <b>破れたことに気づけないまま配ることがいちばん重い</b>（{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>縛るのは pdf-desktop だけである。</b>pdf-ai は通信するのが仕事であり、pdf-cli は
+     * それを呼ぶ。pdf-core は上の {@link #coreMustNotReachTheNetwork} が別に見ている。
+     * <b>規約が言っている以上のことを機械に守らせない</b>のは、あちらと同じ判断である。
+     *
+     * <p><b>★ {@code java.net.URL} を除外する。上（pdf-core）とはそこだけ違う。</b>
+     * JavaFX はスタイルシートを URL の文字列で受け取るため、{@code PdfjigApplication} が
+     * {@code getResource("pdfjig.css").toExternalForm()} を呼ぶ——<b>クラスパスの資源を
+     * 名指しているだけで、通信はしない</b>（実際にこのルールが最初に掴んだのがそれである）。
+     * pdf-core には URL を使う理由が 1 つも無いので、あちらは除外しない。
+     *
+     * <p><b>そのぶんの穴は下の {@link #urlMustNotBeOpenedDirectly} が塞ぐ。</b>
+     * {@code URL#openConnection} は戻り値の {@code URLConnection} でこのルールに掛かるが、
+     * {@code URL#openStream} は {@code InputStream} を返すので<b>型では掛からない</b>。
+     *
+     * <p><b>見落とす経路がもう 1 つある</b>——サードパーティの HTTP クライアントを足せば
+     * {@code java.net} を直接参照しないまま通信でき、このルールは緑のままになる（#90）。
+     * pdf-core と同じ限界であり、ここが見ているのは「JDK の通信 API を直に使うこと」だけである。
+     *
+     * <p><b>下の {@code ...RuleHasSubject} は、除外した側が本当に通信していることを見る。</b>
+     * {@code UpdateCheck} を消せば、このルールは緑のまま何も守らなくなる。
+     */
+    @Test
+    @DisplayName("pdf-desktop で外へ出るのは UpdateCheck だけである")
+    void desktopReachesTheNetworkOnlyThroughUpdateCheck() {
+        noClasses()
+                .that()
+                .resideInAPackage("..pdfjig.desktop..")
+                .and(not(isUpdateCheck()))
+                .should()
+                .dependOnClassesThat(resideInAnyPackage("java.net..", "javax.net..")
+                        .and(not(nameMatching("java\\.net\\.(URI|URISyntaxException|URL|URLEncoder|URLDecoder)"))))
+                .because("外への通信は、利用者が「更新を確認」を押したときだけである。"
+                        + "起動しただけで外へ出ないことを README が公開しており、"
+                        + "それを守れているかは経路の数でしか確かめられない（#72）")
+                .check(classes);
+    }
+
+    /**
+     * {@code URL} から直に開く経路を塞ぐ。
+     *
+     * <p>上のルールが {@code java.net.URL} を除外したぶんの穴である。<b>型では縛れないので、
+     * 入口のメソッドを名指しする。</b>{@code new URL("https://…").openStream()} は
+     * <b>1 行で外へ出られる</b>——それが資源の読み出しと同じ形をしているのが厄介なところで、
+     * {@code getResource(…).openStream()} との違いは URL の中身にしかない。
+     *
+     * <p><b>誰も呼んでよくない。</b>{@code UpdateCheck} も除外しない——あちらは
+     * {@link java.net.HttpURLConnection} を使っており、これを呼ぶ理由が無い。
+     * <b>対の {@code ...RuleHasSubject} を持たないのは、依存先が JDK であり、
+     * クラスパスから外れることがないためである</b>（{@link #coreMustNotReachTheNetwork} と同じ）。
+     */
+    @Test
+    @DisplayName("URL から直に開かない（java.net.URL は識別子として使うので型では縛れない）")
+    void urlMustNotBeOpenedDirectly() {
+        noClasses()
+                .that()
+                .resideInAPackage("..pdfjig..")
+                .should()
+                .callMethod(java.net.URL.class, "openStream")
+                .because("URL#openStream は型に現れないまま外へ出る。" + "資源の読み出しと同じ形をしており、差分を読んだだけでは見分けがつかない（#72）")
                 .check(classes);
     }
 
@@ -237,6 +315,33 @@ class ArchitectureTest {
                         dependency.getTargetClass().getPackageName().startsWith("java.util.logging"));
 
         assertTrue(writes, "Logs が java.util.logging を使っていない。loggingMustGoThroughLogs は緑でも何も守っていない");
+    }
+
+    @Test
+    @DisplayName("外へ出る経路のルールが空振りしていない（除外した UpdateCheck が実際に通信する）")
+    void desktopNetworkRuleHasSubject() {
+        boolean reaches = classes.stream()
+                .filter(javaClass -> isUpdateCheck().test(javaClass))
+                .flatMap(javaClass -> javaClass.getDirectDependenciesFromSelf().stream())
+                .anyMatch(dependency -> dependency.getTargetClass().getName().equals("java.net.HttpURLConnection"));
+
+        assertTrue(
+                reaches,
+                "UpdateCheck が java.net.HttpURLConnection を使っていない。"
+                        + "desktopReachesTheNetworkOnlyThroughUpdateCheck は緑でも何も守っていない");
+    }
+
+    /**
+     * {@code UpdateCheck} とその入れ子クラス。
+     *
+     * <p>照合の作法は {@link #isLogs()} と同じ理由で名前による。前置詞にすると
+     * {@code UpdateCheckScheduler} のような別のクラスまで通してしまう。
+     */
+    private static DescribedPredicate<JavaClass> isUpdateCheck() {
+        return DescribedPredicate.describe(
+                "UpdateCheck とその入れ子クラス",
+                javaClass -> javaClass.getName().equals(UPDATE_CHECK)
+                        || javaClass.getName().startsWith(UPDATE_CHECK + "$"));
     }
 
     /**
