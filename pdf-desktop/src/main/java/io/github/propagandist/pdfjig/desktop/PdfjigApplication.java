@@ -2,10 +2,12 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.ai.NoOpProvider;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
@@ -45,9 +47,13 @@ public final class PdfjigApplication extends Application {
 
         stage.setScene(scene);
         stage.setOnHidden(event -> {
-            // 先に保存する。dispose は文書を閉じるだけだが、順序を決めておく。
-            persist(window, settingsFile);
-            window.dispose();
+            // ★ finally で閉じる。保存が投げても文書を開いたままにしない——
+            //   開いたままだと元の PDF を掴み続け、利用者は掴んでいる犯人が分からない。
+            try {
+                persist(window, settingsFile);
+            } finally {
+                window.dispose();
+            }
         });
         stage.show();
 
@@ -63,16 +69,38 @@ public final class PdfjigApplication extends Application {
      *
      * <p>置き場が無い環境（{@code %LOCALAPPDATA%} を持たない）では何もしない。
      * <b>覚えられないことは、動かない理由ではない。</b>
+     *
+     * <p><b>★ 存在の確認は背景スレッドで行う。</b>覚えていたのは何か月も前のパスでありうる。
+     * 切れたネットワーク共有を JavaFX スレッドで叩くと、<b>SMB のタイムアウトぶん画面が固まる</b>
+     * （CLAUDE.md「JavaFX」）。<b>セッションの中で覚えたフォルダとはここが違う</b>——
+     * あちらは直前に実際へ届いている。
+     *
+     * <p>覚えていたフォルダが 1 拍遅れて効くのは、<b>いま（そもそも覚えない）と比べて悪くならない。</b>
      */
     private static void restore(MainWindow window, Optional<Path> settingsFile) {
         if (settingsFile.isEmpty()) {
             return;
         }
         Settings settings = Settings.load(settingsFile.get());
-        window.folders()
-                .restore(
-                        settings.folder(Settings.READING_FOLDER).orElse(null),
-                        settings.folder(Settings.WRITING_FOLDER).orElse(null));
+        Path reading = settings.folder(Settings.READING_FOLDER).orElse(null);
+        Path writing = settings.folder(Settings.WRITING_FOLDER).orElse(null);
+        if (reading == null && writing == null) {
+            return;
+        }
+        Thread worker = new Thread(
+                () -> {
+                    Path reachableReading = reachable(reading);
+                    Path reachableWriting = reachable(writing);
+                    Platform.runLater(() -> window.folders().restore(reachableReading, reachableWriting));
+                },
+                "restore-folders");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** いま届くフォルダだけを返す。届かなければ覚えていなかったことにする。 */
+    private static Path reachable(Path folder) {
+        return folder != null && Files.isDirectory(folder) ? folder : null;
     }
 
     /**
@@ -81,20 +109,15 @@ public final class PdfjigApplication extends Application {
      * <p><b>閉じるときに一度だけ書く。</b>操作のたびに書くと、覚えているのがフォルダ 2 つだけの
      * ために I/O が増える。<b>異常終了すると失われる</b>が、次に選び直せば済むものである。
      *
-     * <p>読み直してから書くのは、<b>この起動の間に別の窓が書いたものを踏まないため</b>ではない
-     * （1 つの編集セッションしか持たない）。<b>将来ここへ別の項目が増えたときに、
-     * 知らない鍵を消さないためである。</b>
+     * <p><b>書くかどうかの判断は {@link Settings#store} が持つ。</b>ここは JavaFX の側から
+     * 値を取り出すだけである——判断をここに置くと、画面を起こさないと確かめられなくなる。
      */
     private static void persist(MainWindow window, Optional<Path> settingsFile) {
         if (settingsFile.isEmpty()) {
             return;
         }
-        Path file = settingsFile.get();
-        Settings settings = Settings.load(file);
         RecentFolders folders = window.folders();
-        settings.putFolder(Settings.READING_FOLDER, folders.rememberedReading().orElse(null));
-        settings.putFolder(Settings.WRITING_FOLDER, folders.rememberedWriting().orElse(null));
-        settings.save(file);
+        Settings.store(settingsFile.get(), folders.rememberedReading(), folders.rememberedWriting());
     }
 
     public static void main(String[] args) {

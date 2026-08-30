@@ -25,7 +25,7 @@ import java.util.Properties;
  * <p><b>形式は {@link Properties} の text 形式（UTF-8）。</b>JDK だけで足り、
  * 依存も jlink のモジュールも増えない。人が開いて読めることを優先した。
  * <b>★ {@code store} は {@code \} と {@code :} をエスケープする</b>ので、
- * {@code C:\scan} はファイルの中で {@code C\:\scan} と見える。読み書きは対なので壊れないが、
+ * {@code C:\scan} はファイルの中で {@code C\:\\scan} と見える。読み書きは対なので壊れないが、
  * 手で直すときに驚かないように書いておく。
  *
  * <p><b>読めなければ空として扱い、書けなければ諦める。例外を投げない。</b>
@@ -41,8 +41,15 @@ final class Settings {
     /** 最後に書き出したフォルダ。 */
     static final String WRITING_FOLDER = "folder.writing";
 
-    /** 書き出すときの見出し。日付の行は {@link Properties#store} が自分で付ける。 */
-    private static final String HEADER = "pdfjig settings - パスワードは保存しない (CLAUDE.md INV-5)";
+    /**
+     * 書き出すときの見出し。日付の行は {@link Properties#store} が自分で付ける。
+     *
+     * <p><b>★ ASCII だけで書く。</b>{@code store} は見出しの中の U+00FF を超える文字を
+     * <b>Writer の文字集合にかかわらず</b>ユニコード脱出へ変える。日本語で書くと
+     * {@code #パス...} になり、<b>人が読める形式を選んだ理由がその見出しで潰れる。</b>
+     * 値の側は素の UTF-8 で書かれるので影響を受けない。
+     */
+    private static final String HEADER = "pdfjig settings - no passwords are stored here (CLAUDE.md INV-5)";
 
     private final Properties values = new Properties();
 
@@ -81,11 +88,15 @@ final class Settings {
             return;
         }
         Path parent = file.getParent();
+        if (parent == null) {
+            // 置き場を組み立てるのは UserDataDirectory なので実際には起きないが、
+            // 起きたときに投げてはならない。createTempFile は null の親で NPE を投げ、
+            // それは下の catch を素通りする。
+            return;
+        }
         Path temporary = null;
         try {
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
+            Files.createDirectories(parent);
             temporary = Files.createTempFile(parent, "settings", ".tmp");
             try (Writer writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
                 values.store(writer, HEADER);
@@ -97,6 +108,32 @@ final class Settings {
         } finally {
             deleteQuietly(temporary);
         }
+    }
+
+    /**
+     * 覚えているフォルダを書き出す。
+     *
+     * <p><b>★ 覚えていないものは書かないし、消しもしない。</b>覚えていない状態には
+     * 2 つの意味がある——「一度も使っていない」と「まだ読み込めていない」である。
+     * 後者は復元が背景で走るために起きる（{@link PdfjigApplication}）。
+     * <b>これを「忘れろ」と読むと、すぐ閉じただけで前回のぶんが消える。</b>
+     *
+     * <p><b>どちらも覚えていなければ、ファイルを作らない。</b>中身の無いファイルは
+     * アンインストールしても残る（{@code docs/SPEC.md} §10）。<b>覚えることが無いのに置かない。</b>
+     *
+     * @param file    設定ファイル
+     * @param reading 読む用。覚えていなければ空
+     * @param writing 書く用。覚えていなければ空
+     */
+    static void store(Path file, Optional<Path> reading, Optional<Path> writing) {
+        if (reading.isEmpty() && writing.isEmpty()) {
+            return;
+        }
+        // 読み直してから書く。将来ここへ別の項目が増えたときに、知らない鍵を消さないため。
+        Settings settings = load(file);
+        reading.ifPresent(folder -> settings.putFolder(READING_FOLDER, folder));
+        writing.ifPresent(folder -> settings.putFolder(WRITING_FOLDER, folder));
+        settings.save(file);
     }
 
     /**

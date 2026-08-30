@@ -144,7 +144,6 @@ public final class MainWindow {
         return root;
     }
 
-    /** ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。 */
     /**
      * ダイアログを始めるフォルダ。
      *
@@ -156,6 +155,7 @@ public final class MainWindow {
         return folders;
     }
 
+    /** ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。 */
     public void dispose() {
         closeSession();
     }

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -164,6 +165,64 @@ class SettingsTest {
                 .toList();
 
         assertEquals(List.of(Settings.READING_FOLDER, Settings.WRITING_FOLDER), keys);
+    }
+
+    @Test
+    @DisplayName("親を持たないパスを渡されても投げない")
+    void staysQuietForPathWithoutParent() {
+        // 置き場を組み立てるのは UserDataDirectory なので実際には起きないが、
+        // createTempFile は null の親で NPE を投げ、それは IOException の catch を素通りする。
+        Settings settings = Settings.load(Path.of("settings.properties"));
+        settings.putFolder(Settings.READING_FOLDER, Path.of("C:/scan/in"));
+
+        settings.save(Path.of("settings.properties"));
+
+        assertFalse(Files.exists(Path.of("settings.properties")));
+    }
+
+    @Test
+    @DisplayName("見出しは ASCII で書く（日本語だと脱出されて読めなくなる）")
+    void keepsTheHeaderReadable(@TempDir Path directory) throws IOException {
+        // store は見出しの中の U+00FF を超える文字を、Writer の文字集合にかかわらず
+        // ユニコード脱出へ変える。人が読める形式を選んだ理由が、その見出しで潰れる。
+        Path file = directory.resolve("settings.properties");
+        Settings settings = Settings.load(file);
+        settings.putFolder(Settings.READING_FOLDER, Path.of("C:/scan/in"));
+        settings.save(file);
+
+        String header = Files.readAllLines(file, StandardCharsets.UTF_8).stream()
+                .filter(line -> line.startsWith("#"))
+                .findFirst()
+                .orElseThrow();
+
+        assertFalse(header.contains(BACKSLASH + "u"), "見出しが脱出されている: " + header);
+        assertTrue(header.contains("INV-5"));
+    }
+
+    @Test
+    @DisplayName("どちらも覚えていなければファイルを作らない")
+    void writesNoFileWhenNothingIsRemembered(@TempDir Path directory) {
+        Path file = directory.resolve("settings.properties");
+
+        Settings.store(file, Optional.empty(), Optional.empty());
+
+        // 中身の無いファイルはアンインストールしても残る。覚えることが無いのに置かない。
+        assertFalse(Files.exists(file));
+    }
+
+    @Test
+    @DisplayName("★ 覚えていない側は、前に書いたものを消さない")
+    void keepsWhatItCannotSee(@TempDir Path directory) {
+        // 復元は背景で走るので、すぐ閉じられると間に合わないことがある。
+        // それを「忘れろ」と読むと、開いて即閉じただけで前回のぶんが消える。
+        Path file = directory.resolve("settings.properties");
+        Settings.store(file, Optional.of(Path.of("C:/scan/in")), Optional.of(Path.of("C:/scan/out")));
+
+        Settings.store(file, Optional.empty(), Optional.of(Path.of("C:/other")));
+
+        Settings read = Settings.load(file);
+        assertEquals(Path.of("C:/scan/in"), read.folder(Settings.READING_FOLDER).orElseThrow());
+        assertEquals(Path.of("C:/other"), read.folder(Settings.WRITING_FOLDER).orElseThrow());
     }
 
     @Test
