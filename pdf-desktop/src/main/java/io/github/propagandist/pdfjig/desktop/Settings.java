@@ -179,16 +179,31 @@ final class Settings {
     /**
      * 置き換える。
      *
-     * <p>同じフォルダの中なので原子的な移動が使えるはずだが、ファイルシステムによっては
-     * 断られる。そのときは普通の置き換えに落とす——<b>書き終えた一時ファイルからの置き換えなので、
+     * <p>同じフォルダの中なので原子的な移動が使えるはずだが、断られることがある。
+     * そのときは普通の置き換えに落とす——<b>書き終えた一時ファイルからの置き換えなので、
      * 落としても壊れたファイルにはならない。</b>
+     *
+     * <p><b>★★ 断られたら、理由を問わず落とす。</b>もとは
+     * {@link AtomicMoveNotSupportedException} だけに絞っていたが、<b>それは誤りだった</b>
+     * （#113 の実測）——<b>原子的な置き換えは、置き換え先が開かれていると
+     * {@code AccessDeniedException} で断る。</b>設定ファイルは人が読める場所に置いてあり
+     * （{@code docs/SPEC.md} §10）、ウイルス対策・インデクサ・2 つ目の窓が掴みうる。
+     * <b>絞ったままだと、そのとき覚えたフォルダが黙って保存されない。</b>
+     *
+     * <p><b>★ 絞った条件は、ここでは起きようがなかった。</b>一時ファイルも同じフォルダに作るので、
+     * Windows で {@link AtomicMoveNotSupportedException} になる唯一の条件
+     * （{@code ERROR_NOT_SAME_DEVICE}）に当たりようがない。<b>死んだ catch だった。</b>
+     * 同じ形は {@code DocumentWriter#move} にもある。<b>2 つを 1 つにするかは決めていない</b>
+     * （#113）が、<b>落とす条件は揃えてある。</b>
      */
     private static void replace(Path temporary, Path file) throws IOException {
         try {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            return;
+        } catch (IOException refused) {
+            // 断られた。落とした先で書けることがある（上の★★）。
         }
+        Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
     }
 
     /** 置き換えに失敗したときの後始末。ここの失敗は元の失敗より重要ではない。 */

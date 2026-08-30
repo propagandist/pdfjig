@@ -44,14 +44,17 @@ class DocumentWriterTest {
     /**
      * 開いたままの文書へ上書き保存できる。
      *
-     * <p><b>★★ 原子的な移動だけにすると、ここが赤になる。</b> Windows の
-     * {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は、<b>置き換え先が開かれていると
+     * <p><b>★★ 原子的な移動だけにすると、ここが赤になる——ただし Windows でだけである。</b>
+     * {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は<b>置き換え先が開かれていると
      * {@code AccessDeniedException} で断る</b>（2026-08-30、Windows 10 / JDK 21.0.8 で実測）。
+     * <b>POSIX の {@code rename(2)} は開かれていても置き換えるので、CI の ubuntu 側では
+     * 条件を絞っても緑のままである</b>——<b>この縛りを持っているのは windows 側だけである。</b>
      *
      * <p><b>そして画面から上書き保存するとき、その置き換え先を開いているのは pdfjig 自身である。</b>
      * {@code DocumentSession} が持つ {@code PdfDocument} は PDFBox の
      * {@code RandomAccessReadBufferedFile} 経由で {@link FileChannel} を握り続け、
-     * 閉じるのは「別の文書を開く」「閉じる」「窓を閉じる」の 3 つだけで、<b>保存はどれも通らない。</b>
+     * <b>書き出しの元になっている文書は、保存の間に閉じられない</b>
+     * （{@code DocumentSession#remove} は外した文書を閉じるが、外したものはもう元ではない）。
      * ここで使う {@link FileChannel#open} は、それと同じ開き方である。
      *
      * <p>だから {@link DocumentWriter#move} は
@@ -85,10 +88,13 @@ class DocumentWriterTest {
      * <b>見ているのは「頼むようにしたあとフォールバックを外す」変更</b>であり、
      * 外れると原子的な移動を支えないファイルシステムの上で<b>書き出しそのものが失敗する。</b>
      *
-     * <p><b>支えないファイルシステムを手元に用意できないので、同じ例外が確実に出る形で代える</b>——
-     * 移動元と移動先の provider が違うと {@code CopyMoveHelper#moveToForeignTarget} が
-     * 必ず {@link java.nio.file.AtomicMoveNotSupportedException} を投げる。
-     * <b>実際に起きるのはネットワークドライブなどであり、作り方は違う。</b>
+     * <p><b>★ 作り方は production と違う。</b>移動元と移動先の provider が違うと
+     * {@code CopyMoveHelper#moveToForeignTarget} が必ず
+     * {@link java.nio.file.AtomicMoveNotSupportedException} を投げるので、それで代えている。
+     * <b>production ではこの例外は起きない</b>——{@code OutputWorkspace} が作業場所を
+     * 出力先と同じフォルダに作るため、Windows で唯一の条件（{@code ERROR_NOT_SAME_DEVICE}）に
+     * 当たりようがない。<b>だからここが守っているのは「フォールバックがあること」であって、
+     * 「production のフォールバックが正しいこと」ではない。</b>
      */
     @Test
     @DisplayName("原子的な移動を断られても書き出せる")

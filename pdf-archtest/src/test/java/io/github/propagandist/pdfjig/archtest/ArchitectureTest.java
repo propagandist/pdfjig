@@ -14,6 +14,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.nio.file.StandardCopyOption;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
@@ -356,6 +357,43 @@ class ArchitectureTest {
                         + "テストから呼ぶためであり、他から呼んでよくなったわけではない"
                         + "（CLAUDE.md 優先順位 1）")
                 .check(classes);
+    }
+
+    /**
+     * 置き換えは原子的な移動を頼む。
+     *
+     * <p><b>★★ これは実装の中身を縛る、この一覧で唯一のルールである。</b>ふつうはやらない——
+     * だが<b>ここは「頼んでいること」そのものが直しであり、それを見るテストが 1 本も書けなかった。</b>
+     *
+     * <p>{@code DocumentWriterTest} の 3 本は、<b>{@code ATOMIC_MOVE} を消しても全部緑になる</b>
+     * （実測）。頼まなければ断られようがないので、フォールバックを見るテストは素通りし、
+     * 置き換えを見るテストは 2 段でも成功するからである。<b>#113 の直しは、消しても何も鳴らない。</b>
+     *
+     * <p><b>欠陥そのもの（2 段の間に割り込まれること）は赤にできない</b>——再現を用意できない
+     * （#113 の受け入れ基準がそう定めている）。<b>赤にできないのは欠陥であって、直しではない。</b>
+     * {@code CLAUDE.md}「配る差分の門」3 が求める「縛れる形になったものはテストか ArchUnit へ」を、
+     * 縛れる側で満たす。
+     *
+     * <p><b>★ ArchRule の形では書けない。</b>{@code should().accessField} は
+     * 「触るフィールドはすべてそれであること」を意味し、<b>入れ子の {@code SplitResult} が
+     * 自分のフィールドを触るだけで違反になる</b>（実測）。<b>「1 度は触ること」を言う形が無い</b>ので、
+     * 取り込んだクラスを直に見る。<b>空振りは、探す相手が見つからなければ落ちることで防いでいる。</b>
+     */
+    @Test
+    @DisplayName("書き出しの置き換えは、原子的な移動を頼む")
+    void replaceAsksForAnAtomicMove() {
+        String atomicMove = StandardCopyOption.class.getName() + ".ATOMIC_MOVE";
+        assertTrue(
+                classes.stream().anyMatch(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER)),
+                DOCUMENT_WRITER + " が取り込まれていない。このテストは何も見ていない");
+        assertTrue(
+                classes.stream()
+                        .filter(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER))
+                        .flatMap(javaClass -> javaClass.getFieldAccessesFromSelf().stream())
+                        .anyMatch(access -> access.getTarget().getFullName().equals(atomicMove)),
+                "頼まないと Windows では DeleteFile → MoveFileEx の 2 段になり、その間に割り込まれると"
+                        + "元のファイルも置き換えるはずのものも残らない（#113）。"
+                        + "消しても DocumentWriterTest は全部緑になるので、縛れるのはここだけである");
     }
 
     /**

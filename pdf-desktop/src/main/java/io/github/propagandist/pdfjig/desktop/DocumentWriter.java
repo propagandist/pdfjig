@@ -121,12 +121,22 @@ final class DocumentWriter {
      * {@link AtomicMoveNotSupportedException} だけに絞ってはならない——<b>原子的な置き換えは、
      * 出力先が開かれていると {@code AccessDeniedException} で断る。</b>そして
      * <b>画面から上書き保存するとき、その出力先を開いているのは pdfjig 自身でありうる</b>
-     * （{@code DocumentSession} は保存の間も入力を閉じない）。絞ると
-     * <b>「開いている文書へ上書き保存する」が必ず失敗する</b>——2026-08-30 に
+     * ——{@code DocumentSession} は<b>書き出しの元になっている文書を、保存の間に閉じない。</b>
+     * 絞ると<b>「開いている文書へ上書き保存する」が必ず失敗する</b>——2026-08-30 に
      * Windows 10 / JDK 21.0.8 で実測した（{@code DocumentWriterTest}）。
      *
-     * <p><b>落ちた先は 2 段のままである。</b>それでも先に原子的を試す価値があるのは、
-     * <b>出力先を誰も開いていない経路がそれで 1 回の {@code MoveFileEx} になる</b>からである。
+     * <p><b>★ 断る理由は、実際には 1 つしかない。</b>{@link OutputWorkspace} は作業場所を
+     * 出力先の<b>同じフォルダ</b>に作るので、Windows で
+     * {@link AtomicMoveNotSupportedException} になる唯一の条件（{@code ERROR_NOT_SAME_DEVICE}）は
+     * <b>起こりようがない。</b>それでも {@code IOException} で受けるのは、
+     * <b>断る理由を数え上げないためである</b>——数え上げた瞬間に、次に増えた理由で落ちなくなる。
+     *
+     * <p><b>★★ 落ちた先は 2 段のままであり、そこで失敗すると元のファイルも
+     * 置き換えるはずのものも残らない。</b>{@code DeleteFile} が済んだ後で
+     * {@code MoveFileEx} が失敗すると元は消えており、{@link #assemble} の
+     * try-with-resources が作業場所ごと書けていたものを片づける。
+     * <b>それでも先に原子的を試す価値があるのは、出力先を誰も開いていない経路が
+     * それで 1 回の {@code MoveFileEx} になる</b>からである。
      * {@code Settings#replace} も同じ形だが、あちらは落とす条件が狭い。
      * <b>2 つを 1 つにするかは #113 では決めていない。</b>
      *
@@ -146,7 +156,7 @@ final class DocumentWriter {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return;
         } catch (IOException refused) {
-            // 断られた。理由は上の 2 通りある。どちらでも、落とした先で書き出せることがある。
+            // 断られた。落とした先で書き出せることがある（上の★★）。
         }
         try {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
