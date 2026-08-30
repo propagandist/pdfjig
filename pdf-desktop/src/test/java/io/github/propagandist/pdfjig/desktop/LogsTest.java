@@ -13,6 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +37,15 @@ class LogsTest {
 
     /** 例外のメッセージに紛れうるパスワード（CLAUDE.md INV-5）。 */
     private static final String PASSWORD = "hunter2-very-secret";
+
+    /**
+     * {@code Logs} が使うファイル名の形。
+     *
+     * <p><b>ここだけは写しである。</b>{@code Logs} の側は private で、外へ出すと
+     * 「置き場の形を知っているのは Logs だけ」という線が崩れる。
+     * <b>ずれたら下の 2 つ目のテストが赤になる</b>——2 つのハンドラが同じ錠を争わなくなるためである。
+     */
+    private static final String LOG_FILE_NAME = "pdfjig.%u.%g.log";
 
     @AfterEach
     void closeLogs() {
@@ -177,6 +189,44 @@ class LogsTest {
     }
 
     @Test
+    @DisplayName("★ 原因の連鎖も途中で切り、切ったことを書く")
+    void marksTheCutOfTheCauseChain(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        Throwable deepest = new IOException("boom");
+        Throwable chained = deepest;
+        for (int i = 0; i < 8; i++) {
+            chained = new IllegalStateException("layer " + i, chained);
+        }
+
+        Logs.severe(LogEvent.UNCAUGHT, chained);
+
+        assertTrue(readAll(logs).contains("これより奥は書いていない"), "5 つ目が根だと読まれないようにする");
+    }
+
+    @Test
+    @DisplayName("★ 2 つ目のプロセスが同時に書いても、決めた形の外へ出さない")
+    void keepsTheFileSetEvenWithASecondProcess(@TempDir Path logs) throws IOException {
+        // この道具は 2 つ目の窓を止めていない（OutputWorkspace も 2 つ目を前提に書いてある）。
+        // FileHandler は錠を取れないと番号を繰り上げるが、%u が無いと名前の末尾へ .1 を継ぎ足し、
+        // pdfjig.0.log.1 という決めた形の外のファイルを作る。
+        Logs.startIn(logs, 64 * 1024, 2);
+        Logs.warn(LogEvent.OPERATION_FAILED, new IOException("boom"));
+
+        FileHandler second = new FileHandler(logs + "/" + LOG_FILE_NAME, 64 * 1024, 2, true);
+        try {
+            second.publish(new LogRecord(Level.WARNING, "from the second process"));
+        } finally {
+            second.close();
+        }
+
+        assertTrue(
+                names(logs).stream().allMatch(name -> name.endsWith(".log") || name.endsWith(".log.lck")),
+                "置き場に出るのは決めた形のファイルだけである: " + names(logs));
+        assertEquals(
+                2, names(logs).stream().filter(name -> name.endsWith(".log")).count(), "2 つ目は別のファイルへ書く");
+    }
+
+    @Test
     @DisplayName("★ 置き場のパスに % が入っていても、その中に書く")
     void survivesPercentInThePath(@TempDir Path directory) {
         // FileHandler のパターンは %g / %u / %t / %h を置き換える。逃がさないと違う場所へ書きに行く。
@@ -196,6 +246,17 @@ class LogsTest {
         Logs.startIn(blocker.resolve("logs"), 64 * 1024, 2);
 
         assertDoesNotThrow(() -> Logs.warn(LogEvent.OPERATION_FAILED, new IOException("boom")));
+    }
+
+    private static List<String> names(Path logs) {
+        if (!Files.isDirectory(logs)) {
+            return List.of();
+        }
+        try (Stream<Path> entries = Files.list(logs)) {
+            return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+        } catch (IOException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private static List<Path> logFiles(Path logs) {

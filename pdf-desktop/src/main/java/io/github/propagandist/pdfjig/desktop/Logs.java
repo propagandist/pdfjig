@@ -46,17 +46,29 @@ final class Logs {
     /** 1 世代あたりの上限。文字数にして数千行で、原因を追うには足りる。 */
     private static final int LIMIT = 512 * 1024;
 
-    /** 残す世代の数。現行を含む。合わせて 1.5 MB を超えない。 */
+    /**
+     * 残す世代の数。現行を含む。
+     *
+     * <p><b>合計は 1.5 MB を少し超える。</b>{@link FileHandler} は<b>書き終えてから</b>上限を見るので、
+     * どの世代も最後の 1 件ぶんだけはみ出す。<b>「超えない」とは書かない</b>——
+     * 実際に守れない数字を書くと、次に読む者がそれを根拠に何かを決める。
+     */
     private static final int COUNT = 3;
 
     /**
-     * ファイル名。{@code %g} が世代に置き換わる。
+     * ファイル名。{@code %u} が番号に、{@code %g} が世代に置き換わる。
      *
-     * <p>現行が {@code pdfjig.0.log} で、古いものが {@code pdfjig.1.log} → {@code pdfjig.2.log} と
-     * 下がっていく。<b>同じ場所に {@code .lck} が並ぶ</b>のは {@link FileHandler} の仕組みで、
-     * 消せないものではない。
+     * <p>ふつうは番号が 0 で、現行が {@code pdfjig.0.0.log}、古いものが {@code pdfjig.0.1.log} →
+     * {@code pdfjig.0.2.log} と下がっていく。<b>同じ場所に {@code .lck} が並ぶ</b>のは
+     * {@link FileHandler} の仕組みで、消せないものではない。
+     *
+     * <p><b>★ {@code %u} を省くと、2 つ目のプロセスが決めた形の外へ書く。</b>
+     * {@code FileHandler} は錠を取れないと番号を繰り上げ、<b>{@code %u} が無い場合は
+     * 名前の末尾へ {@code .1} を継ぎ足す</b>——{@code pdfjig.0.log.1} である。
+     * <b>この道具は 2 つ目の窓を止めていない</b>（{@link OutputWorkspace} も 2 つ目を前提に書いてある）。
+     * 落ちた報告を受けて {@code pdfjig.0.0.log} を開いた人が、<b>何も記録されていないと読む。</b>
      */
-    private static final String FILE_NAME = "pdfjig.%g.log";
+    private static final String FILE_NAME = "pdfjig.%u.%g.log";
 
     private static final DateTimeFormatter TIMESTAMP =
             DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
@@ -309,6 +321,10 @@ final class Logs {
                 }
                 Throwable cause = current.getCause();
                 current = cause == current ? null : cause;
+                if (current != null && depth + 1 == CAUSE_DEPTH) {
+                    // フレームと同じ理由で、切ったことを書く。黙って切ると 5 つ目が根だと読まれる。
+                    text.append("\tCaused by ... これより奥は書いていない").append(NEW_LINE);
+                }
             }
         }
 
