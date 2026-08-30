@@ -57,17 +57,29 @@ final class RecentFolders {
     }
 
     /**
-     * 覚えていた状態に戻す。
+     * 覚えていた状態に戻す。<b>まだ使われていない側だけを戻す。</b>
      *
-     * <p>前回の終了時に保存されたものを渡す。<b>存在の確認はしない</b>——
-     * 取り出すときに落ちる（{@link #existing}）。
+     * <p>前回の終了時に保存されたものを渡す。
+     *
+     * <p><b>★ 上書きしてはならない。</b>復元は背景スレッドで走るので
+     * （{@link PdfjigApplication}）、<b>戻る前に使われていることがある</b>——
+     * ファイルの関連付けから起動した経路がそれで、{@code start} の中で
+     * 起動引数のファイルを開き、その置き場をここへ覚える。
+     * <b>後から前回のぶんで塗り潰すと、いま開いた文書の隣ではなく何か月も前のフォルダから
+     * ダイアログが始まり、しかもその古い値が保存されて残る。</b>
+     *
+     * <p>存在の確認はしない——取り出すときに落ちる（{@link #existing}）。
      *
      * @param reading 読む用。無ければ {@code null}
      * @param writing 書く用。無ければ {@code null}
      */
-    void restore(Path reading, Path writing) {
-        this.reading = reading;
-        this.writing = writing;
+    void restoreUnused(Path reading, Path writing) {
+        if (this.reading == null) {
+            this.reading = reading;
+        }
+        if (this.writing == null) {
+            this.writing = writing;
+        }
     }
 
     /**
