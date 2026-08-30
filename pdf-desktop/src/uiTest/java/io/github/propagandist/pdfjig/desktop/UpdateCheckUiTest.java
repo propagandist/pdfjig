@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.desktop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import java.util.concurrent.atomic.AtomicInteger;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.stage.Stage;
@@ -81,13 +82,22 @@ class UpdateCheckUiTest extends DesktopUiTest {
         // 窓を閉じて開き直すしかない。
         assertFalse(button(robot, "#about-check-update").isDisable(), "答えが出たのにボタンが戻っていない");
 
-        clickWhenReady(robot, "#about-check-update");
-        waitForAnswer(robot);
+        // ★★ 2 回目が本当に走ったかを、答えの文字列では見分けられない——同じ答えが返るのが
+        //   ふつうだからである。代わりに、答えの行が書き換わった回数を数える。1 回押すと
+        //   必ず 2 回変わる（「確認しています…」→ 答え）。数えないと、クリックが OS に
+        //   取りこぼされても、1 回目の答えがそのまま残っているせいで緑のまま通る。
+        AtomicInteger rewrites = countRewrites(robot);
+
+        // 1 回目の書き換えは押した瞬間に JavaFX スレッドで起きる。届いていなければ押し直す
+        // （窓は既に前面にあるが、取りこぼしは待っても届かない。DesktopUiTest#clickUntilAccepted）。
+        clickUntilAccepted(robot, "#about-check-update", () -> rewrites.get() < 1);
+        waitFor(() ->
+                rewrites.get() >= 2 && !button(robot, "#about-check-update").isDisable());
+        WaitForAsyncUtils.waitForFxEvents();
 
         // ★ 1 回目と 2 回目の答えが一致することは求めない。1 回目が一時的に失敗して
         //   2 回目が通れば（逆も）変わるのが正しく、そこで赤くするのは環境の揺れを
         //   判断の揺れとして扱うことになる（CLAUDE.md「不安定なテストの扱い」）。
-        //   ここが見たいのは「押し直せて、また答えが出る」ことだけである。
         String again = result(robot).getText();
         assertFalse(again.isBlank(), "押し直したのに答えの行が空である");
         assertEquals(1, again.lines().count(), again);
@@ -129,6 +139,21 @@ class UpdateCheckUiTest extends DesktopUiTest {
                 && !button(robot, "#about-check-update").isDisable());
         // 読むのは別のスレッドである。掛け金を通してから読む（waitForNode と同じ作法）。
         WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /**
+     * 答えの行が書き換わった回数を数え始める。
+     *
+     * <p>監視の付け外しは JavaFX スレッドで行う。{@code FxRobot} が返す節点は
+     * そちらが持ち主である。
+     */
+    private static AtomicInteger countRewrites(FxRobot robot) throws Exception {
+        AtomicInteger rewrites = new AtomicInteger();
+        WaitForAsyncUtils.asyncFx(() -> result(robot)
+                        .textProperty()
+                        .addListener((observable, before, after) -> rewrites.incrementAndGet()))
+                .get();
+        return rewrites;
     }
 
     private static Label result(FxRobot robot) {
