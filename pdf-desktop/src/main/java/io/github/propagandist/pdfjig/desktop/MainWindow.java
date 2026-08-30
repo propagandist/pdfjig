@@ -2,47 +2,27 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
-import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
-import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
-import io.github.propagandist.pdfjig.core.Warning;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
-import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Alert.AlertType;
-import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.Separator;
-import javafx.scene.control.SeparatorMenuItem;
-import javafx.scene.control.ToolBar;
-import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
@@ -53,6 +33,16 @@ import javafx.stage.Stage;
 
 /**
  * 主画面。サムネイル一覧と、そこに対する操作を持つ。
+ *
+ * <p><b>持つのは画面の組み立てと状態の同期、そして操作が何をするかである</b>（#57）。
+ * それ以外は外へ出してある。
+ *
+ * <ul>
+ *   <li>{@link Action} / {@link Actions} — メニューとツールバーの並べ方
+ *   <li>{@link BackgroundTasks} — 非同期の実行
+ *   <li>{@link DocumentWriter} — ファイルの書き出し
+ *   <li>{@link Messages} — 利用者に伝えること
+ * </ul>
  *
  * <p><b>ファイル I/O を伴う操作はすべて非同期で行う</b>（CLAUDE.md JavaFX 節）。
  * 画面を止めないためであり、100 ページの文書でも開いた瞬間に固まらない。
@@ -80,10 +70,13 @@ public final class MainWindow {
     /** ファイルとフォルダを選ばせる手段。テストではここを差し替える。 */
     private final FileDialogs dialogs;
 
-    private final Label status = new Label();
+    /** 画面を止めずに走らせる手段。進行中かどうかもここが持つ。 */
+    private final BackgroundTasks tasks = new BackgroundTasks();
 
-    /** 進行中の操作がある間は true。操作の重ね掛けを防ぐ。 */
-    private final BooleanProperty busy = new SimpleBooleanProperty(false);
+    /** 利用者に伝える手段。 */
+    private final Messages messages;
+
+    private final Label status = new Label();
 
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
 
@@ -115,6 +108,7 @@ public final class MainWindow {
         this.aiProvider = aiProvider;
         this.hostServices = hostServices;
         this.dialogs = dialogs;
+        this.messages = new Messages(stage);
     }
 
     /**
@@ -135,7 +129,7 @@ public final class MainWindow {
         statusBar.setPadding(new Insets(6, 12, 6, 12));
 
         BorderPane root = new BorderPane();
-        root.setTop(new VBox(buildMenuBar(actions), buildToolBar(actions), legend.node()));
+        root.setTop(new VBox(actions.menuBar(), actions.toolBar(), legend.node()));
         root.setCenter(thumbnails.node());
         root.setBottom(statusBar);
 
@@ -161,50 +155,16 @@ public final class MainWindow {
     }
 
     /**
-     * メニューとツールバーに出す 1 つの操作。
+     * どの操作を持ち、それぞれが何をするかを決める。
      *
-     * <p>文言・ショートカット・有効条件・処理をここにまとめてある。メニューとツールバーで
-     * 別々に書くと、片方だけ直したときに挙動がずれる。
-     *
-     * @param id           節点に付ける識別子。{@code menu-} / {@code tool-} を冠して使う。
-     *                     テストが文言ではなくこれで節点を掴めるようにするためのもので、
-     *                     文言を変えてもテストが落ちないための逃げ道である
-     * @param menuText     メニューに出す文言
-     * @param toolText     ツールバーに出す文言。{@code null} ならツールバーには出さない
-     * @param icon         ツールバーのアイコン（{@link ToolIcons} の SVG パス）
-     * @param accelerator  ショートカット。{@code null} なら割り当てない
-     * @param handler      実行する処理
-     * @param disabled     無効にする条件
+     * <p><b>並べ方は {@link Actions} が、節点の作り方は {@link Action} が持つ。</b>
+     * ここが持つのは<b>処理と、無効にする条件</b>——どちらも画面の状態に依るものであり、
+     * 外へ出せない。
      */
-    private record Action(
-            String id,
-            String menuText,
-            String toolText,
-            String icon,
-            KeyCombination accelerator,
-            Runnable handler,
-            ObservableValue<Boolean> disabled) {}
-
-    /** 画面が持つ操作一式。メニューとツールバーの双方がここから作られる。 */
-    private record Actions(
-            Action open,
-            Action save,
-            Action close,
-            Action quit,
-            Action delete,
-            Action rotateRight,
-            Action rotateLeft,
-            Action keepRange,
-            Action toggleBreak,
-            Action breakEveryN,
-            Action clearBreaks,
-            Action reset,
-            Action add,
-            Action split,
-            Action splitPages,
-            Action about) {}
-
     private Actions buildActions() {
+        // 走っている間は押させない。立てるのも下ろすのも BackgroundTasks だけである。
+        ReadOnlyBooleanProperty busy = tasks.busy();
+
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
         ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
 
@@ -289,100 +249,6 @@ public final class MainWindow {
                 new Action("about", AppInfo.NAME + " について", null, null, null, this::showAbout, null));
     }
 
-    private MenuBar buildMenuBar(Actions actions) {
-        return new MenuBar(
-                new Menu(
-                        "ファイル",
-                        null,
-                        menuItem(actions.open()),
-                        menuItem(actions.save()),
-                        menuItem(actions.close()),
-                        menuItem(actions.quit())),
-                new Menu(
-                        "ページ",
-                        null,
-                        menuItem(actions.delete()),
-                        menuItem(actions.rotateRight()),
-                        menuItem(actions.rotateLeft()),
-                        menuItem(actions.keepRange()),
-                        new SeparatorMenuItem(),
-                        menuItem(actions.toggleBreak()),
-                        menuItem(actions.breakEveryN()),
-                        menuItem(actions.clearBreaks()),
-                        new SeparatorMenuItem(),
-                        menuItem(actions.reset())),
-                new Menu(
-                        "ツール",
-                        null,
-                        menuItem(actions.add()),
-                        menuItem(actions.split()),
-                        menuItem(actions.splitPages())),
-                new Menu("ヘルプ", null, menuItem(actions.about())));
-    }
-
-    /**
-     * ツールバーを組む。
-     *
-     * <p>置くのは繰り返し使う操作だけで、メニューは全部を持ったまま残す。
-     * 区切りは「ファイル」「ページ」「文書」の 3 つのまとまりに対応させてある。
-     */
-    private ToolBar buildToolBar(Actions actions) {
-        return new ToolBar(
-                toolButton(actions.open()),
-                toolButton(actions.save()),
-                new Separator(),
-                toolButton(actions.delete()),
-                toolButton(actions.rotateLeft()),
-                toolButton(actions.rotateRight()),
-                new Separator(),
-                toolButton(actions.keepRange()),
-                toolButton(actions.toggleBreak()),
-                toolButton(actions.reset()),
-                new Separator(),
-                toolButton(actions.add()),
-                toolButton(actions.split()),
-                toolButton(actions.splitPages()));
-    }
-
-    private MenuItem menuItem(Action action) {
-        MenuItem item = new MenuItem(action.menuText());
-        item.setId("menu-" + action.id());
-        item.setOnAction(event -> action.handler().run());
-        if (action.accelerator() != null) {
-            item.setAccelerator(action.accelerator());
-        }
-        if (action.disabled() != null) {
-            item.disableProperty().bind(action.disabled());
-        }
-        return item;
-    }
-
-    private Button toolButton(Action action) {
-        Button button = new Button(action.toolText(), ToolIcons.of(action.icon()));
-        button.setId("tool-" + action.id());
-        button.getStyleClass().add("tool-button");
-        button.setContentDisplay(ContentDisplay.TOP);
-        // Windows の UI Automation から見えるのはこの名前だけで、setId は届かない
-        // （JavaFX は AutomationId に内部の連番を返す）。Labeled の既定でも同じ値になるが、
-        // 明示しておかないと「文言を変えると外側の起動確認が壊れる」ことが読めない。
-        button.setAccessibleText(action.toolText());
-        // Tab の巡回はサムネイル一覧に集める。操作の対象はページであって、ボタンではない。
-        button.setFocusTraversable(false);
-        button.setOnAction(event -> action.handler().run());
-        button.setTooltip(new Tooltip(tooltipText(action)));
-        if (action.disabled() != null) {
-            button.disableProperty().bind(action.disabled());
-        }
-        return button;
-    }
-
-    /** ツールチップにはメニューと同じ文言を出す。短縮した表示名だけでは意味が伝わらないため。 */
-    private static String tooltipText(Action action) {
-        return action.accelerator() == null
-                ? action.menuText()
-                : action.menuText() + "（" + action.accelerator().getDisplayText() + "）";
-    }
-
     /**
      * 指定したファイルを開く。
      *
@@ -399,11 +265,11 @@ public final class MainWindow {
         // ファイルの関連付け）も通すためである。
         folders.rememberReadFile(path);
 
-        runAsync(() -> DocumentSession.open(path), this::adopt, failure -> {
+        tasks.run(() -> DocumentSession.open(path), this::adopt, failure -> {
             if (errorCodeOf(failure) == ErrorCode.PASSWORD_REQUIRED) {
                 askPasswordAndOpen(path, false);
             } else {
-                showFailure(failure);
+                messages.failure(failure);
             }
         });
     }
@@ -421,11 +287,11 @@ public final class MainWindow {
         }
         // この配列は DocumentSession.open の中でゼロ埋めされる。
         char[] password = entered.get();
-        runAsync(() -> DocumentSession.open(path, password), this::adopt, failure -> {
+        tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
             if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
                 askPasswordAndOpen(path, true);
             } else {
-                showFailure(failure);
+                messages.failure(failure);
             }
         });
     }
@@ -453,9 +319,9 @@ public final class MainWindow {
         Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
-        runAsync(() -> assemble(sources, pages, output), warnings -> {
+        run(() -> DocumentWriter.assemble(sources, pages, output), warnings -> {
             markSaved(saving, pages);
-            showWarnings(warnings);
+            messages.warnings(warnings);
         });
     }
 
@@ -484,7 +350,7 @@ public final class MainWindow {
         try {
             session.order().removeAt(index);
         } catch (PdfjigException e) {
-            showFailure(e);
+            messages.failure(e);
         }
     }
 
@@ -543,7 +409,7 @@ public final class MainWindow {
             if (e.errorCode() == ErrorCode.PASSWORD_REQUIRED) {
                 addWithPassword(path, false);
             } else {
-                showFailure(e);
+                messages.failure(e);
             }
         }
         afterOrderChanged();
@@ -562,17 +428,12 @@ public final class MainWindow {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
                 addWithPassword(path, true);
             } else {
-                showFailure(e);
+                messages.failure(e);
             }
         }
     }
 
-    /**
-     * ファイル一覧から 1 つ外す。
-     *
-     * <p>取り消せない。そのファイルに対して行った並べ替えや回転も一緒に消えるため、
-     * 何ページ消えるのかを見せて確認を取る。
-     */
+    /** ファイル一覧から 1 つ外す。取り消せないので、消える量を見せて確認を取る。 */
     private void removeSource(int sourceIndex) {
         if (session == null || sourceIndex >= session.sourceCount()) {
             return;
@@ -582,20 +443,14 @@ public final class MainWindow {
                 .filter(entry -> entry.selection().sourceIndex() == sourceIndex)
                 .count();
 
-        Alert alert = new Alert(
-                AlertType.CONFIRMATION, name + " の " + pageCount + " ページを取り除きます。", ButtonType.OK, ButtonType.CANCEL);
-        alert.setHeaderText("このファイルに対して行った並べ替えや回転も消えます。");
-        alert.initOwner(stage);
-        alert.getDialogPane().setId("remove-source-dialog");
-        alert.getDialogPane().lookupButton(ButtonType.OK).setId("remove-source-ok");
-        if (alert.showAndWait().filter(ButtonType.OK::equals).isEmpty()) {
+        if (!messages.confirmRemoveSource(name, pageCount)) {
             return;
         }
 
         try {
             session.remove(sourceIndex);
         } catch (PdfjigException e) {
-            showFailure(e);
+            messages.failure(e);
             return;
         }
         afterOrderChanged();
@@ -631,15 +486,13 @@ public final class MainWindow {
         }
         PageOrder order = session.order();
         if (order.breakCount() == 0) {
-            show(
-                    AlertType.INFORMATION,
-                    "区切りが指定されていません。"
-                            + System.lineSeparator()
-                            + "新しいファイルの先頭にするページを選び、「ここで区切る」を押してください。"
-                            + System.lineSeparator()
-                            + "枚数で機械的に区切るなら「N ページごとに区切る…」を使います。"
-                            + System.lineSeparator()
-                            + "1 枚ずつバラすなら「1 ページずつに分割…」を使います。");
+            messages.information("区切りが指定されていません。"
+                    + System.lineSeparator()
+                    + "新しいファイルの先頭にするページを選び、「ここで区切る」を押してください。"
+                    + System.lineSeparator()
+                    + "枚数で機械的に区切るなら「N ページごとに区切る…」を使います。"
+                    + System.lineSeparator()
+                    + "1 枚ずつバラすなら「1 ページずつに分割…」を使います。");
             return;
         }
         writeSegments(order.toSegments());
@@ -668,7 +521,7 @@ public final class MainWindow {
      * 切り分けたページ列を書き出す。
      *
      * <p>保存先を尋ねてから非同期で書く。既に同名のファイルがあれば 1 つも書かずに
-     * 失敗する（{@link #splitInto}）。上書きするかどうかは利用者の判断である。
+     * 失敗する（{@link DocumentWriter#splitInto}）。上書きするかどうかは利用者の判断である。
      *
      * @param segments かたまりごとのページ指定。先頭から順に連番で書き出す
      */
@@ -682,7 +535,7 @@ public final class MainWindow {
         Path outputDir = directory.get();
         folders.rememberWrittenFolder(outputDir);
 
-        runAsync(() -> splitInto(sources, segments, outputDir), this::showSplitResult);
+        run(() -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult);
     }
 
     /** 選択中のページの区切りを付け外しする。 */
@@ -743,61 +596,9 @@ public final class MainWindow {
         onOrderChanged();
     }
 
-    /**
-     * ページ列を書き出す。
-     *
-     * <p>{@link OutputWorkspace} に書いてから置き換える。保存先を選ぶダイアログは既存ファイルへの
-     * 上書きを利用者に確認するが、pdf-core は既存の出力を拒む。先に消してしまうと
-     * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
-     * 元のファイルはそのまま残る。
-     *
-     * <p><b>この経路だけが pdf-core の「既存の出力を拒む」約束の上に層を重ねている。</b>
-     * ダイアログで確認が取れているので置き換えてよい、という判断であり、
-     * 画面の<b>分割</b>は層を重ねずに拒むほうを保っている（{@code splitInto}）。
-     * 約束が 2 段になっていることの正本は {@code docs/SPEC.md} §4.2 にある。
-     * <b>確認を出すのは OS のダイアログなので、出ていることを自動テストでは確かめられない</b>
-     * （{@link FileDialogs} の向こう側。{@code docs/HANDOVER.md} 4-4 の 10 番）。
-     */
-    private static List<Warning> assemble(List<Path> sources, List<PageSelection> pages, Path output) {
-        List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
-        PageOperations operations = new PdfBoxPageOperations(warnings::add);
-
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
-            operations.assemble(sources, pages, workspace.file());
-            move(workspace.file(), output);
-        }
-        return List.copyOf(warnings);
-    }
-
-    /**
-     * かたまりごとに書き出す。
-     *
-     * <p><b>連番の付け方も、書けないときの約束も pdf-core が持つ</b>
-     * （{@link PageOperations#assembleEach}）。ここに写すと、同じ「分割」という操作の
-     * 挙動が 2 か所に分かれ、しかも違いは失敗したときにしか出ない。
-     */
-    private static SplitResult splitInto(List<Path> sources, List<List<PageSelection>> segments, Path outputDir) {
-        List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
-        PageOperations operations = new PdfBoxPageOperations(warnings::add);
-
-        List<Path> outputs = operations.assembleEach(sources, segments, outputDir);
-        return new SplitResult(outputs.size(), List.copyOf(warnings));
-    }
-
-    /** 分割の結果。書き出した数と、その途中で出た警告。 */
-    private record SplitResult(int fileCount, List<Warning> warnings) {}
-
-    private void showSplitResult(SplitResult result) {
-        show(AlertType.INFORMATION, result.fileCount() + " 個のファイルを書き出しました。");
-        showWarnings(result.warnings());
-    }
-
-    private static void move(Path from, Path to) {
-        try {
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
-        }
+    private void showSplitResult(DocumentWriter.SplitResult result) {
+        messages.information(result.fileCount() + " 個のファイルを書き出しました。");
+        messages.warnings(result.warnings());
     }
 
     private String suggestedFileName() {
@@ -832,70 +633,14 @@ public final class MainWindow {
         return Optional.ofNullable(session.path().getParent()).filter(Files::isDirectory);
     }
 
-    private <T> void runAsync(Supplier<T> work, Consumer<T> onSucceeded) {
-        runAsync(work, onSucceeded, this::showFailure);
-    }
-
-    private <T> void runAsync(Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
-        Task<T> task = new Task<>() {
-            @Override
-            protected T call() {
-                return work.get();
-            }
-        };
-        task.setOnSucceeded(event -> {
-            busy.set(false);
-            onSucceeded.accept(task.getValue());
-        });
-        task.setOnFailed(event -> {
-            busy.set(false);
-            onFailed.accept(task.getException());
-        });
-
-        busy.set(true);
-        Thread worker = new Thread(task, "pdfjig-operation");
-        worker.setDaemon(true);
-        worker.start();
+    /** 失敗の伝え方を既定にして走らせる。分けたい経路だけが {@link BackgroundTasks} を直に呼ぶ。 */
+    private <T> void run(Supplier<T> work, Consumer<T> onSucceeded) {
+        tasks.run(work, onSucceeded, messages::failure);
     }
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
     private void showAbout() {
         AboutDialog.show(stage, hostServices, aiProvider.isAvailable());
-    }
-
-    private void showWarnings(List<Warning> warnings) {
-        if (warnings.isEmpty()) {
-            return;
-        }
-        String message =
-                warnings.stream().distinct().map(Warning::defaultMessage).collect(Collectors.joining("\n"));
-        show(AlertType.WARNING, message);
-    }
-
-    /**
-     * 失敗を伝える。
-     *
-     * <p>例外そのもののメッセージは決して出さない。依存ライブラリの例外には入力値が
-     * 埋め込まれていることがあり、そこにパスワードが混ざりうる（CLAUDE.md INV-5）。
-     * 出してよいのは {@link ErrorCode} の定型文だけである。
-     *
-     * <p><b>同じものを {@link Logs} にも残す。</b>画面の定型文は「何が起きたか」までしか言わず、
-     * <b>利用者が窓を閉じた時点で消える</b>。後から報告を受ける側には型と行が要る。
-     */
-    private void showFailure(Throwable failure) {
-        Logs.warn(LogEvent.OPERATION_FAILED, failure);
-        String message =
-                failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
-        show(AlertType.ERROR, message);
-    }
-
-    private void show(AlertType type, String message) {
-        Alert alert = new Alert(type, message, ButtonType.OK);
-        alert.setHeaderText(null);
-        alert.initOwner(stage);
-        alert.getDialogPane().setId("message-dialog");
-        alert.getDialogPane().lookupButton(ButtonType.OK).setId("message-ok");
-        alert.showAndWait();
     }
 
     private void updateTitle() {

@@ -1,8 +1,11 @@
 package io.github.propagandist.pdfjig.archtest;
 
 import static com.tngtech.archunit.base.DescribedPredicate.not;
+import static com.tngtech.archunit.core.domain.JavaCall.Predicates.target;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
+import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,6 +40,12 @@ class ArchitectureTest {
 
     /** 外へ出る唯一の経路。pdf-desktop で {@code java.net} の通信 API を触ってよい唯一のクラスである。 */
     private static final String UPDATE_CHECK = "io.github.propagandist.pdfjig.desktop.UpdateCheck";
+
+    /** 書き出しの実体。JavaFX の型を持たず、画面を持たずに読める側である。 */
+    private static final String DOCUMENT_WRITER = "io.github.propagandist.pdfjig.desktop.DocumentWriter";
+
+    /** 既にあるファイルを置き換える書き出しを頼んでよい唯一のクラス。 */
+    private static final String MAIN_WINDOW = "io.github.propagandist.pdfjig.desktop.MainWindow";
 
     private static JavaClasses classes;
 
@@ -294,6 +303,57 @@ class ArchitectureTest {
     }
 
     /**
+     * 既にあるファイルを置き換える書き出しを、確認を取れる경路だけに残す。
+     *
+     * <p>{@code DocumentWriter#assemble} は {@code OutputWorkspace} に書いてから
+     * <b>{@code REPLACE_EXISTING} で置き換える</b>——pdf-core が「既存の出力を拒む」約束の上に、
+     * <b>この経路だけが層を重ねている</b>（{@code docs/SPEC.md} §4.2）。
+     * 重ねてよい根拠は<b>保存ダイアログが上書きの確認を取っていること</b>だけであり、
+     * <b>それを持っているのは {@code MainWindow#saveAs} である。</b>
+     *
+     * <p><b>★ #57 まではコンパイラが縛っていた。</b>{@code MainWindow} の中に private で
+     * 置いてあったので、呼べる相手が 1 つしか無かった。<b>外へ出した以上、同じ強さを
+     * ここで作り直す</b>——{@code CLAUDE.md}「配る差分の門」3 と、優先順位 1 である。
+     *
+     * <p><b>対の {@code ...RuleHasSubject} は足さない。</b>依存先は pdfjig 自身の型であり、
+     * クラスパスから外れることがない（{@link #coreMustNotReachTheNetwork} と同じ理由）。
+     */
+    @Test
+    @DisplayName("既にあるファイルを置き換える書き出しを頼めるのは MainWindow だけである")
+    void assembleIsCalledOnlyByMainWindow() {
+        noClasses()
+                .that(not(named(MAIN_WINDOW)))
+                .should()
+                .callMethodWhere(target(owner(name(DOCUMENT_WRITER))).and(target(name("assemble"))))
+                .because("既にあるファイルを黙って置き換えてよいのは、保存ダイアログが上書きの確認を"
+                        + "取ったときだけである。確認を持っているのは MainWindow#saveAs だけであり、"
+                        + "#57 まではそれを private が縛っていた（CLAUDE.md 優先順位 1）")
+                .check(classes);
+    }
+
+    /**
+     * 書き出しを画面から切り離したままにする。
+     *
+     * <p>{@code DocumentWriter} は<b>バックグラウンドスレッドから呼ばれる</b>
+     * （{@code BackgroundTasks}）。<b>安全に呼べる根拠は「JavaFX の型を 1 つも持たない」ことだけ</b>で、
+     * あちらの Javadoc はそれを断言している。<b>断言を機械で支える。</b>
+     *
+     * <p>#57 が「画面を持たずに読める」と書いた効き目は、ここが赤くなることで保たれる
+     * ——{@code Platform.runLater} を 1 つ足せば、その文は嘘になる。
+     */
+    @Test
+    @DisplayName("DocumentWriter は JavaFX の型を持たない")
+    void documentWriterHasNoScreen() {
+        noClasses()
+                .that(named(DOCUMENT_WRITER))
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("javafx..")
+                .because("バックグラウンドスレッドから呼ぶ。画面の型が入った瞬間に、" + "その約束が読む側から確かめられなくなる（#57）")
+                .check(classes);
+    }
+
+    /**
      * ログの口を迂回させない。
      *
      * <p>{@code Logs} は {@code LogEvent} しか受け取らない——<b>自由な文字列を渡せないので、
@@ -356,6 +416,20 @@ class ArchitectureTest {
                 "UpdateCheck とその入れ子クラス",
                 javaClass -> javaClass.getName().equals(UPDATE_CHECK)
                         || javaClass.getName().startsWith(UPDATE_CHECK + "$"));
+    }
+
+    /**
+     * その名前のクラスとその入れ子クラス。
+     *
+     * <p>照合の作法は {@link #isLogs()} と同じ理由で名前による。前置詞にすると
+     * {@code MainWindowHelper} のような別のクラスまで通してしまうので、
+     * <b>厳密一致か、入れ子を表す {@code $} で始まるものだけ</b>を通す。
+     */
+    private static DescribedPredicate<JavaClass> named(String className) {
+        return DescribedPredicate.describe(
+                className + " とその入れ子クラス",
+                javaClass -> javaClass.getName().equals(className)
+                        || javaClass.getName().startsWith(className + "$"));
     }
 
     /**

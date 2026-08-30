@@ -36,7 +36,8 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
-# ツールバーに出ている文言。pdf-desktop の MainWindow が setAccessibleText で渡している値。
+# ツールバーに出ている文言。定義元は pdf-desktop の MainWindow#buildActions()
+# （Action の toolText）で、Action#toolButton がそれを setAccessibleText へ渡す。
 # ここを変えるなら向こうも変えること（逆も同じ）。
 $OpenButtonName = '開く'
 
