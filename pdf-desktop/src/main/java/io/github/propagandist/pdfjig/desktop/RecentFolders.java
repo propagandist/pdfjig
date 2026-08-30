@@ -15,9 +15,11 @@ import java.util.Optional;
  * <p><b>読む用と書く用を分けて持つ。</b>PDF を取ってくる場所と、整理した結果を置く場所は
  * 違うことが多い。片方に引きずられると、そのつどたどり直すことになる。
  *
- * <p>覚えるのは各 1 つだけで、履歴は持たない。<b>アプリを閉じると忘れる。</b>
- * 再起動をまたいで維持するには設定ファイルの置き場を決める必要があり、
- * それは {@code HANDOVER.md} の未決事項として M1 に残してある。
+ * <p>覚えるのは各 1 つだけで、履歴は持たない。
+ *
+ * <p><b>再起動をまたいで保つのは {@link Settings} の側である。</b>このクラスは
+ * {@link #restore} で戻され、{@link #rememberedReading()} / {@link #rememberedWriting()} で
+ * 取り出される。<b>置き場も書き方もここは知らない</b>——{@code Path} だけを扱う状態を保つ。
  *
  * <p>JavaFX の型を持ち込まないこと。Toolkit の初期化なしでテストできる状態を保つ。
  */
@@ -37,6 +39,35 @@ final class RecentFolders {
     /** 書き出し先を選ぶダイアログを始めるフォルダ。 */
     Optional<Path> writing() {
         return existing(writing);
+    }
+
+    /**
+     * 覚えている読む用のフォルダを、そのまま返す。
+     *
+     * <p><b>存在を確かめない。</b>保存のために使う——終了したその瞬間に USB が抜けていても、
+     * 次に挿せば同じ場所である。<b>消えたものを落とすのは取り出すとき</b>（{@link #reading()}）でよい。
+     */
+    Optional<Path> rememberedReading() {
+        return Optional.ofNullable(reading);
+    }
+
+    /** 覚えている書く用のフォルダを、そのまま返す。存在を確かめない。 */
+    Optional<Path> rememberedWriting() {
+        return Optional.ofNullable(writing);
+    }
+
+    /**
+     * 覚えていた状態に戻す。
+     *
+     * <p>前回の終了時に保存されたものを渡す。<b>存在の確認はしない</b>——
+     * 取り出すときに落ちる（{@link #existing}）。
+     *
+     * @param reading 読む用。無ければ {@code null}
+     * @param writing 書く用。無ければ {@code null}
+     */
+    void restore(Path reading, Path writing) {
+        this.reading = reading;
+        this.writing = writing;
     }
 
     /**

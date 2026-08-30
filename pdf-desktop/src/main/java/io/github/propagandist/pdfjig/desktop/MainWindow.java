@@ -145,6 +145,17 @@ public final class MainWindow {
     }
 
     /** ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。 */
+    /**
+     * ダイアログを始めるフォルダ。
+     *
+     * <p><b>再起動をまたいで保つのは呼び出し側の仕事である</b>（{@link PdfjigApplication}）。
+     * ここは置き場も書き方も知らない——{@code Settings} を持ち込むと、画面が
+     * ファイルの読み書きを抱えることになる（#57）。
+     */
+    RecentFolders folders() {
+        return folders;
+    }
+
     public void dispose() {
         closeSession();
     }
