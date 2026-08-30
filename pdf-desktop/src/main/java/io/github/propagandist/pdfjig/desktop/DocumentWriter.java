@@ -7,6 +7,7 @@ import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -36,8 +37,11 @@ final class DocumentWriter {
      *
      * <p>{@link OutputWorkspace} に書いてから置き換える。保存先を選ぶダイアログは既存ファイルへの
      * 上書きを利用者に確認するが、pdf-core は既存の出力を拒む。先に消してしまうと
-     * 書き込みに失敗したときに元のファイルが失われる。置き換えなら、失敗しても
-     * 元のファイルはそのまま残る。
+     * 書き込みに失敗したときに元のファイルが失われる。
+     *
+     * <p><b>★ 置き換えが「失敗しても元のファイルが残る」と言い切れるのは、原子的な移動が
+     * 通った場合だけである</b>（{@link #move}）。<b>通らなかった経路は、いまも
+     * 「先に消してから動かす」ままである。</b>
      *
      * <p><b>この経路だけが pdf-core の「既存の出力を拒む」約束の上に層を重ねている。</b>
      * ダイアログで確認が取れているので置き換えてよい、という判断であり、
@@ -104,7 +108,37 @@ final class DocumentWriter {
      */
     record SplitResult(int fileCount, List<Warning> warnings) {}
 
-    private static void move(Path from, Path to) {
+    /**
+     * 作業場所から出力先へ移す。
+     *
+     * <p><b>まず原子的な移動を頼む。</b> 頼まないと Windows では {@code DeleteFile} →
+     * {@code MoveFileEx} の 2 段になり、<b>先に消してから動かす</b>——その 2 つの間に
+     * 割り込まれると、元のファイルも置き換えるはずのものも無い状態になる（#113）。
+     * {@link OutputWorkspace} が作業場所を出力先の隣に作っているのは、
+     * <b>同じボリュームなら 1 回の {@code MoveFileEx} で済むから</b>である。
+     *
+     * <p><b>★★ 断られたら、理由を問わず普通の置き換えに落とす。</b>
+     * {@link AtomicMoveNotSupportedException} だけに絞ってはならない——<b>原子的な置き換えは、
+     * 出力先が開かれていると {@code AccessDeniedException} で断る。</b>そして
+     * <b>画面から上書き保存するとき、その出力先を開いているのは pdfjig 自身でありうる</b>
+     * （{@code DocumentSession} は保存の間も入力を閉じない）。絞ると
+     * <b>「開いている文書へ上書き保存する」が必ず失敗する</b>——2026-08-30 に
+     * Windows 10 / JDK 21.0.8 で実測した（{@code DocumentWriterTest}）。
+     *
+     * <p><b>落ちた先は 2 段のままである。</b>それでも先に原子的を試す価値があるのは、
+     * <b>出力先を誰も開いていない経路がそれで 1 回の {@code MoveFileEx} になる</b>からである。
+     * {@code Settings#replace} も同じ形だが、あちらは落とす条件が狭い。
+     * <b>2 つを 1 つにするかは #113 では決めていない。</b>
+     *
+     * <p><b>package-private なのはテストのためである</b>（{@code DocumentWriterTest}）。
+     */
+    static void move(Path from, Path to) {
+        try {
+            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            return;
+        } catch (IOException refused) {
+            // 断られた。理由は上の 2 通りある。どちらでも、落とした先で書き出せることがある。
+        }
         try {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
