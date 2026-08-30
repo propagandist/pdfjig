@@ -342,6 +342,19 @@ gh api repos/propagandist/.github/contents/docs/security-baseline.md --jq .conte
 （`PdfjigCommand` の `@Parameters Path input`）。**残るのは zip slip / zip 爆弾と、
 アプリが自分で決める出力先だけ**（同 §3.3 の★★）。
 
+**★ Code scanning は default setup で入れてある**（2026-08-30。ワークフローは置いていない）。
+**`threat_model` は `remote_and_local` にしてある**——この道具の脅威は**手元で開く細工 PDF**であり、
+**既定の `remote` ではローカルのファイルが汚染源にならず、`SECURITY.md`「対象範囲」に
+書いてあるものをちょうど見逃す。**
+
+**★ Copilot Autofix が効き始めた。提案は中身を読んでからでなければマージしない**
+（org `security-baseline.md` §5.2「モデルの出力を信頼された入力として扱わない」）。
+**§5.2 全体が効き始めるのは pdfjig 自身が AI を組み込む日であり、そちらは #80 が持つ。**
+
+**★★ `tools/` の指摘を却下した軸を、配布物へ持ち込まないこと。** あちらは配布物に入らず、
+引数を打つのも開発者自身である（#69 の軸）。**`pdf-core` / `pdf-desktop` / `pdf-cli` に出たものは
+必ず読む**——出力先をアプリが決める経路が実際にある。
+
 **★ ③ 週次 cron を足すなら、org 基準 §0 の 3 条件を満たすこと**——public であること・
 見るのは同梱物に限ること・**CVE が出たときに何をするかまで決まっていること**。
 **P では気づいても再リリースしなければ直らない**ので、3 番目が抜けると「監視しているつもり」になる。
