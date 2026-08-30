@@ -6,6 +6,8 @@ import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nam
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -29,6 +31,9 @@ import org.junit.jupiter.api.Test;
  * 2026-08-22 に POI を依存から外したとき、実際にこれが起きた。
  */
 class ArchitectureTest {
+
+    /** ログの書き手。{@code java.util.logging} を触ってよい唯一のクラスである。 */
+    private static final String LOGS = "io.github.propagandist.pdfjig.desktop.Logs";
 
     private static JavaClasses classes;
 
@@ -194,5 +199,57 @@ class ArchitectureTest {
                         + "外への通信が初めて入るのは pdf-ai であり、その都合がこちらへ滲むのを止める"
                         + "（CLAUDE.md「モジュール別の責務」）")
                 .check(classes);
+    }
+
+    /**
+     * ログの口を迂回させない。
+     *
+     * <p>{@code Logs} は {@code LogEvent} しか受け取らない——<b>自由な文字列を渡せないので、
+     * 文書のパスもファイル名も載せられない</b>（{@code docs/SPEC.md} §10.4）。
+     * <b>その線は、誰かが {@code Logger.getLogger} を直に取った瞬間に消える。</b>
+     * 型で守っているものを、型を迂回して破れないようにするのがここである。
+     *
+     * <p><b>下の {@code ...RuleHasSubject} は、除外した側が本当に書き手であることを見る。</b>
+     * {@code Logs} を消したり別の仕組みへ移したりすると、このルールは緑のまま何も守らなくなる
+     * ——依存先が JDK なので、この形の空振りは上の 2 例（PDFBox / POI）とは別の起こり方をする。
+     */
+    @Test
+    @DisplayName("java.util.logging を触るのは Logs だけである")
+    void loggingMustGoThroughLogs() {
+        noClasses()
+                .that(not(isLogs()))
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("java.util.logging..")
+                .because("ログの口は LogEvent しか受け取らない。"
+                        + "直に Logger を取ると、書かないと決めたパスとファイル名がそこから入る"
+                        + "（docs/SPEC.md §10.4、CLAUDE.md INV-5）")
+                .check(classes);
+    }
+
+    @Test
+    @DisplayName("ログのルールが空振りしていない（除外した Logs が実際の書き手である）")
+    void loggingRuleHasSubject() {
+        boolean writes = classes.stream()
+                .filter(javaClass -> isLogs().test(javaClass))
+                .flatMap(javaClass -> javaClass.getDirectDependenciesFromSelf().stream())
+                .anyMatch(dependency ->
+                        dependency.getTargetClass().getPackageName().startsWith("java.util.logging"));
+
+        assertTrue(writes, "Logs が java.util.logging を使っていない。loggingMustGoThroughLogs は緑でも何も守っていない");
+    }
+
+    /**
+     * {@code Logs} とその入れ子クラス。
+     *
+     * <p>正規表現ではなく名前で照合する。{@code Logs} を前置詞にすると
+     * {@code LogsHelper} のような別のクラスまで通してしまうので、
+     * <b>厳密一致か、入れ子を表す {@code $} で始まるものだけ</b>を通す。
+     */
+    private static DescribedPredicate<JavaClass> isLogs() {
+        return DescribedPredicate.describe(
+                "Logs とその入れ子クラス",
+                javaClass ->
+                        javaClass.getName().equals(LOGS) || javaClass.getName().startsWith(LOGS + "$"));
     }
 }

@@ -42,12 +42,24 @@ final class UserDataDirectory {
      * 設定ファイル。
      *
      * <p>この木に何を置くかは {@code docs/SPEC.md}「利用者の PC に置くもの」が持つ。
-     * <b>置き場の組み立てはこのクラスに集める</b>——ログ（#13）も提案（#103）も同じ木に来る。
+     * <b>置き場の組み立てはこのクラスに集める</b>——ログも提案（#103）も同じ木に来る。
      *
      * @return 設定ファイル。置き場が無い環境では空
      */
     static Optional<Path> settingsFile() {
         return locate().map(directory -> directory.resolve("settings.properties"));
+    }
+
+    /**
+     * ログを置くフォルダ。
+     *
+     * <p>ここは<b>作らない</b>。作るのは最初の 1 件が出たときであり、その判断は {@link Logs} が持つ
+     * ——正常に動いている限り、中身の無いフォルダを置かない。
+     *
+     * @return 置き場。{@code LOCALAPPDATA} が無い環境では空
+     */
+    static Optional<Path> logDirectory() {
+        return locate().map(directory -> directory.resolve("logs"));
     }
 
     /**

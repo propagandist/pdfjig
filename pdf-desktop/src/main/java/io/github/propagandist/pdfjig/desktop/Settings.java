@@ -31,7 +31,8 @@ import java.util.Properties;
  * <p><b>読めなければ空として扱い、書けなければ諦める。例外を投げない。</b>
  * 覚えているのは次にダイアログが開くフォルダだけで、失われても選び直せば済む。
  * <b>設定が壊れているせいでアプリが起動しない、という形を作らない。</b>
- * ★ ログの仕組みが入ったら、捨てたこと・書けなかったことをそこへ出す（#13）。
+ * ★ <b>ただし黙ってはいない。</b>捨てたこと・書けなかったことは {@link Logs} へ出す——
+ * 覚えたはずのフォルダが戻らないとき、原因を追える先がどこかに要る。
  */
 final class Settings {
 
@@ -71,6 +72,7 @@ final class Settings {
         } catch (IOException | IllegalArgumentException e) {
             // 壊れた設定は捨てて既定に戻る。中身が読めないことは、動かない理由にはならない。
             settings.values.clear();
+            Logs.warn(LogEvent.SETTINGS_UNREADABLE, e);
         }
         return settings;
     }
@@ -105,6 +107,7 @@ final class Settings {
             temporary = null;
         } catch (IOException e) {
             // 書けなくても諦める。次に選び直せば済むものであり、閉じる操作を失敗させない。
+            Logs.warn(LogEvent.SETTINGS_UNWRITABLE, e);
         } finally {
             deleteQuietly(temporary);
         }
@@ -154,6 +157,7 @@ final class Settings {
             return Optional.of(Path.of(value));
         } catch (InvalidPathException e) {
             // 手で書き換えられていることがある。読めないなら覚えていないのと同じ扱いにする。
+            Logs.warn(LogEvent.SETTINGS_VALUE_UNREADABLE, e);
             return Optional.empty();
         }
     }
