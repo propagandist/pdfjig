@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -11,6 +12,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,51 @@ class DocumentWriterTest {
 
         assertEquals("新しいファイル", Files.readString(target));
         assertTrue(Files.notExists(source), "移した元が残るなら、それは移動ではなく複製である");
+    }
+
+    @Test
+    @DisplayName("出どころそのものへ書き出すなら、置き換えである")
+    void seesThatItReplacesTheSourceItself(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(source), source));
+    }
+
+    @Test
+    @DisplayName("出どころが複数でも、どれか 1 つに当たれば置き換えである")
+    void seesThatItReplacesOneOfSeveralSources(@TempDir Path directory) throws IOException {
+        Path first = Files.writeString(directory.resolve("a.pdf"), "1 つ目");
+        Path second = Files.writeString(directory.resolve("b.pdf"), "2 つ目");
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(first, second), second));
+    }
+
+    @Test
+    @DisplayName("名前が違っても、同じ実体なら置き換えである")
+    void seesThroughADifferentNameForTheSameFile(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+        // 同じ実体を指す別の書き方。名前で比べていると取り逃がす。
+        Path sameFileOtherName = directory.resolve("sub").resolve("..").resolve("doc.pdf");
+        Files.createDirectory(directory.resolve("sub"));
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(source), sameFileOtherName));
+    }
+
+    @Test
+    @DisplayName("別のファイルへ書き出すなら、置き換えではない")
+    void seesThatANewNameIsNotAReplacement(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+        Path other = Files.writeString(directory.resolve("other.pdf"), "別のファイル");
+
+        assertFalse(DocumentWriter.replacesAnyOf(List.of(source), other));
+    }
+
+    @Test
+    @DisplayName("まだ無いファイルへ書き出すなら、置き換えではない")
+    void seesThatAFileThatDoesNotExistYetIsNotAReplacement(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+
+        assertFalse(DocumentWriter.replacesAnyOf(List.of(source), directory.resolve("new.pdf")));
     }
 
     /**
