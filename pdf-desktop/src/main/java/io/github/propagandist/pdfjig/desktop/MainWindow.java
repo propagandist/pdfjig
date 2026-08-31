@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
@@ -179,19 +180,29 @@ public final class MainWindow {
         ReadOnlyBooleanProperty busy = tasks.busy();
 
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
-        ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy).or(stale);
+        BooleanBinding needsDocument = documentOpen.not().or(busy);
+
+        // ★★ 食い違っている間は、中身に対する操作をさせない（{@link #stale}。#118）。
+        //   並びは書き出す前のファイルに対する指定のままなので、そこから何を書き出しても
+        //   同じ変換が二重に掛かる。
+        //   ★ 「閉じる」はここに含めない——「開き直してください」と出しておいて閉じられないのでは、
+        //     利用者に打つ手が無くなる。「開く」も busy だけで縛ってある（開き直すと印は下りる）。
+        ObservableValue<Boolean> needsFreshDocument = needsDocument.or(stale);
 
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
         ObservableValue<Boolean> breakUnavailable = documentOpen
                 .not()
                 .or(busy)
+                .or(stale)
                 .or(thumbnails.selectedIndexProperty().lessThan(1));
 
-        ObservableValue<Boolean> noBreaks = documentOpen.not().or(busy).or(breakCount.isEqualTo(0));
+        ObservableValue<Boolean> noBreaks =
+                documentOpen.not().or(busy).or(stale).or(breakCount.isEqualTo(0));
 
         // 1 ページしかなければ 1 枚ずつには分けられない。できるのは元と同じ 1 ファイルだけで、
         // 区切りが無いときと違って利用者に打つ手も無い。断るより初めから押させない。
-        ObservableValue<Boolean> notSplittable = documentOpen.not().or(busy).or(pageCount.lessThan(2));
+        ObservableValue<Boolean> notSplittable =
+                documentOpen.not().or(busy).or(stale).or(pageCount.lessThan(2));
 
         return new Actions(
                 new Action(
@@ -209,7 +220,7 @@ public final class MainWindow {
                         ToolIcons.SAVE,
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
                         this::saveAs,
-                        needsDocument),
+                        needsFreshDocument),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
                 new Action("quit", "終了", null, null, null, stage::close, null),
                 new Action(
@@ -219,7 +230,7 @@ public final class MainWindow {
                         ToolIcons.DELETE,
                         new KeyCodeCombination(KeyCode.DELETE),
                         this::deleteSelected,
-                        needsDocument),
+                        needsFreshDocument),
                 new Action(
                         "rotate-right",
                         "右に 90 度回転",
@@ -227,7 +238,7 @@ public final class MainWindow {
                         ToolIcons.ROTATE_RIGHT,
                         new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.CLOCKWISE_90),
-                        needsDocument),
+                        needsFreshDocument),
                 new Action(
                         "rotate-left",
                         "左に 90 度回転",
@@ -235,8 +246,9 @@ public final class MainWindow {
                         ToolIcons.ROTATE_LEFT,
                         new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90),
-                        needsDocument),
-                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsDocument),
+                        needsFreshDocument),
+                new Action(
+                        "keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsFreshDocument),
                 new Action(
                         "toggle-break",
                         "ここで区切る / 区切りを外す",
@@ -245,11 +257,12 @@ public final class MainWindow {
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
                         this::toggleBreak,
                         breakUnavailable),
-                new Action("break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsDocument),
+                new Action(
+                        "break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsFreshDocument),
                 new Action("clear-breaks", "区切りをすべて外す", null, null, null, this::clearBreaks, noBreaks),
-                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsDocument),
-                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsDocument),
-                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsDocument),
+                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsFreshDocument),
+                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsFreshDocument),
+                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsFreshDocument),
                 new Action(
                         "split-pages",
                         "1 ページずつに分割…",
@@ -682,6 +695,8 @@ public final class MainWindow {
     }
 
     private void closeSession() {
+        // 閉じたのだから食い違いようが無い。次に開くまで印は要らない。
+        stale.set(false);
         if (session == null) {
             return;
         }
