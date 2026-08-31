@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.IntStream;
 import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -81,6 +80,18 @@ public final class MainWindow {
     private final Label status = new Label();
 
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
+
+    /**
+     * 開いている文書が、ディスクの中身と食い違っている。
+     *
+     * <p><b>★★ 立つと保存を押せなくする。</b>上書き保存の後にセッションを寄せ直せなかったとき、
+     * <b>並びは書き出す前のファイルに対する指定のまま</b>で、出どころの中身は書き出したものに
+     * 入れ替わっている。<b>そのまま保存すると同じ変換が二重に掛かる</b>（#118）。
+     *
+     * <p><b>失うものは無い。</b>書き出し自体は成功しておりファイルはできている。
+     * <b>開き直せば続けられる。</b>
+     */
+    private final BooleanProperty stale = new SimpleBooleanProperty(false);
 
     /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
     private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
@@ -168,7 +179,7 @@ public final class MainWindow {
         ReadOnlyBooleanProperty busy = tasks.busy();
 
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
-        ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
+        ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy).or(stale);
 
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
         ObservableValue<Boolean> breakUnavailable = documentOpen
@@ -318,8 +329,9 @@ public final class MainWindow {
         DocumentSession saving = session;
         List<Path> sources = saving.paths();
         List<PageSelection> pages = saving.order().toPageSelections();
-        // 区切りは書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
-        List<Boolean> breaks = breaksOf(saving);
+        // 区切りと選択位置は書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
+        List<Boolean> breaks = saving.order().breaks();
+        int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
@@ -331,10 +343,15 @@ public final class MainWindow {
                 },
                 outcome -> {
                     markSaved(saving, pages);
-                    messages.warnings(outcome.warnings());
+                    // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
+                    //   出ている間は入れ子のイベントループに入る——後ろに置くと、
+                    //   利用者が閉じるまで寄せ直しが始まらない。
+                    //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
+                    //   これは例外的な経路ではない。
                     if (outcome.replacedASource()) {
-                        reopenAt(saving, output, breaks);
+                        reopenAt(saving, output, breaks, selected);
                     }
+                    messages.warnings(outcome.warnings());
                 });
     }
 
@@ -345,14 +362,6 @@ public final class MainWindow {
      * @param warnings        途中で出た警告
      */
     private record SaveOutcome(boolean replacedASource, List<Warning> warnings) {}
-
-    /** 区切りの付き方を控える。位置で持つ——寄せ直しても並びは変わらないためである。 */
-    private static List<Boolean> breaksOf(DocumentSession saving) {
-        PageOrder order = saving.order();
-        return IntStream.range(0, order.pages().size())
-                .mapToObj(order::hasBreakAt)
-                .toList();
-    }
 
     /**
      * 書き出したファイルへセッションを寄せ直す。
@@ -368,33 +377,51 @@ public final class MainWindow {
      * <p><b>★ 区切りは持ち越す。</b>書き出しに関与しないので寄せ直すと消えるが、
      * <b>並びは書き出したものと同じなので、位置はそのまま通じる。</b>
      *
-     * <p><b>★ 開き直せなかった場合は、寄せ直さずに失敗を出す。</b>書き出し自体は成功しており、
-     * ファイルはできている。<b>そのときセッションは古いままなので、続けて保存すると二重に掛かる</b>
-     * ——直せない状況を黙って進めるより、出して止まるほうを採る。
+     * <p><b>★★ 寄せ直せなかったときは、保存を押せなくする</b>（{@link #stale}）。
+     * 起きるのは 2 通り——<b>書き出している間に編集されていた</b>か、
+     * <b>書き出したファイルを開き直せなかった</b>かである。
+     * どちらでもセッションは古いままで、<b>続けて保存すると同じ変換が二重に掛かる。</b>
+     * <b>書き出し自体は成功しておりファイルはできているので、失うものは無い</b>——開き直せば続けられる。
+     *
+     * <p><b>★ 書き出している間の編集を捨てない。</b>{@code busy} を素通りする入口が実際にある
+     * （{@code BackgroundTasks}。#114）。そこで並べ替えや削除がされていたら、
+     * <b>寄せ直すとその編集ごと消える</b>——直しながら別のものを壊すことになる（優先順位 1）。
      */
-    private void reopenAt(DocumentSession saving, Path output, List<Boolean> breaks) {
+    private void reopenAt(DocumentSession saving, Path output, List<Boolean> breaks, int selected) {
         if (session != saving) {
             // 書き出している間に別の文書を開かれていた。そちらを置き換えてはならない。
+            return;
+        }
+        if (saving.order().modified()) {
+            // ★★ 書き出している間に並べ替え・削除・ファイルの解除がされていた。
+            //   寄せ直すとその編集ごと消える——直す前はそれが生き残っていたので、
+            //   直しながら別のものを壊すことになる（CLAUDE.md 優先順位 1）。
+            //   寄せないので古いままである。保存を押せなくして、そこで止める。
+            stale.set(true);
+            updateStatus();
             return;
         }
         tasks.run(
                 () -> DocumentSession.open(output),
                 opened -> {
+                    if (session != saving) {
+                        // 開いている間に別の文書を開かれた／窓が閉じられた。
+                        // ここで入れ替えると、そちらを黙って捨てることになる。
+                        opened.close();
+                        return;
+                    }
                     adopt(opened);
-                    restoreBreaks(opened, breaks);
+                    opened.order().applyBreaks(breaks);
+                    // 先頭へ戻されているので、控えておいた位置へ返す。
+                    thumbnails.selectAndReveal(selected);
                 },
-                messages::failure);
-    }
-
-    /** 控えておいた区切りを付け直す。多い分・少ない分は無視する。 */
-    private void restoreBreaks(DocumentSession opened, List<Boolean> breaks) {
-        PageOrder order = opened.order();
-        int count = Math.min(breaks.size(), order.pages().size());
-        for (int index = 0; index < count; index++) {
-            if (breaks.get(index) && !order.hasBreakAt(index)) {
-                order.toggleBreakAt(index);
-            }
-        }
+                failure -> {
+                    // 開き直せなかった。書き出しは成功しておりファイルはできているが、
+                    // セッションは古いままである。押せなくして止める。
+                    stale.set(true);
+                    updateStatus();
+                    messages.failure(failure);
+                });
     }
 
     /**
@@ -643,6 +670,8 @@ public final class MainWindow {
     private void adopt(DocumentSession opened) {
         closeSession();
         session = opened;
+        // 開き直したので食い違いは無い。
+        stale.set(false);
 
         thumbnails.show(opened);
         opened.order().pages().addListener(orderListener);
@@ -750,6 +779,10 @@ public final class MainWindow {
             }
             if (session.order().modified()) {
                 text.append("（未保存の変更があります）");
+            }
+            if (stale.get()) {
+                // 書き出したファイルはできている。開き直せば続けられる。
+                text.append("（書き出したファイルを開き直せませんでした。開き直してください）");
             }
             if (session.encrypted()) {
                 text.append("（暗号化されています）");

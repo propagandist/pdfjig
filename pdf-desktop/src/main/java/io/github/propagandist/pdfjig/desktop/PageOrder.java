@@ -186,6 +186,33 @@ public final class PageOrder {
         return pages.stream().map(entry -> List.of(entry.selection())).toList();
     }
 
+    /**
+     * 区切りの付き方をまとめて取り出す。位置で持つ。
+     *
+     * <p><b>{@link #applyBreaks} と対で使う。</b>書き出した先へセッションを寄せ直すとき、
+     * 区切りは書き出しに関与しないので消える（#118）。<b>並びは書き出したものと同じなので、
+     * 位置はそのまま通じる。</b>
+     *
+     * @return 各位置に区切りがあるか
+     */
+    public List<Boolean> breaks() {
+        return pages.stream().map(PageEntry::startsNewFile).toList();
+    }
+
+    /**
+     * 区切りをまとめて当て直す。渡された数と合わない分は無視する。
+     *
+     * <p><b>★ 1 つずつ付け直さない。</b>{@link #pages()} は見られているので、
+     * 1 つ動かすたびに画面が組み直される（{@link #applyEveryNPages} と同じ理由）。
+     *
+     * @param wanted 各位置に区切りを付けるか（{@link #breaks} が返した形）
+     */
+    public void applyBreaks(List<Boolean> wanted) {
+        pages.setAll(IntStream.range(0, pages.size())
+                .mapToObj(index -> pages.get(index).withBreak(index < wanted.size() && wanted.get(index)))
+                .toList());
+    }
+
     /** 区切りで分かれるファイルの数。 */
     public int segmentCount() {
         return breakCount() + 1;
