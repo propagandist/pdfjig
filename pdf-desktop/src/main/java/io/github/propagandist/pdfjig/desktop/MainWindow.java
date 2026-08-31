@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
+import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -316,13 +318,83 @@ public final class MainWindow {
         DocumentSession saving = session;
         List<Path> sources = saving.paths();
         List<PageSelection> pages = saving.order().toPageSelections();
+        // 区切りは書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
+        List<Boolean> breaks = breaksOf(saving);
         Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
-        run(() -> DocumentWriter.assemble(sources, pages, output), warnings -> {
-            markSaved(saving, pages);
-            messages.warnings(warnings);
-        });
+        run(
+                () -> {
+                    // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
+                    boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
+                    return new SaveOutcome(replaced, DocumentWriter.assemble(sources, pages, output));
+                },
+                outcome -> {
+                    markSaved(saving, pages);
+                    messages.warnings(outcome.warnings());
+                    if (outcome.replacedASource()) {
+                        reopenAt(saving, output, breaks);
+                    }
+                });
+    }
+
+    /**
+     * 書き出しの結果。
+     *
+     * @param replacedASource 開いている出どころのどれかを置き換えたか（#118）
+     * @param warnings        途中で出た警告
+     */
+    private record SaveOutcome(boolean replacedASource, List<Warning> warnings) {}
+
+    /** 区切りの付き方を控える。位置で持つ——寄せ直しても並びは変わらないためである。 */
+    private static List<Boolean> breaksOf(DocumentSession saving) {
+        PageOrder order = saving.order();
+        return IntStream.range(0, order.pages().size())
+                .mapToObj(order::hasBreakAt)
+                .toList();
+    }
+
+    /**
+     * 書き出したファイルへセッションを寄せ直す。
+     *
+     * <p><b>★★ 出どころを置き換えたときだけ呼ぶ。</b>置き換えた後の出どころは書き出したものに
+     * なっており、<b>いまの並び（元のファイルに対する指定）をもう一度当てると同じ変換が二重に掛かる</b>
+     * ——回転は保存のたびに 90 度ずつ回り、削除は 2 回目に止まる（#118）。
+     * <b>別の名前へ保存したときは呼ばない。</b>元のファイルは変わっておらず、いまの並びが正しい。
+     *
+     * <p><b>寄せ直しはふつうの「開く」である。</b>書き出したものは平文であり
+     * （{@code EncryptionPropagation.NONE} しか対応していない）、<b>パスワードを訊かれることはない。</b>
+     *
+     * <p><b>★ 区切りは持ち越す。</b>書き出しに関与しないので寄せ直すと消えるが、
+     * <b>並びは書き出したものと同じなので、位置はそのまま通じる。</b>
+     *
+     * <p><b>★ 開き直せなかった場合は、寄せ直さずに失敗を出す。</b>書き出し自体は成功しており、
+     * ファイルはできている。<b>そのときセッションは古いままなので、続けて保存すると二重に掛かる</b>
+     * ——直せない状況を黙って進めるより、出して止まるほうを採る。
+     */
+    private void reopenAt(DocumentSession saving, Path output, List<Boolean> breaks) {
+        if (session != saving) {
+            // 書き出している間に別の文書を開かれていた。そちらを置き換えてはならない。
+            return;
+        }
+        tasks.run(
+                () -> DocumentSession.open(output),
+                opened -> {
+                    adopt(opened);
+                    restoreBreaks(opened, breaks);
+                },
+                messages::failure);
+    }
+
+    /** 控えておいた区切りを付け直す。多い分・少ない分は無視する。 */
+    private void restoreBreaks(DocumentSession opened, List<Boolean> breaks) {
+        PageOrder order = opened.order();
+        int count = Math.min(breaks.size(), order.pages().size());
+        for (int index = 0; index < count; index++) {
+            if (breaks.get(index) && !order.hasBreakAt(index)) {
+                order.toggleBreakAt(index);
+            }
+        }
     }
 
     /**

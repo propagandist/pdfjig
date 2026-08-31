@@ -81,6 +81,49 @@ final class DocumentWriter {
     }
 
     /**
+     * この書き出しが、開いている出どころのどれかを置き換えるかどうか。
+     *
+     * <p><b>★★ 置き換えるなら、書き出した後にセッションを寄せ直さなければならない</b>（#118）。
+     * {@link PageOperations#assemble} は<b>毎回ディスクから読み直す</b>ので、出どころの中身が
+     * 書き出したものに入れ替わったまま同じ指定をもう一度当てると、<b>同じ変換が二重に掛かる</b>——
+     * 回転は保存のたびに 90 度ずつ回り、削除は 2 回目に {@code PAGE_OUT_OF_RANGE} で止まる。
+     *
+     * <p><b>★ 名前で比べない。</b>Windows は大文字小文字を区別せず、リンクや {@code ..} を挟めば
+     * 同じファイルが違う名前で書ける。<b>{@link Files#isSameFile} は実体で比べる。</b>
+     *
+     * <p><b>★ 書き出す前に呼ぶこと。</b>後から呼んでも同じ答えになるが、
+     * <b>「これから何を置き換えるのか」を見ているという意味が読めなくなる。</b>
+     *
+     * <p><b>出力先がまだ無ければ置き換えではない。</b>出どころは開かれている＝必ず存在するので、
+     * 存在しないものと同じ実体にはなりえない。
+     *
+     * @param sources 開いている出どころ
+     * @param output  書き出し先
+     * @return 出どころのどれかを置き換えるなら {@code true}
+     */
+    static boolean replacesAnyOf(List<Path> sources, Path output) {
+        if (!Files.exists(output)) {
+            return false;
+        }
+        for (Path source : sources) {
+            try {
+                if (Files.isSameFile(source, output)) {
+                    return true;
+                }
+            } catch (IOException e) {
+                // 実体で比べられないなら名前で見る。ここで投げると、書き出せるのに
+                // 書き出さないことになる——比べられないことは、書けないことではない。
+                if (source.toAbsolutePath()
+                        .normalize()
+                        .equals(output.toAbsolutePath().normalize())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * かたまりごとに書き出す。
      *
      * <p><b>連番の付け方も、書けないときの約束も pdf-core が持つ</b>
