@@ -304,7 +304,7 @@ class ArchitectureTest {
     }
 
     /**
-     * 既にあるファイルを置き換える書き出しを、確認を取れる경路だけに残す。
+     * 既にあるファイルを置き換える書き出しを、確認を取れる経路だけに残す。
      *
      * <p>{@code DocumentWriter#assemble} は {@code OutputWorkspace} に書いてから
      * <b>{@code REPLACE_EXISTING} で置き換える</b>——pdf-core が「既存の出力を拒む」約束の上に、
