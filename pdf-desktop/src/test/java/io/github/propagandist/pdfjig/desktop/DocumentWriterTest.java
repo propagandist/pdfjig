@@ -19,9 +19,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
+ * 出力先の見分け（{@link DocumentWriter#replacesAnyOf}）と、
  * 作業場所から出力先への置き換え（{@link DocumentWriter#move}）。
  *
- * <p>PDF は要らない——ここが扱うのはファイルの移動だけであり、中身は関与しない。
+ * <p>PDF は要らない——ここが扱うのはファイルの移動と見分けだけであり、中身は関与しない。
  *
  * <p><b>★ #113 の欠陥そのもの（Windows で「先に消してから動かす」になっていたこと）は、
  * ここでは赤にできない。</b> 2 段の間に割り込む再現を用意できないためであり、
@@ -60,15 +61,38 @@ class DocumentWriterTest {
         assertTrue(DocumentWriter.replacesAnyOf(List.of(first, second), second));
     }
 
+    /**
+     * 名前が違っても、同じ実体なら置き換えである。
+     *
+     * <p><b>★ ハードリンクで見る。</b>{@code sub/..} のような書き方では足りない——
+     * {@link Path#normalize()} が字面だけで畳むので、<b>名前で比べる実装でも通ってしまい、
+     * {@link Files#isSameFile} を選んだ理由を守れない。</b>
+     * <b>ハードリンクは字面が一致しようがないので、実体で比べていなければ落ちる。</b>
+     */
     @Test
     @DisplayName("名前が違っても、同じ実体なら置き換えである")
     void seesThroughADifferentNameForTheSameFile(@TempDir Path directory) throws IOException {
         Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
-        // 同じ実体を指す別の書き方。名前で比べていると取り逃がす。
-        Path sameFileOtherName = directory.resolve("sub").resolve("..").resolve("doc.pdf");
-        Files.createDirectory(directory.resolve("sub"));
+        Path sameFileOtherName = Files.createLink(directory.resolve("link.pdf"), source);
 
         assertTrue(DocumentWriter.replacesAnyOf(List.of(source), sameFileOtherName));
+    }
+
+    /**
+     * 実体で比べられなければ、置き換えであるとみなす。
+     *
+     * <p><b>★★ 迷ったら安全側に倒す。</b>外したときの損は「要らない開き直しが 1 回走る」だけで、
+     * 取り違えたときの損は<b>同じ変換が二重に掛かって文書が壊れること</b>である（#118）。
+     */
+    @Test
+    @DisplayName("実体で比べられなければ、置き換えであるとみなす")
+    void treatsAnUncomparablePairAsAReplacement(@TempDir Path directory) throws IOException {
+        Path output = Files.writeString(directory.resolve("out.pdf"), "書き出し先");
+        // 出どころが消えていれば isSameFile は投げる。開いている文書では起きないが、
+        // 起きたときにどちらへ倒すかがここの関心事である。
+        Path vanished = directory.resolve("gone.pdf");
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(vanished), output));
     }
 
     @Test

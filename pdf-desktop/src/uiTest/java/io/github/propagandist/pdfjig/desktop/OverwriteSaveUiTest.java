@@ -2,7 +2,6 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
@@ -20,6 +19,10 @@ import org.testfx.framework.junit5.Stop;
  * {@code DesktopUiTest#saveAs} が既存ファイルを待てず（{@link DesktopUiTest#saveOver} の Javadoc）、
  * 呼び出し元 5 つはすべて新規パスを渡していた。<b>手元でも CI でも全部緑のまま、
  * 保存するたびに文書が壊れていた。</b>
+ *
+ * <p><b>★ 並べ替えの筋はここに無い。</b>{@code ReorderUiTest} に置いてある——
+ * ドラッグは windows ランナーで 1 本 19 分かかり、あちらは既にその費用を払って CI から外れている。
+ * <b>ここへ持ってくると、この 4 本ごと CI から落ちる。</b>
  *
  * <p><b>見るのは「2 回保存しても結果が変わらないこと」である。</b>
  * {@code assemble} は毎回ディスクから読み直すので、出どころが書き出したものに入れ替わったまま
@@ -66,16 +69,81 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         robot.clickOn("#tool-delete");
 
         saveOver(robot, document);
-        try (PdfDocument saved = PdfDocument.open(document)) {
-            assertEquals(2, saved.pageCount(), "1 回目が既に違う");
-        }
+        assertEquals(List.of("P1", "P3"), pageTexts(document), "1 回目が既に違う");
 
         // 寄せ直していないと、2 ページの文書に 3 番を要求して PAGE_OUT_OF_RANGE で止まる。
         // そのときは保存そのものが失敗するので、更新時刻が進まず saveOver が待ちきれずに落ちる。
         saveOver(robot, document);
-        try (PdfDocument saved = PdfDocument.open(document)) {
-            assertEquals(2, saved.pageCount(), "2 回目でページが減っている（#118）");
-        }
+        // 枚数だけを見ない。どのページが残ったかまで見ないと、入れ替わりを見逃す。
+        assertEquals(List.of("P1", "P3"), pageTexts(document), "2 回目で中身が変わっている（#118）");
+    }
+
+    /**
+     * 上書き保存のあとも、選んでいたページと区切りが残る。
+     *
+     * <p><b>★ 寄せ直しは「開く」なので、放っておくと先頭へ戻って区切りも消える。</b>
+     * 消すと、#118 を直しながら別の使い勝手を壊すことになる。
+     *
+     * <p><b>選んでいるページは、保存のあとにもう一度回してどれが回ったかで見る</b>——
+     * 選択そのものは画面の外から掴めないが、<b>次の操作がどこに当たるかが利用者にとっての意味である。</b>
+     */
+    @Test
+    void 上書き保存のあとも選んでいたページと区切りが残る(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path document = TestPdfs.plain(dir.resolve("doc.pdf"), 4);
+        openFixture(robot, document);
+
+        robot.clickOn("#thumbnail-tile-2");
+        robot.clickOn("#tool-toggle-break");
+        robot.clickOn("#tool-rotate-right");
+
+        saveOver(robot, document);
+        assertEquals(List.of(0, 0, 90, 0), TestPdfs.rotationsOf(document), "1 回目が既に違う");
+
+        // 区切りが残っていることは状態行で見る。寄せ直しが終わるまでの待ちも兼ねる。
+        waitFor(() -> statusText(robot).contains("区切り 1 か所"));
+
+        // 選び直さずにもう一度回す。押せるようになるまで押し直す（寄せ直しの間は押せない）。
+        clickUntilAccepted(robot, "#tool-rotate-right", () -> !statusText(robot).contains("未保存"));
+        saveOver(robot, document);
+
+        assertEquals(List.of(0, 0, 180, 0), TestPdfs.rotationsOf(document), "選んでいたページが先頭に戻っている——次の操作が別のページに当たる");
+    }
+
+    /**
+     * 複数のファイルを開いていても、どれか 1 つへ上書き保存すればその 1 つに寄る。
+     *
+     * <p><b>★ 書き出したファイルには全ページが入っている。</b>
+     * だから以後の出どころが 1 つになるのは意味的に正しい——
+     * <b>ただし題名から「ほか N ファイル」が消え、凡例も出なくなる。</b>
+     * <b>誰もそう決めていなかったので、ここで固める</b>（#118 のレビュー）。
+     *
+     * <p><b>★ 2 つ以上の出どころから書き出すと、文書情報の警告が必ず出る。</b>
+     * モーダルなので<b>閉じるまで画面は何も進まない</b>——閉じ忘れるとテストごとハングする
+     * （2026-08-31 に実際に 30 分ハングさせた）。
+     */
+    @Test
+    void 複数ファイルでも上書き保存すればその1つに寄る(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path document = TestPdfs.withText(dir.resolve("doc.pdf"), "A1", "A2");
+        openFixture(robot, document);
+
+        dialogs.willOpenMultiple(TestPdfs.withText(dir.resolve("more.pdf"), "B1"));
+        clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+        waitForNode(robot, "#thumbnail-tile-2");
+        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot));
+
+        saveOver(robot, document);
+
+        // ★★ 出どころが 2 つ以上あると、文書情報の出どころについて必ず警告が出る。
+        //   モーダルなので、閉じるまで画面は何も進まない——閉じないとテストごとハングする。
+        clickWhenReady(robot, "#message-ok");
+
+        // 寄せ直しが終わると出どころは 1 つになる。この変化が、待ちの条件でもある。
+        waitFor(() -> statusText(robot).equals("3 / 3 ページ"));
+        assertEquals(List.of("A1", "A2", "B1"), pageTexts(document));
+
+        // もう一度保存しても増えも減りもしない。出どころは 1 つになったので警告も出ない。
+        saveOver(robot, document);
+        assertEquals(List.of("A1", "A2", "B1"), pageTexts(document), "2 回目で中身が変わっている（#118）");
     }
 
     /**

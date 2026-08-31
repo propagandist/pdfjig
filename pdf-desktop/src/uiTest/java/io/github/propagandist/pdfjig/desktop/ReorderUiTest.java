@@ -2,9 +2,6 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.github.propagandist.pdfjig.core.PageText;
-import io.github.propagandist.pdfjig.core.PdfBoxTextExtraction;
-import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
@@ -72,14 +69,26 @@ class ReorderUiTest extends DesktopUiTest {
         assertEquals(List.of("P2", "P3", "P1"), pageTexts(output));
     }
 
-    /** 書き出された PDF の、ページごとの本文。 */
-    private static List<String> pageTexts(Path pdf) {
-        try (PdfDocument document = PdfDocument.open(pdf)) {
-            return new PdfBoxTextExtraction()
-                    .extractByPage(document).stream()
-                            .map(PageText::text)
-                            .map(String::trim)
-                            .toList();
-        }
+    /**
+     * 並べ替えたあと上書き保存を繰り返しても、並びが動かない。
+     *
+     * <p><b>★ #118 の受け入れ基準の 3 つ目（並べ替え）はここにある。</b>
+     * {@code OverwriteSaveUiTest} が回転と削除を見るが、<b>並べ替えを混ぜたときだけ出る形がある</b>
+     * ——二重に当たると<b>別のページへ回転が移る</b>（[0,90,0] → [0,90,90]。#118 の実測）。
+     * <b>あちらへ置くとドラッグの費用でクラスごと CI から落ちるので、こちらに置く。</b>
+     */
+    @Test
+    void 並べ替えたあと上書き保存を繰り返しても並びが動かない(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path document = TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2", "P3");
+        openFixture(robot, document);
+
+        robot.drag("#thumbnail-tile-0", MouseButton.PRIMARY).dropTo("#thumbnail-tile-2");
+        WaitForAsyncUtils.waitForFxEvents();
+
+        saveOver(robot, document);
+        assertEquals(List.of("P2", "P3", "P1"), pageTexts(document), "1 回目が既に違う");
+
+        saveOver(robot, document);
+        assertEquals(List.of("P2", "P3", "P1"), pageTexts(document), "2 回目で並びが動いている（#118）");
     }
 }
