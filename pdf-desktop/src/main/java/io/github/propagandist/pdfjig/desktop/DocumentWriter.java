@@ -77,6 +77,8 @@ final class DocumentWriter {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
             operations.assemble(sources, pages, workspace.file());
             move(workspace.file(), output, workspace.replaced());
+            // 置き換えが済んだ。控えを残すと作業場所が片づかない（OutputWorkspace#discard）。
+            dropKept(workspace.replaced());
         }
         return List.copyOf(warnings);
     }
@@ -161,8 +163,12 @@ final class DocumentWriter {
      * 空いたところへ書けたものを入れる（{@link #replaceWith}）。
      *
      * <p><b>これで「両方無い」がどの瞬間にも存在しない。</b>2 本の間で落ちても、
-     * 元は作業場所の中に実体として残る（{@link OutputWorkspace#close} が消さない）。
+     * 元は作業場所の中に実体として残る（{@link OutputWorkspace} は控えを抱えた作業場所を消さない）。
      * 2 本目に失敗したら 1 本目を巻き戻す（{@link #restore}）。
+     *
+     * <p><b>★ 済んだあとの控えはここでは捨てない。</b>捨てるのは {@link #assemble} である——
+     * <b>ここが返った時点で控えが残っていることが、「まだ済んでいない」の印そのもの</b>であり、
+     * <b>それを外から見えるようにしておくために残す</b>（{@code DocumentWriterTest}）。
      *
      * <p><b>★★ 素直に置き換えないのは、いちばんありふれた経路がそれを断るからである。</b>
      * {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は<b>置き換え先が開かれていると
@@ -206,11 +212,13 @@ final class DocumentWriter {
      * @param aside 出力先に元からあったものを退避する先（{@link OutputWorkspace#replaced}）
      */
     static void move(Path from, Path to, Path aside) {
-        Path kept = setAside(to, aside);
+        boolean kept = setAside(to, aside);
         try {
             replaceWith(from, to);
         } catch (RuntimeException failed) {
-            restore(kept, to);
+            if (kept) {
+                restore(aside, to);
+            }
             throw failed;
         }
     }
@@ -222,15 +230,15 @@ final class DocumentWriter {
      * それは<b>この修正が消したかった経路そのもの</b>である。失敗すれば元は手つかずで残り、
      * 利用者は失敗を見て選び直せる（{@code CLAUDE.md} 優先順位 1）。
      *
-     * @return 退避したもの。出力先がまだ無ければ {@code null}
+     * @return 退避したなら {@code true}。出力先がまだ無ければ {@code false}
      */
-    private static Path setAside(Path to, Path aside) {
+    private static boolean setAside(Path to, Path aside) {
         if (Files.notExists(to)) {
-            return null;
+            return false;
         }
         try {
             Files.move(to, aside, StandardCopyOption.ATOMIC_MOVE);
-            return aside;
+            return true;
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
@@ -261,21 +269,42 @@ final class DocumentWriter {
     /**
      * 退避したものを出力先へ戻す。
      *
+     * <p><b>★ 入れるときと同じ形を通す</b>（{@link #replaceWith}）。書き分けると
+     * <b>「出力先へ改名する」規則が 2 か所に分かれ、次に直すとき忘れられるのは
+     * 巻き戻しのほうである</b>——ふつうは通らない経路だからである。
+     *
      * <p><b>戻せなくても、ここで新しい例外を投げない。</b>呼ぶ側は入れ替えの失敗を投げ直す
      * ところであり、<b>後始末の失敗で元の理由を上書きすると、何が起きたのか読めなくなる。</b>
      *
-     * <p><b>★ 戻せなかったときだけ記録に残す。</b>そのとき出力先には何も無く、
+     * <p><b>★★ 戻せなかったことは記録に残す。</b>そのとき出力先には何も無く、
      * <b>元は作業場所の中にしか無い</b>——{@link OutputWorkspace} はそれを消さないが、
      * <b>消さなかったことがどこにも残らなければ、利用者にも読む側にも辿れない。</b>
+     * <b>この経路が {@link LogEvent#REPLACED_FILE_KEPT} の唯一の出どころである。</b>
      */
     private static void restore(Path kept, Path to) {
-        if (kept == null) {
-            return;
-        }
         try {
-            Files.move(kept, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
+            replaceWith(kept, to);
+        } catch (PdfjigException e) {
             Logs.warn(LogEvent.REPLACED_FILE_KEPT, e);
+        }
+    }
+
+    /**
+     * 置き換えが済んだので、控えを捨てる。
+     *
+     * <p><b>★★ 済んだかどうかを知っているのはここだけである。</b>{@link OutputWorkspace} から
+     * 見えるのは控えが在るか無いかだけで、<b>在ることをそのまま「まだ済んでいない」と読む</b>
+     * ——だから<b>済んだ時点で捨てるのはこちらの責務である。</b>残すと、
+     * 成功した保存のたびに作業場所が片づかなくなる。
+     *
+     * <p><b>消せなくても保存は成功している。</b>出力先には新しいものが載っており、
+     * <b>失うものは無い</b>——残るのは利用者から見える {@code .pdfjig-*} が 1 つだけである。
+     */
+    private static void dropKept(Path kept) {
+        try {
+            Files.deleteIfExists(kept);
+        } catch (IOException e) {
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
     }
 }

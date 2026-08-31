@@ -188,9 +188,10 @@ abstract class DesktopUiTest {
         FileTime before = Files.getLastModifiedTime(output);
         dialogs.willSaveTo(output);
         clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
-        // ★ 存在を先に見る。置き換えは DeleteFile → MoveFileEx の 2 段に落ちる（DocumentWriter#move）
-        //   ので、出力先が一瞬消える。TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく
-        //   失敗として投げ直すため、見ずに触ると NoSuchFileException で落ちる。
+        // ★ 存在を先に見る。置き換えは「元をどけてから入れる」2 本の改名なので（DocumentWriter#move。
+        //   #119 より前は DeleteFile → MoveFileEx の 2 段だった）、どちらの形でも出力先が一瞬消える。
+        //   TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく失敗として投げ直すため、
+        //   見ずに触ると NoSuchFileException で落ちる。
         waitFor(() -> Files.exists(output) && Files.getLastModifiedTime(output).compareTo(before) > 0);
         WaitForAsyncUtils.waitForFxEvents();
         return output;

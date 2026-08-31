@@ -19,7 +19,7 @@ import java.util.stream.Stream;
  * <b>消さずに</b>ここへ改名してから入れ替えるので、<b>どの瞬間にも「両方無い」が存在しない</b>——
  * 途中で落ちても、元は作業場所の中に実体として残る。<b>だからこの作業場所は、
  * 「書きかけの置き場」であると同時に「元の唯一の控えの置き場」でありうる。</b>
- * 片づけの側がそれを知っている必要がある（{@link #holdsTheOnlyCopy}）。
+ * <b>片づけはそれを見て止まる</b>（{@link #discard}）。
  *
  * <p><b>ファイルではなくディレクトリを作る。</b> 名前だけ押さえて実体を消し、同じ名前で
  * 作り直すのは CWE-377 の形であり、消えてから書かれるまでに隙がある。出力先に書ける第三者が
@@ -43,25 +43,23 @@ final class OutputWorkspace implements AutoCloseable {
     private static final String NAME = "output.pdf";
 
     /**
-     * 退避した元の実体を入れるディレクトリの名前。
+     * 退避した元の実体を置く名前。中は自分のものなので、こちらも固定でよい。
      *
-     * <p><b>★ 中の名前は固定できない。</b>出力先のファイル名をそのまま使う——
-     * {@link #holdsTheOnlyCopy} が「その名前が出力先のフォルダに戻っているか」で
-     * <b>片づけてよいかを決める</b>ためであり、名前を捨てると判断の材料が消える。
+     * <p><b>★★ これが在ることが、そのまま「片づけてはならない」の印である</b>
+     * （{@link #holdsTheOnlyCopy}）。<b>置き換えが済んだら {@code DocumentWriter} が捨てる</b>ので、
+     * <b>残っているのは「まだ済んでいない」ときだけ</b>である。
      *
-     * <p><b>だから 1 階層挟む。</b>{@link #NAME} と同じ高さに置くと、
-     * <b>利用者が {@code output.pdf} という名前で保存したときに衝突する</b>——
-     * 書きかけと控えが同じパスを指す。
+     * <p><b>★ 出力先の名前は持ち込まない。</b>持ち込んで「同じ名前が隣に戻っているか」で
+     * 判断する形も採れるが、それは<b>在るかどうかより弱い手がかりである</b>——
+     * 別の窓や他のアプリがその名前で何かを置けば「済んだ」と読み、
+     * <b>唯一の控えを抱えた作業場所を次の書き出しが消す。</b>
      */
-    private static final String REPLACED = "replaced";
+    private static final String REPLACED = "replaced.pdf";
 
     private final Path workspace;
 
-    private final Path replaced;
-
-    private OutputWorkspace(Path workspace, Path replaced) {
+    private OutputWorkspace(Path workspace) {
         this.workspace = workspace;
-        this.replaced = replaced;
     }
 
     /**
@@ -70,13 +68,10 @@ final class OutputWorkspace implements AutoCloseable {
      * @param output 最終的な出力先。その隣に作る
      */
     static OutputWorkspace nextTo(Path output) {
-        Path target = output.toAbsolutePath();
-        Path directory = target.getParent();
+        Path directory = output.toAbsolutePath().getParent();
         discardAbandoned(directory);
         try {
-            Path workspace = Files.createTempDirectory(directory, PREFIX);
-            Path aside = Files.createDirectory(workspace.resolve(REPLACED)).resolve(target.getFileName());
-            return new OutputWorkspace(workspace, aside);
+            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX));
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
@@ -90,30 +85,17 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * 出力先に元からあった実体の退避先。まだ存在しない。
      *
-     * <p><b>入れ物のディレクトリは先に作ってある</b>——{@link Files#move} は親が無ければ落ちる。
-     * 退避しないまま終わることのほうが多い（新規パスへの書き出し）ので、空のまま片づく。
+     * <p><b>置き換えが済んだら、ここへ退避したものを捨てるのは呼ぶ側である</b>
+     * （{@code DocumentWriter#assemble}）。<b>済んだかどうかを知っているのはあちらだけ</b>で、
+     * こちらから見えるのは「在るか無いか」だけである（{@link #REPLACED}）。
      */
     Path replaced() {
-        return replaced;
+        return workspace.resolve(REPLACED);
     }
 
-    /**
-     * 作業場所を中身ごと片づける。消せなくても保存は失敗させない。
-     *
-     * <p>置き換えに成功していれば、中に残るのは元の実体（控え）だけである。
-     * <b>そこまで済んでいれば控えは要らない</b>——出力先には新しいものが載っている。
-     *
-     * <p><b>★★ 済んでいなければ消さない</b>（{@link #holdsTheOnlyCopy}）。
-     * 退避したあと入れ替えにも巻き戻しにも失敗すると、<b>元の実体はここにしか無い。</b>
-     * 片づけるほうを既定にすると、いちばん失って困る場面でだけ消すことになる
-     * （{@code CLAUDE.md} 優先順位 1）。
-     */
+    /** 作業場所を片づける。消せなくても保存は失敗させない。 */
     @Override
     public void close() {
-        if (holdsTheOnlyCopy(workspace)) {
-            Logs.warn(LogEvent.REPLACED_FILE_KEPT);
-            return;
-        }
         discard(workspace);
     }
 
@@ -132,7 +114,7 @@ final class OutputWorkspace implements AutoCloseable {
      * 書きかけのファイルは開かれているため実際には消せないことが多いが、消せたとしても
      * 起きるのは<b>あちらの保存が失敗すること</b>だけである。置き換えはまだ済んでいないので、
      * あちらの元のファイルは失われない（{@code CLAUDE.md} 優先順位 1）。
-     * <b>★ ただし控えを抱えているものには触らない</b>（{@link #holdsTheOnlyCopy}）——
+     * <b>★ ただし控えを抱えているものには触らない</b>（{@link #discard}）——
      * あちらが既に退避まで進んでいたなら、消すのは<b>あちらの元のファイルそのもの</b>である。
      *
      * <p><b>★★ 落ちた後に残った控えを、次の書き出しが消さない</b>（#119 の受け入れ基準）。
@@ -146,7 +128,6 @@ final class OutputWorkspace implements AutoCloseable {
             // 逆にすると出力先フォルダの全エントリぶん走る。絞り込みの意味は変わらない。
             entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
                     .filter(Files::isDirectory)
-                    .filter(entry -> !holdsTheOnlyCopy(entry))
                     .forEach(OutputWorkspace::discard);
         } catch (IOException | UncheckedIOException e) {
             // 片づけられなくても、これから書くものの成否は変わらない。
@@ -155,37 +136,38 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * その作業場所が、出力先の元の実体を唯一の控えとして抱えているか。
+     * その作業場所が、元の実体を唯一の控えとして抱えているか。
      *
-     * <p><b>見るのは名前だけである。</b>控えは出力先のファイル名のまま置いてあり
-     * （{@link #REPLACED}）、作業場所は出力先と同じフォルダにある。だから
-     * <b>同じ名前が隣に戻っていれば、入れ替えか巻き戻しのどちらかが済んでいる</b>——
-     * 控えはもう唯一の実体ではない。戻っていなければ、<b>ここにしか無い。</b>
+     * <p><b>在るかどうかだけを見る。</b>{@code DocumentWriter} は<b>置き換えが済んだ時点で
+     * 控えを捨てる</b>ので、<b>残っているのは済んでいないときだけである</b>——
+     * 落ちたか、巻き戻しにも失敗したか、そのどちらかである。
      *
-     * <p><b>★ この 1 つの見方で {@link #close} と {@link #discardAbandoned} の両方が済む。</b>
-     * 後者は<b>どの出力先のものだったかを知らない</b>ので、控えの名前がそれを持っている必要がある。
-     * 判断を 2 つに分けると、片方だけ直したときに<b>消す側だけが緩くなる。</b>
-     *
-     * <p><b>読めなければ抱えている側に倒す。</b>消さずに残す損は、利用者から見える
-     * {@code .pdfjig-*} が 1 つ残ることである。取り違えたときの損は、元のファイルが消えることである。
+     * <p><b>★ 出力先の側を見に行かない。</b>「同じ名前が隣に戻っているか」で判断する形も
+     * 採れるが、それは<b>置き換えが済んだことの証拠にならない</b>——別の窓や他のアプリが
+     * その名前で何かを置いただけでも「済んだ」と読み、<b>唯一の控えを抱えた作業場所を
+     * 次の書き出しが消す。</b>作業場所が出力先の隣にあることも、
+     * <b>ボリュームを揃えるための判断であって</b>（このクラスの説明）、
+     * <b>片づけの根拠に使ってよいものではない。</b>
      */
     private static boolean holdsTheOnlyCopy(Path workspace) {
-        Path kept = workspace.resolve(REPLACED);
-        if (!Files.isDirectory(kept)) {
-            // #119 より前の版が残したものと、退避まで進まなかったもの。控えは無い。
-            return false;
-        }
-        Path directory = workspace.getParent();
-        try (Stream<Path> entries = Files.list(kept)) {
-            return entries.anyMatch(entry -> Files.notExists(directory.resolve(entry.getFileName())));
-        } catch (IOException | UncheckedIOException e) {
-            Logs.warn(LogEvent.REPLACED_FILE_KEPT, e);
-            return true;
-        }
+        return Files.exists(workspace.resolve(REPLACED));
     }
 
-    /** ディレクトリを中身ごと消す。消せなくても保存は失敗させない（{@link Logs} には残す）。 */
+    /**
+     * ディレクトリを中身ごと消す。消せなくても保存は失敗させない（{@link Logs} には残す）。
+     *
+     * <p><b>★★ 控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）。
+     * <b>この関門を消す側の 1 か所に置く</b>——呼ぶ側それぞれに置くと、
+     * <b>3 つ目の呼び出しが足されたときに黙って素通りする。</b>
+     *
+     * <p><b>残ったことを記録しない。</b>残すのは正しい振る舞いであって失敗ではなく、
+     * ログに書くのは失敗したことだけである（{@code docs/SPEC.md} §10.4）。
+     * <b>そこへ至る失敗は既に記録されている</b>（{@code DocumentWriter#restore}）。
+     */
     private static void discard(Path directory) {
+        if (holdsTheOnlyCopy(directory)) {
+            return;
+        }
         try (Stream<Path> entries = Files.walk(directory)) {
             entries.sorted(Comparator.reverseOrder()).forEach(OutputWorkspace::deleteQuietly);
         } catch (IOException | UncheckedIOException e) {

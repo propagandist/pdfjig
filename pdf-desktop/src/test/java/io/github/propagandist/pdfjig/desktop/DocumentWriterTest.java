@@ -248,13 +248,16 @@ class DocumentWriterTest {
     /**
      * 退避先。
      *
-     * <p><b>production と同じ形にする</b>——{@code OutputWorkspace#replaced} が返すのは
-     * 作業場所の中の {@code replaced/} で、<b>名前は出力先のファイル名のままである</b>。
-     * ここを 1 つのファイルで代えると、<b>片づけの判断（あちらの {@code holdsTheOnlyCopy}）が
-     * 見ているものと違うものを渡すことになる。</b>
+     * <p><b>★ 本物に訊く。</b>作業場所の名前も控えの名前も {@link OutputWorkspace} の private な
+     * 決めごとであり、<b>ここで組み直すと、あちらが形を変えても気づかないまま緑になる</b>
+     * ——しかも組み直した形は、<b>片づけの判断（あちらの {@code holdsTheOnlyCopy}）が
+     * 見ているものと違う。</b>
+     *
+     * <p><b>閉じない。</b>{@code @TempDir} が片づける。ここで見たいのは
+     * {@link DocumentWriter#move} だけで、作業場所の後始末は別のテストが持つ
+     * （{@code OutputWorkspaceTest}）。
      */
-    private static Path asideFor(Path target) throws IOException {
-        Path workspace = Files.createTempDirectory(target.getParent(), ".pdfjig-");
-        return Files.createDirectory(workspace.resolve("replaced")).resolve(target.getFileName());
+    private static Path asideFor(Path target) {
+        return OutputWorkspace.nextTo(target).replaced();
     }
 }
