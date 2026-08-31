@@ -193,8 +193,14 @@ final class Settings {
      * <p><b>★ 絞った条件は、ここでは起きようがなかった。</b>一時ファイルも同じフォルダに作るので、
      * Windows で {@link AtomicMoveNotSupportedException} になる唯一の条件
      * （{@code ERROR_NOT_SAME_DEVICE}）に当たりようがない。<b>死んだ catch だった。</b>
-     * 同じ形は {@code DocumentWriter#move} にもある。<b>2 つを 1 つにするかは決めていない</b>
-     * （#113）が、<b>落とす条件は揃えてある。</b>
+     *
+     * <p><b>★★ {@code DocumentWriter#move} とは揃えない</b>（#119 で決めた。#113 の宿題）。
+     * あちらは<b>退避してから入れ替える 2 本の改名</b>になり、ここは 2 段のままである。
+     * <b>守っているものが違う</b>——ここが失うのは<b>次にダイアログが開くフォルダの記憶</b>だけで、
+     * <b>失われても選び直せば済み、書けなければ諦める</b>（{@code docs/SPEC.md} §10.2）。
+     * あちらが失うのは<b>利用者の文書</b>である。<b>形を 1 つにすると、諦めてよい側の都合が
+     * 諦めてはならない側に効く</b>か、<b>その逆に、閉じる操作が設定の置き換えのために失敗する。</b>
+     * <b>落とす条件だけは揃えてある</b>（上の★★）。
      */
     private static void replace(Path temporary, Path file) throws IOException {
         try {
