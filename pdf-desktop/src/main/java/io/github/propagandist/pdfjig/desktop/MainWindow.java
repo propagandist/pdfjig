@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
+import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -13,6 +14,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
@@ -79,6 +81,18 @@ public final class MainWindow {
     private final Label status = new Label();
 
     private final BooleanProperty documentOpen = new SimpleBooleanProperty(false);
+
+    /**
+     * 開いている文書が、ディスクの中身と食い違っている。
+     *
+     * <p><b>★★ 立つと保存を押せなくする。</b>上書き保存の後にセッションを寄せ直せなかったとき、
+     * <b>並びは書き出す前のファイルに対する指定のまま</b>で、出どころの中身は書き出したものに
+     * 入れ替わっている。<b>そのまま保存すると同じ変換が二重に掛かる</b>（#118）。
+     *
+     * <p><b>失うものは無い。</b>書き出し自体は成功しておりファイルはできている。
+     * <b>開き直せば続けられる。</b>
+     */
+    private final BooleanProperty stale = new SimpleBooleanProperty(false);
 
     /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
     private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
@@ -166,19 +180,29 @@ public final class MainWindow {
         ReadOnlyBooleanProperty busy = tasks.busy();
 
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
-        ObservableValue<Boolean> needsDocument = documentOpen.not().or(busy);
+        BooleanBinding needsDocument = documentOpen.not().or(busy);
+
+        // ★★ 食い違っている間は、中身に対する操作をさせない（{@link #stale}。#118）。
+        //   並びは書き出す前のファイルに対する指定のままなので、そこから何を書き出しても
+        //   同じ変換が二重に掛かる。
+        //   ★ 「閉じる」はここに含めない——「開き直してください」と出しておいて閉じられないのでは、
+        //     利用者に打つ手が無くなる。「開く」も busy だけで縛ってある（開き直すと印は下りる）。
+        ObservableValue<Boolean> needsFreshDocument = needsDocument.or(stale);
 
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
         ObservableValue<Boolean> breakUnavailable = documentOpen
                 .not()
                 .or(busy)
+                .or(stale)
                 .or(thumbnails.selectedIndexProperty().lessThan(1));
 
-        ObservableValue<Boolean> noBreaks = documentOpen.not().or(busy).or(breakCount.isEqualTo(0));
+        ObservableValue<Boolean> noBreaks =
+                documentOpen.not().or(busy).or(stale).or(breakCount.isEqualTo(0));
 
         // 1 ページしかなければ 1 枚ずつには分けられない。できるのは元と同じ 1 ファイルだけで、
         // 区切りが無いときと違って利用者に打つ手も無い。断るより初めから押させない。
-        ObservableValue<Boolean> notSplittable = documentOpen.not().or(busy).or(pageCount.lessThan(2));
+        ObservableValue<Boolean> notSplittable =
+                documentOpen.not().or(busy).or(stale).or(pageCount.lessThan(2));
 
         return new Actions(
                 new Action(
@@ -196,7 +220,7 @@ public final class MainWindow {
                         ToolIcons.SAVE,
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
                         this::saveAs,
-                        needsDocument),
+                        needsFreshDocument),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
                 new Action("quit", "終了", null, null, null, stage::close, null),
                 new Action(
@@ -206,7 +230,7 @@ public final class MainWindow {
                         ToolIcons.DELETE,
                         new KeyCodeCombination(KeyCode.DELETE),
                         this::deleteSelected,
-                        needsDocument),
+                        needsFreshDocument),
                 new Action(
                         "rotate-right",
                         "右に 90 度回転",
@@ -214,7 +238,7 @@ public final class MainWindow {
                         ToolIcons.ROTATE_RIGHT,
                         new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.CLOCKWISE_90),
-                        needsDocument),
+                        needsFreshDocument),
                 new Action(
                         "rotate-left",
                         "左に 90 度回転",
@@ -222,8 +246,9 @@ public final class MainWindow {
                         ToolIcons.ROTATE_LEFT,
                         new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90),
-                        needsDocument),
-                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsDocument),
+                        needsFreshDocument),
+                new Action(
+                        "keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsFreshDocument),
                 new Action(
                         "toggle-break",
                         "ここで区切る / 区切りを外す",
@@ -232,11 +257,12 @@ public final class MainWindow {
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
                         this::toggleBreak,
                         breakUnavailable),
-                new Action("break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsDocument),
+                new Action(
+                        "break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsFreshDocument),
                 new Action("clear-breaks", "区切りをすべて外す", null, null, null, this::clearBreaks, noBreaks),
-                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsDocument),
-                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsDocument),
-                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsDocument),
+                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsFreshDocument),
+                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsFreshDocument),
+                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsFreshDocument),
                 new Action(
                         "split-pages",
                         "1 ページずつに分割…",
@@ -316,13 +342,99 @@ public final class MainWindow {
         DocumentSession saving = session;
         List<Path> sources = saving.paths();
         List<PageSelection> pages = saving.order().toPageSelections();
+        // 区切りと選択位置は書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
+        List<Boolean> breaks = saving.order().breaks();
+        int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
         // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
         folders.rememberWrittenFile(output);
-        run(() -> DocumentWriter.assemble(sources, pages, output), warnings -> {
-            markSaved(saving, pages);
-            messages.warnings(warnings);
-        });
+        run(
+                () -> {
+                    // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
+                    boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
+                    return new SaveOutcome(replaced, DocumentWriter.assemble(sources, pages, output));
+                },
+                outcome -> {
+                    markSaved(saving, pages);
+                    // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
+                    //   出ている間は入れ子のイベントループに入る——後ろに置くと、
+                    //   利用者が閉じるまで寄せ直しが始まらない。
+                    //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
+                    //   これは例外的な経路ではない。
+                    if (outcome.replacedASource()) {
+                        reopenAt(saving, output, breaks, selected);
+                    }
+                    messages.warnings(outcome.warnings());
+                });
+    }
+
+    /**
+     * 書き出しの結果。
+     *
+     * @param replacedASource 開いている出どころのどれかを置き換えたか（#118）
+     * @param warnings        途中で出た警告
+     */
+    private record SaveOutcome(boolean replacedASource, List<Warning> warnings) {}
+
+    /**
+     * 書き出したファイルへセッションを寄せ直す。
+     *
+     * <p><b>★★ 出どころを置き換えたときだけ呼ぶ。</b>置き換えた後の出どころは書き出したものに
+     * なっており、<b>いまの並び（元のファイルに対する指定）をもう一度当てると同じ変換が二重に掛かる</b>
+     * ——回転は保存のたびに 90 度ずつ回り、削除は 2 回目に止まる（#118）。
+     * <b>別の名前へ保存したときは呼ばない。</b>元のファイルは変わっておらず、いまの並びが正しい。
+     *
+     * <p><b>寄せ直しはふつうの「開く」である。</b>書き出したものは平文であり
+     * （{@code EncryptionPropagation.NONE} しか対応していない）、<b>パスワードを訊かれることはない。</b>
+     *
+     * <p><b>★ 区切りは持ち越す。</b>書き出しに関与しないので寄せ直すと消えるが、
+     * <b>並びは書き出したものと同じなので、位置はそのまま通じる。</b>
+     *
+     * <p><b>★★ 寄せ直せなかったときは、保存を押せなくする</b>（{@link #stale}）。
+     * 起きるのは 2 通り——<b>書き出している間に編集されていた</b>か、
+     * <b>書き出したファイルを開き直せなかった</b>かである。
+     * どちらでもセッションは古いままで、<b>続けて保存すると同じ変換が二重に掛かる。</b>
+     * <b>書き出し自体は成功しておりファイルはできているので、失うものは無い</b>——開き直せば続けられる。
+     *
+     * <p><b>★ 書き出している間の編集を捨てない。</b>{@code busy} を素通りする入口が実際にある
+     * （{@code BackgroundTasks}。#114）。そこで並べ替えや削除がされていたら、
+     * <b>寄せ直すとその編集ごと消える</b>——直しながら別のものを壊すことになる（優先順位 1）。
+     */
+    private void reopenAt(DocumentSession saving, Path output, List<Boolean> breaks, int selected) {
+        if (session != saving) {
+            // 書き出している間に別の文書を開かれていた。そちらを置き換えてはならない。
+            return;
+        }
+        if (saving.order().modified()) {
+            // ★★ 書き出している間に並べ替え・削除・ファイルの解除がされていた。
+            //   寄せ直すとその編集ごと消える——直す前はそれが生き残っていたので、
+            //   直しながら別のものを壊すことになる（CLAUDE.md 優先順位 1）。
+            //   寄せないので古いままである。保存を押せなくして、そこで止める。
+            stale.set(true);
+            updateStatus();
+            return;
+        }
+        tasks.run(
+                () -> DocumentSession.open(output),
+                opened -> {
+                    if (session != saving) {
+                        // 開いている間に別の文書を開かれた／窓が閉じられた。
+                        // ここで入れ替えると、そちらを黙って捨てることになる。
+                        opened.close();
+                        return;
+                    }
+                    adopt(opened);
+                    opened.order().applyBreaks(breaks);
+                    // 先頭へ戻されているので、控えておいた位置へ返す。
+                    thumbnails.selectAndReveal(selected);
+                },
+                failure -> {
+                    // 開き直せなかった。書き出しは成功しておりファイルはできているが、
+                    // セッションは古いままである。押せなくして止める。
+                    stale.set(true);
+                    updateStatus();
+                    messages.failure(failure);
+                });
     }
 
     /**
@@ -571,6 +683,8 @@ public final class MainWindow {
     private void adopt(DocumentSession opened) {
         closeSession();
         session = opened;
+        // 開き直したので食い違いは無い。
+        stale.set(false);
 
         thumbnails.show(opened);
         opened.order().pages().addListener(orderListener);
@@ -581,6 +695,8 @@ public final class MainWindow {
     }
 
     private void closeSession() {
+        // 閉じたのだから食い違いようが無い。次に開くまで印は要らない。
+        stale.set(false);
         if (session == null) {
             return;
         }
@@ -678,6 +794,10 @@ public final class MainWindow {
             }
             if (session.order().modified()) {
                 text.append("（未保存の変更があります）");
+            }
+            if (stale.get()) {
+                // 書き出したファイルはできている。開き直せば続けられる。
+                text.append("（書き出したファイルを開き直せませんでした。開き直してください）");
             }
             if (session.encrypted()) {
                 text.append("（暗号化されています）");

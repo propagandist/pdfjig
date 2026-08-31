@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -11,15 +12,17 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
+ * 出力先の見分け（{@link DocumentWriter#replacesAnyOf}）と、
  * 作業場所から出力先への置き換え（{@link DocumentWriter#move}）。
  *
- * <p>PDF は要らない——ここが扱うのはファイルの移動だけであり、中身は関与しない。
+ * <p>PDF は要らない——ここが扱うのはファイルの移動と見分けだけであり、中身は関与しない。
  *
  * <p><b>★ #113 の欠陥そのもの（Windows で「先に消してから動かす」になっていたこと）は、
  * ここでは赤にできない。</b> 2 段の間に割り込む再現を用意できないためであり、
@@ -39,6 +42,74 @@ class DocumentWriterTest {
 
         assertEquals("新しいファイル", Files.readString(target));
         assertTrue(Files.notExists(source), "移した元が残るなら、それは移動ではなく複製である");
+    }
+
+    @Test
+    @DisplayName("出どころそのものへ書き出すなら、置き換えである")
+    void seesThatItReplacesTheSourceItself(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(source), source));
+    }
+
+    @Test
+    @DisplayName("出どころが複数でも、どれか 1 つに当たれば置き換えである")
+    void seesThatItReplacesOneOfSeveralSources(@TempDir Path directory) throws IOException {
+        Path first = Files.writeString(directory.resolve("a.pdf"), "1 つ目");
+        Path second = Files.writeString(directory.resolve("b.pdf"), "2 つ目");
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(first, second), second));
+    }
+
+    /**
+     * 名前が違っても、同じ実体なら置き換えである。
+     *
+     * <p><b>★ ハードリンクで見る。</b>{@code sub/..} のような書き方では足りない——
+     * {@link Path#normalize()} が字面だけで畳むので、<b>名前で比べる実装でも通ってしまい、
+     * {@link Files#isSameFile} を選んだ理由を守れない。</b>
+     * <b>ハードリンクは字面が一致しようがないので、実体で比べていなければ落ちる。</b>
+     */
+    @Test
+    @DisplayName("名前が違っても、同じ実体なら置き換えである")
+    void seesThroughADifferentNameForTheSameFile(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+        Path sameFileOtherName = Files.createLink(directory.resolve("link.pdf"), source);
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(source), sameFileOtherName));
+    }
+
+    /**
+     * 実体で比べられなければ、置き換えであるとみなす。
+     *
+     * <p><b>★★ 迷ったら安全側に倒す。</b>外したときの損は「要らない開き直しが 1 回走る」だけで、
+     * 取り違えたときの損は<b>同じ変換が二重に掛かって文書が壊れること</b>である（#118）。
+     */
+    @Test
+    @DisplayName("実体で比べられなければ、置き換えであるとみなす")
+    void treatsAnUncomparablePairAsAReplacement(@TempDir Path directory) throws IOException {
+        Path output = Files.writeString(directory.resolve("out.pdf"), "書き出し先");
+        // 出どころが消えていれば isSameFile は投げる。開いている文書では起きないが、
+        // 起きたときにどちらへ倒すかがここの関心事である。
+        Path vanished = directory.resolve("gone.pdf");
+
+        assertTrue(DocumentWriter.replacesAnyOf(List.of(vanished), output));
+    }
+
+    @Test
+    @DisplayName("別のファイルへ書き出すなら、置き換えではない")
+    void seesThatANewNameIsNotAReplacement(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+        Path other = Files.writeString(directory.resolve("other.pdf"), "別のファイル");
+
+        assertFalse(DocumentWriter.replacesAnyOf(List.of(source), other));
+    }
+
+    @Test
+    @DisplayName("まだ無いファイルへ書き出すなら、置き換えではない")
+    void seesThatAFileThatDoesNotExistYetIsNotAReplacement(@TempDir Path directory) throws IOException {
+        Path source = Files.writeString(directory.resolve("doc.pdf"), "元のファイル");
+
+        assertFalse(DocumentWriter.replacesAnyOf(List.of(source), directory.resolve("new.pdf")));
     }
 
     /**

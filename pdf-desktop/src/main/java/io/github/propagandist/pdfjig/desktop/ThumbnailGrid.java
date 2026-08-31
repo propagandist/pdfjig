@@ -197,8 +197,12 @@ final class ThumbnailGrid {
      * ページを選び、見えるところまでスクロールする。
      *
      * <p>選択が画面の外へ出うる操作から呼ぶ。既に見えているなら {@link #reveal} が何もしない。
+     *
+     * <p><b>★ {@code MainWindow} からも呼ぶ。</b>上書き保存の後にセッションを寄せ直すと
+     * {@link #show} が先頭へ戻すので、控えておいた位置をここで返す（#118）。
+     * <b>範囲の外なら {@link #reveal} が何もしない。</b>
      */
-    private void selectAndReveal(int index) {
+    void selectAndReveal(int index) {
         select(index);
         reveal(index);
     }

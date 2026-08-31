@@ -430,6 +430,45 @@ class PageOrderTest {
     }
 
     @Test
+    @DisplayName("区切りの付き方を取り出して、そのまま当て直せる")
+    void carriesBreaksAcrossARebase() {
+        PageOrder before = PageOrder.of(6);
+        before.toggleBreakAt(2);
+        before.toggleBreakAt(4);
+
+        // 上書き保存の後に開き直した側。並びは同じで、区切りだけが落ちている（#118）。
+        PageOrder after = PageOrder.of(6);
+        after.applyBreaks(before.breaks());
+
+        assertEquals(before.breaks(), after.breaks());
+        assertEquals(2, after.breakCount());
+    }
+
+    @Test
+    @DisplayName("当て直しは、いま付いている区切りを置き換える")
+    void applyBreaksReplacesWhatIsThere() {
+        PageOrder order = PageOrder.of(4);
+        order.toggleBreakAt(1);
+
+        order.applyBreaks(List.of(false, false, true, false));
+
+        assertFalse(order.hasBreakAt(1), "当て直しは差分ではなく置き換えである");
+        assertTrue(order.hasBreakAt(2));
+    }
+
+    @Test
+    @DisplayName("当て直しは、数が合わない分を無視する")
+    void applyBreaksIgnoresWhatDoesNotFit() {
+        PageOrder order = PageOrder.of(3);
+
+        order.applyBreaks(List.of(false, true));
+
+        assertTrue(order.hasBreakAt(1));
+        assertFalse(order.hasBreakAt(2), "渡されていない位置に区切りを付けてはならない");
+        assertEquals(1, order.breakCount());
+    }
+
+    @Test
     @DisplayName("区切りをすべて外せる")
     void clearsBreaks() {
         PageOrder order = PageOrder.of(4);

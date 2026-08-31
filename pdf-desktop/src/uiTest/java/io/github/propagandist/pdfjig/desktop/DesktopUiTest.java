@@ -2,8 +2,13 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.ai.NoOpProvider;
+import io.github.propagandist.pdfjig.core.PageText;
+import io.github.propagandist.pdfjig.core.PdfBoxTextExtraction;
+import io.github.propagandist.pdfjig.core.PdfDocument;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -161,6 +166,37 @@ abstract class DesktopUiTest {
     }
 
     /**
+     * 既にあるファイルへ上書き保存し、書き終わるまで待つ。
+     *
+     * <p><b>★★ {@link #saveAs} は既存ファイルには使えない。</b>あちらは
+     * {@code Files.exists(output) && size > 0} で待つので、<b>既にあるファイルを渡すと
+     * 書き出す前に条件が満たされ、待てなくなる。</b>この塞がりのために「既存ファイルへの上書き」は
+     * uiTest を一度も通っておらず、{@code docs/HANDOVER.md} 4-4 の 10 番が
+     * 人が見る側に置いてある理由の 1 つになっていた。
+     *
+     * <p><b>更新時刻が進むのを待つ。</b>中身で比べる形は採れない——<b>2 回目の上書きは
+     * 同じ内容を書くので、中身は変わらないのが正しい</b>（それがまさに #118 で直したことである）。
+     *
+     * <p><b>★ 寄せ直しの終わりは待たない。</b>上書き保存は書いた後にセッションを寄せ直すが
+     * （#118）、<b>その間ボタンは押せないので、次の {@link #clickUntilAccepted} が
+     * 押し直しながら待つ。</b>ここで busy を覗くと、書き終わりと寄せ直しの開始の間で
+     * 取り違える。
+     *
+     * @return 書き出されたファイル
+     */
+    Path saveOver(FxRobot robot, Path output) throws Exception {
+        FileTime before = Files.getLastModifiedTime(output);
+        dialogs.willSaveTo(output);
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        // ★ 存在を先に見る。置き換えは DeleteFile → MoveFileEx の 2 段に落ちる（DocumentWriter#move）
+        //   ので、出力先が一瞬消える。TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく
+        //   失敗として投げ直すため、見ずに触ると NoSuchFileException で落ちる。
+        waitFor(() -> Files.exists(output) && Files.getLastModifiedTime(output).compareTo(before) > 0);
+        WaitForAsyncUtils.waitForFxEvents();
+        return output;
+    }
+
+    /**
      * 節点が押せるようになるのを待ってから押す。
      *
      * <p>ダイアログの中身はこれを通すこと。窓が出る前の節点をクリックすると
@@ -208,6 +244,22 @@ abstract class DesktopUiTest {
 
     static String statusText(FxRobot robot) {
         return robot.lookup("#status-label").queryAs(Label.class).getText();
+    }
+
+    /**
+     * 書き出された PDF の、ページごとの本文。
+     *
+     * <p><b>枚数だけを見ても、どのページが残ったかは分からない。</b>
+     * {@code TestPdfs.withText} で作った出力はこれで中身まで確かめる。
+     */
+    static List<String> pageTexts(Path pdf) {
+        try (PdfDocument document = PdfDocument.open(pdf)) {
+            return new PdfBoxTextExtraction()
+                    .extractByPage(document).stream()
+                            .map(PageText::text)
+                            .map(String::trim)
+                            .toList();
+        }
     }
 
     static String textOf(FxRobot robot, String id) {
