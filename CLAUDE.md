@@ -141,6 +141,7 @@ Public リポジトリであり、一度コミットされた機密文書は取�
 | メニュー | `menu-<操作>` | `menu-open` `menu-about` |
 | 主画面の部品 | `<役割>` | `thumbnail-list` `status-label` |
 | サムネイル | `thumbnail-tile-<並びの位置>` | `thumbnail-tile-0` |
+| ファイル一覧の「×」 | `source-remove-<並びの位置>` | `source-remove-0` |
 | ダイアログ | `<用途>-dialog` | `password-dialog` `range-dialog` |
 | ダイアログの中身 | `<用途>-<役割>` | `password-field` `range-first` `page-count-input` |
 

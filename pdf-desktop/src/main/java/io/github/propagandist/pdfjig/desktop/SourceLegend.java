@@ -30,6 +30,18 @@ final class SourceLegend {
     private static final double NAME_WIDTH = 260;
 
     /**
+     * 「×」の id の頭。後ろに並びの位置が付く（{@code source-remove-0}）。
+     *
+     * <p><b>★ 位置で区別するのは、ファイルごとに 1 つずつ増えるからである</b>——
+     * サムネイルのタイルと同じ形にしてある（{@code CLAUDE.md}「命名」）。
+     *
+     * <p><b>★ 消えたぶんの id が残らないことは {@link #update} が保っている。</b>
+     * あちらは節点を作り直すので、タイルのような付け替えが要らない——
+     * <b>使い回す形に変えるなら、そこで id も付け替えること。</b>
+     */
+    private static final String REMOVE_ID_PREFIX = "source-remove-";
+
+    /**
      * ファイルが多いと 1 行に収まらない。切り捨てず折り返す。
      *
      * <p>横スクロールにすると、隠れているファイルがあること自体に気づけない。
@@ -113,10 +125,21 @@ final class SourceLegend {
         count.getStyleClass().add("source-count");
 
         Button remove = new Button();
+        // ★★ この道具で唯一取り消せない操作の入口である（#115）。
+        //   id はテストとの契約（CLAUDE.md「命名」）、accessibleText は支援技術から見える
+        //   唯一の手がかりである——Windows の UI Automation に setId は届かない。
+        remove.setId(REMOVE_ID_PREFIX + sourceIndex);
         remove.getStyleClass().add("source-remove");
         remove.setGraphic(ToolIcons.of(ToolIcons.REMOVE));
         remove.setFocusTraversable(false);
-        remove.setTooltip(new Tooltip(name + " をこの編集から外す"));
+        // ★ 名前を入れる。「外す」だけだと、ファイルが 3 つ並んだとき
+        //   読み上げからは同じボタンが 3 つあるようにしか聞こえない——
+        //   取り消せない操作でそれは危うい（CLAUDE.md 優先順位 2）。
+        //   ★ 新しい漏れにはならない。この一覧は既に名前を出しており、
+        //     ツールチップにも同じ文が入っている。
+        String action = name + " をこの編集から外す";
+        remove.setTooltip(new Tooltip(action));
+        remove.setAccessibleText(action);
         remove.setOnAction(event -> onRemove.accept(sourceIndex));
 
         HBox chip = new HBox(6, swatch, label, count, remove);
