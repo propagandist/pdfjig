@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -165,5 +166,42 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         // 同じ並びのまま別の名前へもう一度。元の doc.pdf を見ているので結果は変わらない。
         assertEquals(List.of(90, 0, 0), TestPdfs.rotationsOf(saveAs(robot, dir.resolve("out2.pdf"))));
         assertEquals(List.of(0, 0, 0), TestPdfs.rotationsOf(document), "別の名前へ保存したのに元が書き換わっている");
+    }
+
+    /**
+     * 上書き保存のあと、フォルダに隠しものが残らない。
+     *
+     * <p><b>★★ 「置き換えが済んだら控えを捨てる」という後始末を見る</b>（#119）。
+     * 退避した控えが残っていると {@code OutputWorkspace} は<b>作業場所ごと残す</b>——
+     * <b>「元がここにしか無い」の印だからである。</b>捨て忘れると、
+     * <b>保存が成功するたびに {@code .pdfjig-*} が 1 つずつ増え、二度と消えない。</b>
+     *
+     * <p><b>★ ここでしか見られない。</b>捨てるのは {@code DocumentWriter#assemble} で、
+     * <b>そこを通すには実物の PDF が要る</b>——{@code DocumentWriterTest} は
+     * {@code move} までしか呼べない（あちらは PDF を持たない側である）。
+     *
+     * <p><b>待つのは、後始末が書き出しの後ろで続くからである。</b>{@code saveOver} が
+     * 見ているのは出力先の更新時刻までで、作業場所を片づけるのはその先にある。
+     */
+    @Test
+    void 上書き保存のあとフォルダに隠しものが残らない(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path document = TestPdfs.plain(dir.resolve("doc.pdf"), 2);
+        openFixture(robot, document);
+
+        robot.clickOn("#thumbnail-tile-0");
+        robot.clickOn("#tool-rotate-right");
+        saveOver(robot, document);
+
+        // ★ 中身も見る。片づいたことだけを見ると、何も書けていない保存でも緑になる。
+        assertEquals(List.of(90, 0), TestPdfs.rotationsOf(document), "書き出せていない");
+
+        // ★ 待つのは後始末が書き出しの後ろで続くからである。saveOver が見ているのは
+        //   出力先の更新時刻までで、作業場所を片づけるのはその先にある。
+        //   ★★ 上限で落ちるのは TimeoutException であり、理由は出ない。捕まえて書く。
+        try {
+            waitFor(() -> namesIn(dir).equals(List.of("doc.pdf")));
+        } catch (TimeoutException e) {
+            throw new AssertionError("置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）。残っているもの: " + namesIn(dir), e);
+        }
     }
 }

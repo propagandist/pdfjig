@@ -2,8 +2,10 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -12,10 +14,13 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -27,8 +32,12 @@ import org.junit.jupiter.api.io.TempDir;
  * <p><b>★ #113 の欠陥そのもの（Windows で「先に消してから動かす」になっていたこと）は、
  * ここでは赤にできない。</b> 2 段の間に割り込む再現を用意できないためであり、
  * <b>1 回の {@code MoveFileEx} になっていることは実装を読んで確かめる</b>
- * （#113 の受け入れ基準がそう定めている）。<b>ここが見ているのは、その直しが
- * 連れてきた 2 つの縛りである。</b>
+ * （#113 の受け入れ基準がそう定めている）。
+ *
+ * <p><b>★★ #119 の側は赤にできる。</b>「元をどけてから入れる」形は<b>退避したものが
+ * 残ることで外から見える</b>ので、割り込みを再現しなくても
+ * {@link #setsTheOriginalAsideInsteadOfReplacingIt} が直す前の実装で落ちる。
+ * <b>置き換えで消してしまうなら、戻すものが無い。</b>
  */
 class DocumentWriterTest {
 
@@ -38,10 +47,99 @@ class DocumentWriterTest {
         Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
         Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
 
-        DocumentWriter.move(source, target);
+        DocumentWriter.move(source, target, workspaceFor(target));
 
         assertEquals("新しいファイル", Files.readString(target));
         assertTrue(Files.notExists(source), "移した元が残るなら、それは移動ではなく複製である");
+    }
+
+    /**
+     * 元をどけてから入れる。置き換えを通らない。
+     *
+     * <p><b>★★ これが #119 の直しそのものを見ている。</b>置き換え（{@code REPLACE_EXISTING}）で
+     * 済ませていると<b>退避先には何も残らない</b>ので、直す前の実装ではここが落ちる。
+     *
+     * <p><b>控えが残ることは、実装の都合ではなく約束である。</b>2 本の改名の間で落ちても
+     * 元が実体として残る、という保証はこれと同じものを見ている——<b>控えが無いなら、
+     * 落ちたときに戻すものが無い。</b>
+     */
+    @Test
+    @DisplayName("元をどけてから入れる。置き換えを通らない")
+    void setsTheOriginalAsideInsteadOfReplacingIt(@TempDir Path directory) throws IOException {
+        Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
+        Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
+        OutputWorkspace workspace = workspaceFor(target);
+
+        DocumentWriter.move(source, target, workspace);
+
+        assertEquals("新しいファイル", Files.readString(target));
+        assertEquals("元のファイル", Files.readString(workspace.replaced()), "元を退避せずに置き換えている。落ちたときに戻すものが無い（#119）");
+    }
+
+    /**
+     * 入れ替えに失敗したら、元が戻る。
+     *
+     * <p><b>書けたものが無い状態で頼む。</b>{@link Files#move} は原子的なほうも普通のほうも
+     * {@code NoSuchFileException} で落ちるので、<b>退避まで済んで入れ替えだけが失敗した状態</b>を
+     * そのまま作れる。<b>実際にそこへ落ちるのは、退避の後に出力先が書けなくなった場合である。</b>
+     */
+    @Test
+    @DisplayName("入れ替えに失敗したら、元が戻る")
+    void putsTheOriginalBackWhenTheSwapFails(@TempDir Path directory) throws IOException {
+        Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
+        OutputWorkspace workspace = workspaceFor(target);
+        Path neverWritten = directory.resolve("nothing-was-written.pdf");
+
+        assertThrows(PdfjigException.class, () -> DocumentWriter.move(neverWritten, target, workspace));
+
+        assertEquals("元のファイル", Files.readString(target), "巻き戻していない。元は退避先にしか無い（#119）");
+        assertTrue(Files.notExists(workspace.replaced()), "戻したのに控えが残るなら、それは移動ではなく複製である");
+    }
+
+    @Test
+    @DisplayName("出力先がまだ無ければ、退避するものが無い")
+    void hasNothingToSetAsideWhenTheOutputIsNew(@TempDir Path directory) throws IOException {
+        Path target = directory.resolve("out.pdf");
+        Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
+        OutputWorkspace workspace = workspaceFor(target);
+
+        DocumentWriter.move(source, target, workspace);
+
+        assertEquals("新しいファイル", Files.readString(target));
+        assertTrue(Files.notExists(workspace.replaced()), "退避するものが無いのに何かを置いている");
+    }
+
+    /**
+     * 読み取り専用の出力先には手を出さない。
+     *
+     * <p><b>★★ 改名は読み取り専用属性を無視して通る。</b>見ずに退避すると、
+     * <b>利用者が読み取り専用にした文書が警告なく置き換わり、属性まで落ちる</b>——
+     * 2026-09-01 に Windows 10 / JDK 21.0.8 で実測した（退避も入れ替えも成功し、
+     * 出来上がったファイルは読み取り専用ではなくなっていた）。
+     * <b>#119 より前は置き換えが {@code AccessDenied} で断られ、保存そのものが失敗していた</b>ので、
+     * これは直しが連れてきた振る舞いの変化である（{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>★ 縛れるのは Windows でだけである。</b>POSIX の書き込み権限は
+     * {@code @TempDir} の下では立て直せる（所有者は書き込み権を付け直せる）ため、
+     * <b>読み取り専用属性を持つ側でしか同じ条件を作れない。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("読み取り専用の出力先には手を出さない")
+    void refusesToTouchAReadOnlyOutput(@TempDir Path directory) throws IOException {
+        Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
+        Files.getFileAttributeView(target, DosFileAttributeView.class).setReadOnly(true);
+        Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
+        OutputWorkspace workspace = workspaceFor(target);
+
+        assertThrows(PdfjigException.class, () -> DocumentWriter.move(source, target, workspace));
+
+        assertEquals("元のファイル", Files.readString(target), "読み取り専用の文書が黙って置き換わっている");
+        assertTrue(
+                Files.getFileAttributeView(target, DosFileAttributeView.class)
+                        .readAttributes()
+                        .isReadOnly(),
+                "読み取り専用のままでなければ、利用者の意思表示を落としている");
     }
 
     @Test
@@ -115,24 +213,24 @@ class DocumentWriterTest {
     /**
      * 開いたままの文書へ上書き保存できる。
      *
-     * <p><b>★★ 原子的な移動だけにすると、ここが赤になる——ただし Windows でだけである。</b>
-     * {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は<b>置き換え先が開かれていると
-     * {@code AccessDeniedException} で断る</b>（2026-08-30、Windows 10 / JDK 21.0.8 で実測）。
-     * <b>POSIX の {@code rename(2)} は開かれていても置き換えるので、CI の ubuntu 側では
-     * 条件を絞っても緑のままである</b>——<b>この縛りを持っているのは windows 側だけである。</b>
-     *
-     * <p><b>そして画面から上書き保存するとき、その置き換え先を開いているのは pdfjig 自身である。</b>
-     * {@code DocumentSession} が持つ {@code PdfDocument} は PDFBox の
-     * {@code RandomAccessReadBufferedFile} 経由で {@link FileChannel} を握り続け、
-     * <b>書き出しの元になっている文書は、保存の間に閉じられない</b>
+     * <p><b>★★ この経路が #119 の中心である。</b>画面から上書き保存するとき、
+     * <b>置き換え先を開いているのは pdfjig 自身である</b>——{@code DocumentSession} が持つ
+     * {@code PdfDocument} は PDFBox の {@code RandomAccessReadBufferedFile} 経由で
+     * {@link FileChannel} を握り続け、<b>書き出しの元になっている文書は、保存の間に閉じられない</b>
      * （{@code DocumentSession#remove} は外した文書を閉じるが、外したものはもう元ではない）。
-     * ここで使う {@link FileChannel#open} は、それと同じ開き方である。
+     * そして {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は<b>置き換え先が開かれていると
+     * {@code AccessDeniedException} で断る</b>（2026-08-30、Windows 10 / JDK 21.0.8 で実測）ので、
+     * <b>#113 の直しはこの経路にだけ届いていなかった。</b>
      *
-     * <p>だから {@link DocumentWriter#move} は
-     * {@link java.nio.file.AtomicMoveNotSupportedException} だけに絞らず、
-     * <b>断られた理由を問わず普通の置き換えに落とす。</b>絞ると「開いている文書へ
-     * 上書き保存する」が必ず失敗する——<b>{@code docs/HANDOVER.md} 4-4 の 10 番そのものであり、
-     * uiTest はその経路を一度も通っていない。</b>
+     * <p><b>★★ ここで使う {@link FileChannel#open} は、PDFBox 3.0.5 と同じ開き方である。</b>
+     * <b>そこが要である</b>——{@link Files#move} での改名は
+     * <b>{@code FILE_SHARE_DELETE} を持つ開き方でなければ共有違反で落ちる</b>。
+     * <b>{@code java.io.RandomAccessFile} で開くと、退避そのものが落ちる</b>（2026-08-31 実測）。
+     * <b>だから PDFBox が開き方を変えれば、上書き保存は壊れるのにここは緑のままである</b>
+     * ——それを見るのは {@code OverwriteSaveUiTest} の側である。
+     *
+     * <p><b>★ POSIX の {@code rename(2)} は開かれていても通るので、CI の ubuntu 側では
+     * どう書いても緑になる</b>——<b>この縛りを持っているのは windows 側だけである。</b>
      */
     @Test
     @DisplayName("開いたままの文書へ上書き保存できる")
@@ -141,7 +239,7 @@ class DocumentWriterTest {
         Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
 
         try (FileChannel held = FileChannel.open(target, StandardOpenOption.READ)) {
-            DocumentWriter.move(source, target);
+            DocumentWriter.move(source, target, workspaceFor(target));
 
             // 掴んだ実体は置き換わらず、名前の指す先だけが変わる。サムネイルが古い絵を
             // 出し続けるのはこのためであり、保存が失敗したことを意味しない。
@@ -176,10 +274,24 @@ class DocumentWriterTest {
         try (FileSystem foreign = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
             Path source = Files.writeString(foreign.getPath("/new.pdf"), "新しいファイル");
 
-            DocumentWriter.move(source, target);
+            DocumentWriter.move(source, target, workspaceFor(target));
 
             assertTrue(Files.notExists(source), "移した元が残るなら、それは移動ではなく複製である");
         }
         assertEquals("新しいファイル", Files.readString(target));
+    }
+
+    /**
+     * 作業場所。
+     *
+     * <p><b>★ 本物を使う。</b>作業場所の名前も控えの名前も印の名前も {@link OutputWorkspace} の
+     * private な決めごとであり、<b>ここで組み直すと、あちらが形を変えても気づかないまま緑になる。</b>
+     *
+     * <p><b>閉じない。</b>{@code @TempDir} が片づける。ここで見たいのは
+     * {@link DocumentWriter#move} だけで、作業場所の後始末は別のテストが持つ
+     * （{@code OutputWorkspaceTest}）。
+     */
+    private static OutputWorkspace workspaceFor(Path target) {
+        return OutputWorkspace.nextTo(target);
     }
 }

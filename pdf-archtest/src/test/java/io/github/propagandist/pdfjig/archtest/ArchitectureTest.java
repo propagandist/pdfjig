@@ -7,6 +7,7 @@ import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nam
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -14,7 +15,10 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
@@ -304,7 +308,7 @@ class ArchitectureTest {
     }
 
     /**
-     * 既にあるファイルを置き換える書き出しを、確認を取れる경路だけに残す。
+     * 既にあるファイルを置き換える書き出しを、確認を取れる経路だけに残す。
      *
      * <p>{@code DocumentWriter#assemble} は {@code OutputWorkspace} に書いてから
      * <b>{@code REPLACE_EXISTING} で置き換える</b>——pdf-core が「既存の出力を拒む」約束の上に、
@@ -360,19 +364,17 @@ class ArchitectureTest {
     }
 
     /**
-     * 置き換えは原子的な移動を頼む。
+     * 出力先へ改名するところは、どこも原子的な移動を頼む。
      *
      * <p><b>★★ これは実装の中身を縛る、この一覧で唯一のルールである。</b>ふつうはやらない——
-     * だが<b>ここは「頼んでいること」そのものが直しであり、それを見るテストが 1 本も書けなかった。</b>
+     * だが<b>ここは「頼んでいること」そのものが直しであり、それを見るテストが 1 本も書けなかった</b>
+     * （#113）。頼まなければ断られようがないので、フォールバックを見るテストは素通りし、
+     * 置き換えを見るテストは 2 段でも成功する。<b>消しても何も鳴らない。</b>
      *
-     * <p>{@code DocumentWriterTest} の 3 本は、<b>{@code ATOMIC_MOVE} を消しても全部緑になる</b>
-     * （実測）。頼まなければ断られようがないので、フォールバックを見るテストは素通りし、
-     * 置き換えを見るテストは 2 段でも成功するからである。<b>#113 の直しは、消しても何も鳴らない。</b>
-     *
-     * <p><b>欠陥そのもの（2 段の間に割り込まれること）は赤にできない</b>——再現を用意できない
-     * （#113 の受け入れ基準がそう定めている）。<b>赤にできないのは欠陥であって、直しではない。</b>
-     * {@code CLAUDE.md}「配る差分の門」3 が求める「縛れる形になったものはテストか ArchUnit へ」を、
-     * 縛れる側で満たす。
+     * <p><b>★★ 呼ぶ場所ごとに見る</b>（#119）。<b>「クラスのどこかで 1 度は触る」では足りない</b>——
+     * #119 で改名が 3 か所（退避・入れ替え・巻き戻し）に増えたので、
+     * <b>1 か所から外しても他が残っていれば緑になる。</b>そして<b>いちばん外されやすいのは、
+     * ふつうは通らない巻き戻しである。</b>
      *
      * <p><b>★ ArchRule の形では書けない。</b>{@code should().accessField} は
      * 「触るフィールドはすべてそれであること」を意味し、<b>入れ子の {@code SplitResult} が
@@ -380,20 +382,35 @@ class ArchitectureTest {
      * 取り込んだクラスを直に見る。<b>空振りは、探す相手が見つからなければ落ちることで防いでいる。</b>
      */
     @Test
-    @DisplayName("書き出しの置き換えは、原子的な移動を頼む")
-    void replaceAsksForAnAtomicMove() {
+    @DisplayName("出力先へ改名するところは、どこも原子的な移動を頼む")
+    void everyRenameAsksForAnAtomicMove() {
         String atomicMove = StandardCopyOption.class.getName() + ".ATOMIC_MOVE";
         assertTrue(
                 classes.stream().anyMatch(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER)),
                 DOCUMENT_WRITER + " が取り込まれていない。このテストは何も見ていない");
-        assertTrue(
-                classes.stream()
-                        .filter(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER))
-                        .flatMap(javaClass -> javaClass.getFieldAccessesFromSelf().stream())
-                        .anyMatch(access -> access.getTarget().getFullName().equals(atomicMove)),
+
+        Set<String> renames = classes.stream()
+                .filter(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER))
+                .flatMap(javaClass -> javaClass.getMethods().stream())
+                .filter(method -> method.getCallsFromSelf().stream()
+                        .anyMatch(call -> call.getTarget().getFullName().startsWith(Files.class.getName() + ".move")))
+                .map(method -> method.getName())
+                .collect(Collectors.toSet());
+        assertEquals(Set.of("setAside", "replaceWith"), renames, "改名する場所が増減している。増えたなら、そこも原子的を頼んでいるかをここで見ること（#119）");
+
+        Set<String> atomic = classes.stream()
+                .filter(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER))
+                .flatMap(javaClass -> javaClass.getMethods().stream())
+                .filter(method -> method.getFieldAccesses().stream()
+                        .anyMatch(access -> access.getTarget().getFullName().equals(atomicMove)))
+                .map(method -> method.getName())
+                .collect(Collectors.toSet());
+        assertEquals(
+                renames,
+                atomic,
                 "頼まないと Windows では DeleteFile → MoveFileEx の 2 段になり、その間に割り込まれると"
                         + "元のファイルも置き換えるはずのものも残らない（#113）。"
-                        + "消しても DocumentWriterTest は全部緑になるので、縛れるのはここだけである");
+                        + "1 か所だけ外しても DocumentWriterTest は全部緑になるので、縛れるのはここだけである");
     }
 
     /**

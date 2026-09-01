@@ -39,9 +39,10 @@ final class DocumentWriter {
      * 上書きを利用者に確認するが、pdf-core は既存の出力を拒む。先に消してしまうと
      * 書き込みに失敗したときに元のファイルが失われる。
      *
-     * <p><b>★ 置き換えが「失敗しても元のファイルが残る」と言い切れるのは、原子的な移動が
-     * 通った場合だけである</b>（{@link #move}）。<b>通らなかった経路は、いまも
-     * 「先に消してから動かす」ままである。</b>
+     * <p><b>★★ 置き換えは「元をどけてから入れる」2 本の改名である</b>（{@link #move}。#119）。
+     * <b>出力先を開いたまま上書き保存する経路も、そこを通る</b>——{@code #113} で足した
+     * 原子的な置き換えは<b>その経路だけを断られており</b>、いちばんありふれた使い方
+     * （開いて、直して、同じ名前で保存する）が<b>「先に消してから動かす」に落ちていた。</b>
      *
      * <p><b>この経路だけが pdf-core の「既存の出力を拒む」約束の上に層を重ねている。</b>
      * ダイアログで確認が取れているので置き換えてよい、という判断であり、
@@ -75,7 +76,7 @@ final class DocumentWriter {
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
             operations.assemble(sources, pages, workspace.file());
-            move(workspace.file(), output);
+            move(workspace.file(), output, workspace);
         }
         return List.copyOf(warnings);
     }
@@ -155,57 +156,173 @@ final class DocumentWriter {
     /**
      * 作業場所から出力先へ移す。
      *
-     * <p><b>まず原子的な移動を頼む。</b> 頼まないと Windows では {@code DeleteFile} →
-     * {@code MoveFileEx} の 2 段になり、<b>先に消してから動かす</b>——その 2 つの間に
-     * 割り込まれると、元のファイルも置き換えるはずのものも無い状態になる（#113）。
-     * {@link OutputWorkspace} が作業場所を出力先の隣に作っているのは、
-     * <b>同じボリュームなら 1 回の {@code MoveFileEx} で済むから</b>である。
+     * <p><b>★★ 元をどけてから入れる。2 本の改名であり、置き換えは 1 度もしない</b>（#119）。
+     * 出力先に何かあれば、まず作業場所へ<b>改名して退避し</b>（{@link #setAside}）、
+     * 空いたところへ書けたものを入れる（{@link #replaceWith}）。
      *
-     * <p><b>★★ 断られたら、理由を問わず普通の置き換えに落とす。</b>
-     * {@link AtomicMoveNotSupportedException} だけに絞ってはならない——<b>原子的な置き換えは、
-     * 出力先が開かれていると {@code AccessDeniedException} で断る。</b>そして
-     * <b>画面から上書き保存するとき、その出力先を開いているのは pdfjig 自身でありうる</b>
-     * ——{@code DocumentSession} は<b>書き出しの元になっている文書を、保存の間に閉じない。</b>
-     * 絞ると<b>「開いている文書へ上書き保存する」が必ず失敗する</b>——2026-08-30 に
-     * Windows 10 / JDK 21.0.8 で実測した（{@code DocumentWriterTest}）。
+     * <p><b>これで「両方無い」がどの瞬間にも存在しない。</b>2 本の間で落ちても、
+     * 元は作業場所の中に実体として残る（{@link OutputWorkspace} は控えを抱えた作業場所を消さない）。
+     * 2 本目に失敗したら 1 本目を巻き戻す（{@link #restore}）。
      *
-     * <p><b>★ 断る理由は、実際には 1 つしかない。</b>{@link OutputWorkspace} は作業場所を
-     * 出力先の<b>同じフォルダ</b>に作るので、Windows で
-     * {@link AtomicMoveNotSupportedException} になる唯一の条件（{@code ERROR_NOT_SAME_DEVICE}）は
-     * <b>起こりようがない。</b>それでも {@code IOException} で受けるのは、
-     * <b>断る理由を数え上げないためである</b>——数え上げた瞬間に、次に増えた理由で落ちなくなる。
+     * <p><b>★ 済んだあとも控えそのものは残す。</b>片づけるのは {@link OutputWorkspace} の仕事で、
+     * ここが下ろすのは<b>「抱えている」という印だけである</b>（{@link OutputWorkspace#releaseOriginal}）。
+     * <b>控えを印にすると、いちど消せなかっただけで片づけが永久に閉じる</b>
+     * （{@link OutputWorkspace#HELD}）。
      *
-     * <p><b>★★ 落ちた先は 2 段のままであり、そこで失敗すると元のファイルも
-     * 置き換えるはずのものも残らない。</b>{@code DeleteFile} が済んだ後で
-     * {@code MoveFileEx} が失敗すると元は消えており、{@link #assemble} の
-     * try-with-resources が作業場所ごと書けていたものを片づける。
-     * <b>それでも先に原子的を試す価値があるのは、出力先を誰も開いていない経路が
-     * それで 1 回の {@code MoveFileEx} になる</b>からである。
-     * {@code Settings#replace} も同じ形だが、あちらは落とす条件が狭い。
-     * <b>2 つを 1 つにするかは #113 では決めていない。</b>
+     * <p><b>★★ 素直に置き換えないのは、いちばんありふれた経路がそれを断るからである。</b>
+     * {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は<b>置き換え先が開かれていると
+     * {@code AccessDeniedException} で断り</b>、<b>開いているのは pdfjig 自身である</b>
+     * ——{@code DocumentSession} が持つ {@code PdfDocument} は
+     * <b>書き出しの元になっている文書を、保存の間に閉じない</b>（サムネイルの描画が
+     * そのハンドルに依存している）。#113 はそこで普通の置き換えに落としており、
+     * <b>「開いて、直して、同じ名前で保存する」だけが 2 段のまま残っていた。</b>
      *
-     * <p><b>★ 落ちたことを記録しない。</b>落ちるのは<b>開いている文書へ上書き保存する</b>という
-     * ふつうの経路であり、<b>失敗ではない</b>。ログに書くのは {@code WARNING} 以上、つまり
-     * 失敗したことだけである（{@code docs/SPEC.md} §10.4）——ここで書くと、
-     * <b>正常に一巡しただけでログができる。</b>
-     * <b>どちらの経路を通ったかは、実行中も後からも分からない</b>ことになるが、
-     * <b>それを知るために正常な動作を失敗として記録するほうが高くつく。</b>
+     * <p><b>★ 断られるのは「掴まれている宛先を置き換える」ときだけである。</b>
+     * <b>掴まれているものを改名して、空いた名前へ入れるのは通る</b>——2026-08-31 に
+     * Windows 10 / JDK 21.0.8 で、{@code PdfDocument} で実際に開いたまま実測した。
+     * 退避・入れ替え・巻き戻しの 3 本とも成功し、掴んだ実体は読めたままだった。
+     *
+     * <p><b>★★ 「置き換えを頼まない改名だから通る」ではない。</b>JDK は
+     * {@code ATOMIC_MOVE} を頼まれた時点で<b>{@code MOVEFILE_REPLACE_EXISTING} を必ず渡す</b>
+     * ——{@code REPLACE_EXISTING} を書かなくても、既存の宛先は黙って置き換わる
+     * （2026-09-01 実測）。<b>効いているのは宛先が空いていることであって、旗の有無ではない。</b>
+     * <b>{@link #setAside} が退避先を壊さないのは、作業場所が作りたてで中が空だからである</b>
+     * （{@link OutputWorkspace}。#53）。
+     * <b>PDFBox 3.0.5 が {@code FileChannel#open} で開いている</b>ことがその根拠である
+     * （{@code RandomAccessReadBufferedFile}）——<b>{@code FILE_SHARE_DELETE} が要る。</b>
+     * <b>★★ {@code java.io.RandomAccessFile} で開くと退避そのものが共有違反で落ちる</b>
+     * （同日実測）。<b>PDFBox の開き方に依存しており、そこが変われば上書き保存が壊れる</b>
+     * ——{@code DocumentWriterTest} は同じ開き方で縛っているが、
+     * <b>あちらの版が変わったことは鳴らない</b>（{@code OverwriteSaveUiTest} が通る側である）。
+     *
+     * <p><b>★ 断る理由を数え上げない。</b>{@link AtomicMoveNotSupportedException} だけに
+     * 絞ってはならない——次に増えた理由で落ちなくなる。{@link OutputWorkspace} は作業場所を
+     * 出力先の<b>同じフォルダ</b>に作るので、Windows でこの例外になる唯一の条件
+     * （{@code ERROR_NOT_SAME_DEVICE}）は起こりようがないが、それでも
+     * {@code IOException} で受ける。
+     *
+     * <p><b>★ {@code Settings#replace} とは揃えない</b>（#113 が残した宿題への答え）。
+     * <b>あちらが守るのは、失っても選び直せば済むフォルダの記憶であり、書けなければ諦める</b>
+     * （{@code docs/SPEC.md} §10.2）。<b>ここが守るのは利用者の文書である。</b>
+     * 形を 1 つにすると、<b>諦めてよい側の都合が、諦めてはならない側に効く。</b>
+     *
+     * <p><b>★ 落ちたことを記録しない。</b>フォールバックを通るのは失敗ではない。
+     * ログに書くのは {@code WARNING} 以上、つまり失敗したことだけである
+     * （{@code docs/SPEC.md} §10.4）——ここで書くと、正常に一巡しただけでログができる。
      *
      * <p><b>package-private なのはテストのためである</b>（{@code DocumentWriterTest}）。
      * <b>呼んでよいのはこのクラスの中だけである</b>——ArchUnit が縛っている
      * （{@code replaceIsCalledOnlyByDocumentWriter}）。
+     *
+     * @param from      書けたもの。作業場所の中にある
+     * @param to        出力先
+     * @param workspace 退避先と、抱えていることの印を持つ（{@link OutputWorkspace#replaced}）
      */
-    static void move(Path from, Path to) {
+    static void move(Path from, Path to, OutputWorkspace workspace) {
+        Path aside = workspace.replaced();
+        boolean kept = setAside(to, aside, workspace);
+        try {
+            replaceWith(from, to);
+        } catch (RuntimeException failed) {
+            if (kept && restore(aside, to)) {
+                // 元の場所へ返した。もう抱えていない。
+                workspace.releaseOriginal();
+            }
+            throw failed;
+        }
+        if (kept) {
+            // 置き換えが済んだ。控えはもう要らない（作業場所ごと片づく）。
+            workspace.releaseOriginal();
+        }
+    }
+
+    /**
+     * 出力先に元からあったものを、消さずに作業場所へどける。
+     *
+     * <p><b>★★ 書けない出力先には手を出さない。</b>Windows の<b>改名は読み取り専用属性を
+     * 無視して通る</b>——見ずに退避すると、<b>利用者が読み取り専用にした文書が警告なく
+     * 置き換わり、属性まで落ちる</b>（2026-09-01 実測。以前は置き換えが
+     * {@code AccessDenied} で断られ、保存そのものが失敗していた）。
+     * <b>属性は利用者の意思表示であり、直しの巻き添えで無効にしてよいものではない</b>
+     * （{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>★ 退避できなければ書き出しを失敗させる。</b>普通の置き換えに落とす手もあるが、
+     * それは<b>この修正が消したかった経路そのもの</b>である。失敗すれば元は手つかずで残り、
+     * 利用者は失敗を見て選び直せる（{@code CLAUDE.md} 優先順位 1）。
+     *
+     * <p><b>★ 印を先に立てる。</b>退避してから立てると、その間に落ちたときに
+     * <b>印の無い控えが残り、次の書き出しがそれを消す</b>（{@link OutputWorkspace#holdOriginal}）。
+     *
+     * @return 退避したなら {@code true}。出力先がまだ無ければ {@code false}
+     */
+    private static boolean setAside(Path to, Path aside, OutputWorkspace workspace) {
+        if (Files.notExists(to)) {
+            return false;
+        }
+        if (!Files.isWritable(to)) {
+            throw new PdfjigException(ErrorCode.IO_FAILURE);
+        }
+        workspace.holdOriginal();
+        try {
+            Files.move(to, aside, StandardCopyOption.ATOMIC_MOVE);
+            return true;
+        } catch (IOException e) {
+            // 退避していないので、印を残すと空の作業場所が片づかなくなる。
+            workspace.releaseOriginal();
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        }
+    }
+
+    /**
+     * 空いた出力先へ、書けたものを入れる。
+     *
+     * <p><b>{@code REPLACE_EXISTING} を外さない。</b>退避した後にそこへ何かが現れることは
+     * ありうる（2 つ目の窓・別のアプリ）。<b>そのとき無いことを前提にすると落ちる</b>し、
+     * 落ちれば巻き戻して元へ戻ることになる——<b>利用者が承知した上書きが、
+     * 割り込んだ側の都合で失敗する。</b>
+     */
+    private static void replaceWith(Path from, Path to) {
         try {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return;
         } catch (IOException refused) {
-            // 断られた。落とした先で書き出せることがある（上の★★）。
+            // 断られた。落とした先で書き出せることがある（上の★）。
         }
         try {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        }
+    }
+
+    /**
+     * 退避したものを出力先へ戻す。
+     *
+     * <p><b>★ 入れるときと同じ形を通す</b>（{@link #replaceWith}）。書き分けると
+     * <b>「出力先へ改名する」規則が 2 か所に分かれ、次に直すとき忘れられるのは
+     * 巻き戻しのほうである</b>——ふつうは通らない経路だからである。
+     *
+     * <p><b>戻せなくても、ここで新しい例外を投げない。</b>呼ぶ側は入れ替えの失敗を投げ直す
+     * ところであり、<b>後始末の失敗で元の理由を上書きすると、何が起きたのか読めなくなる。</b>
+     *
+     * <p><b>★★ 戻せなかったことは記録に残す。</b>そのとき出力先には何も無く、
+     * <b>元は作業場所の中にしか無い</b>——{@link OutputWorkspace} はそれを消さないが、
+     * <b>消さなかったことがどこにも残らなければ、利用者にも読む側にも辿れない。</b>
+     * <b>この経路が {@link LogEvent#REPLACED_FILE_KEPT} の唯一の出どころである。</b>
+     *
+     * <p><b>★ {@code RuntimeException} で受ける。</b>{@link #replaceWith} が投げるのは
+     * {@link PdfjigException} だけだが、<b>狭く書くと上の約束が型で保証されない</b>——
+     * 別の非チェック例外が抜けた瞬間に、呼ぶ側の {@code throw failed} へ到達しなくなる。
+     *
+     * @return 戻せたなら {@code true}
+     */
+    private static boolean restore(Path kept, Path to) {
+        try {
+            replaceWith(kept, to);
+            return true;
+        } catch (RuntimeException e) {
+            Logs.warn(LogEvent.REPLACED_FILE_KEPT, e);
+            return false;
         }
     }
 }

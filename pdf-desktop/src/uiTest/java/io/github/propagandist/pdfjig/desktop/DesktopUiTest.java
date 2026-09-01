@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.ai.NoOpProvider;
 import io.github.propagandist.pdfjig.core.PageText;
 import io.github.propagandist.pdfjig.core.PdfBoxTextExtraction;
 import io.github.propagandist.pdfjig.core.PdfDocument;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -13,6 +14,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
@@ -188,9 +190,10 @@ abstract class DesktopUiTest {
         FileTime before = Files.getLastModifiedTime(output);
         dialogs.willSaveTo(output);
         clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
-        // ★ 存在を先に見る。置き換えは DeleteFile → MoveFileEx の 2 段に落ちる（DocumentWriter#move）
-        //   ので、出力先が一瞬消える。TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく
-        //   失敗として投げ直すため、見ずに触ると NoSuchFileException で落ちる。
+        // ★ 存在を先に見る。置き換えは「元をどけてから入れる」2 本の改名なので（DocumentWriter#move。
+        //   #119 より前は DeleteFile → MoveFileEx の 2 段だった）、どちらの形でも出力先が一瞬消える。
+        //   TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく失敗として投げ直すため、
+        //   見ずに触ると NoSuchFileException で落ちる。
         waitFor(() -> Files.exists(output) && Files.getLastModifiedTime(output).compareTo(before) > 0);
         WaitForAsyncUtils.waitForFxEvents();
         return output;
@@ -264,5 +267,18 @@ abstract class DesktopUiTest {
 
     static String textOf(FxRobot robot, String id) {
         return robot.lookup(id).queryAs(Label.class).getText();
+    }
+
+    /**
+     * フォルダの直下にある名前を並べる。
+     *
+     * <p><b>ここに置いてあるのは、見たいものが「出来たファイル」だけではないからである</b>——
+     * 書き出しは作業場所（{@code .pdfjig-*}）も作るので、<b>片づいたかどうかは
+     * 隣に何も残っていないことでしか見えない</b>（#119）。
+     */
+    static List<String> namesIn(Path directory) throws IOException {
+        try (Stream<Path> entries = Files.list(directory)) {
+            return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+        }
     }
 }
