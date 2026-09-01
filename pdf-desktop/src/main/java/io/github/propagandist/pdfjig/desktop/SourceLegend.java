@@ -58,6 +58,10 @@ final class SourceLegend {
     /**
      * 表示を作り直す。
      *
+     * <p><b>★ 節点ごと作り直す。</b>だから「×」の id を付け替える必要がない——
+     * <b>サムネイルのタイルは行を使い回すので付け替えが要る</b>が（{@code CLAUDE.md}「命名」）、
+     * こちらは消えたぶんの節点ごと捨てられる。<b>使い回す形に変えるなら、そこで付け替えること。</b>
+     *
      * @param session 表示中の編集セッション。{@code null} なら隠す
      */
     void update(DocumentSession session) {
@@ -113,10 +117,22 @@ final class SourceLegend {
         count.getStyleClass().add("source-count");
 
         Button remove = new Button();
+        // ★★ この道具で唯一取り消せない操作の入口である（#115）。
+        //   id はテストとの契約（CLAUDE.md「命名」）、accessibleText は支援技術から見える
+        //   唯一の手がかりである——Windows の UI Automation に setId は届かない。
+        //   ★ 位置で区別するのは、ファイルごとに 1 つずつ増えるからである（ThumbnailTile と同じ形）。
+        remove.setId("source-remove-" + sourceIndex);
         remove.getStyleClass().add("source-remove");
         remove.setGraphic(ToolIcons.of(ToolIcons.REMOVE));
         remove.setFocusTraversable(false);
-        remove.setTooltip(new Tooltip(name + " をこの編集から外す"));
+        // ★ 名前を入れる。「外す」だけだと、ファイルが 3 つ並んだとき
+        //   読み上げからは同じボタンが 3 つあるようにしか聞こえない——
+        //   取り消せない操作でそれは危うい（CLAUDE.md 優先順位 2）。
+        //   ★ 新しい漏れにはならない。この一覧は既に名前を出しており、
+        //     ツールチップにも同じ文が入っている。
+        String removeText = name + " をこの編集から外す";
+        remove.setTooltip(new Tooltip(removeText));
+        remove.setAccessibleText(removeText);
         remove.setOnAction(event -> onRemove.accept(sourceIndex));
 
         HBox chip = new HBox(6, swatch, label, count, remove);

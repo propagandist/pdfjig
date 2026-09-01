@@ -127,8 +127,7 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         Path document = TestPdfs.withText(dir.resolve("doc.pdf"), "A1", "A2");
         openFixture(robot, document);
 
-        dialogs.willOpenMultiple(TestPdfs.withText(dir.resolve("more.pdf"), "B1"));
-        clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+        addFixtures(robot, TestPdfs.withText(dir.resolve("more.pdf"), "B1"));
         waitForNode(robot, "#thumbnail-tile-2");
         assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot));
 

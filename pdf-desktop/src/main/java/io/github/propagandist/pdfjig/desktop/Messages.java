@@ -91,6 +91,9 @@ final class Messages {
         alert.initOwner(owner);
         alert.getDialogPane().setId("remove-source-dialog");
         alert.getDialogPane().lookupButton(ButtonType.OK).setId("remove-source-ok");
+        // ★ 断る側にも id が要る（#115）。確認を出しておいて「キャンセル」でも外れるなら
+        //   確認は嘘になるので、そこを自動テストで確かめられなければならない。
+        alert.getDialogPane().lookupButton(ButtonType.CANCEL).setId("remove-source-cancel");
         return alert.showAndWait().filter(ButtonType.OK::equals).isPresent();
     }
 
