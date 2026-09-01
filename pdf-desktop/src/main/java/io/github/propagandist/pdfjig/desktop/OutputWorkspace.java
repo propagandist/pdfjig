@@ -45,16 +45,27 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * 退避した元の実体を置く名前。中は自分のものなので、こちらも固定でよい。
      *
-     * <p><b>★★ これが在ることが、そのまま「片づけてはならない」の印である</b>
-     * （{@link #holdsTheOnlyCopy}）。<b>置き換えが済んだら {@code DocumentWriter} が捨てる</b>ので、
-     * <b>残っているのは「まだ済んでいない」ときだけ</b>である。
-     *
      * <p><b>★ 出力先の名前は持ち込まない。</b>持ち込んで「同じ名前が隣に戻っているか」で
-     * 判断する形も採れるが、それは<b>在るかどうかより弱い手がかりである</b>——
-     * 別の窓や他のアプリがその名前で何かを置けば「済んだ」と読み、
-     * <b>唯一の控えを抱えた作業場所を次の書き出しが消す。</b>
+     * 片づけを決める形も採れるが、それは<b>弱い手がかりである</b>——別の窓や他のアプリが
+     * その名前で何かを置けば「済んだ」と読み、<b>唯一の控えを抱えた作業場所を次の書き出しが消す。</b>
      */
     private static final String REPLACED = "replaced.pdf";
+
+    /**
+     * 退避したまま済んでいないことの印。中身は空でよい。
+     *
+     * <p><b>★★ 控えそのものを印にしてはならない。</b>いちど<b>控えを消せなかった</b>だけで
+     * <b>片づけの関門が永久に閉じる</b>——{@link #discard} は {@link #close} からも
+     * {@link #discardAbandoned} からも同じ関門を通るので、<b>どの経路からも二度と消えなくなる。</b>
+     * <b>成功した保存のたびに、利用者の文書の 1 世代前を抱えた {@code .pdfjig-*} が
+     * 1 つずつ積み上がることになる</b>（2026-09-01 実測。出力先が読み取り専用だと、
+     * 改名は通るのに削除だけが {@code AccessDenied} で落ちる）。
+     *
+     * <p><b>だから印は自分で作る。</b>こちらが作った空のファイルなら<b>必ず消せる</b>ので、
+     * 印を外し損ねて閉じ込められることがない。<b>控えを消せなかったときは作業場所ごと残るが、
+     * 印はもう無いので、次に同じフォルダへ書き出すときに片づけ直せる。</b>
+     */
+    private static final String HELD = "held";
 
     private final Path workspace;
 
@@ -85,12 +96,47 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * 出力先に元からあった実体の退避先。まだ存在しない。
      *
-     * <p><b>置き換えが済んだら、ここへ退避したものを捨てるのは呼ぶ側である</b>
-     * （{@code DocumentWriter#assemble}）。<b>済んだかどうかを知っているのはあちらだけ</b>で、
-     * こちらから見えるのは「在るか無いか」だけである（{@link #REPLACED}）。
+     * <p><b>ここへ退避したら {@link #holdOriginal} を、済んだら {@link #releaseOriginal} を呼ぶこと。</b>
+     * <b>済んだかどうかを知っているのは呼ぶ側だけである</b>（{@code DocumentWriter#move}）。
      */
     Path replaced() {
         return workspace.resolve(REPLACED);
+    }
+
+    /**
+     * 元の実体をここに抱えていることを記す。
+     *
+     * <p><b>★ 退避する前に呼ぶこと。</b>先に退避すると、その間に落ちたときに
+     * <b>印の無い控えが残り、次の書き出しがそれを消す</b>——記すのは、
+     * 抱えうる状態に入ることそのものである。
+     *
+     * <p><b>記せなければ退避を始めさせない</b>（例外を投げる）。印を立てられないまま退避すると、
+     * <b>唯一の控えを守れないまま置き換えに進むことになる</b>（{@code CLAUDE.md} 優先順位 1）。
+     */
+    void holdOriginal() {
+        try {
+            Files.createFile(workspace.resolve(HELD));
+        } catch (IOException e) {
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        }
+    }
+
+    /**
+     * もう抱えていないことを記す。
+     *
+     * <p>置き換えが済んだか、巻き戻して元の場所へ返したときに呼ぶ。
+     *
+     * <p><b>これで片づけの関門が開く。</b>控えそのものを消せるかどうかは
+     * {@link #discard} の仕事であり、<b>消せなくても閉じ込められない</b>——
+     * 印はこちらが作った空のファイルなので、必ず消せる（{@link #HELD}）。
+     */
+    void releaseOriginal() {
+        try {
+            Files.deleteIfExists(workspace.resolve(HELD));
+        } catch (IOException e) {
+            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+        }
     }
 
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */
@@ -138,19 +184,22 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * その作業場所が、元の実体を唯一の控えとして抱えているか。
      *
-     * <p><b>在るかどうかだけを見る。</b>{@code DocumentWriter} は<b>置き換えが済んだ時点で
-     * 控えを捨てる</b>ので、<b>残っているのは済んでいないときだけである</b>——
-     * 落ちたか、巻き戻しにも失敗したか、そのどちらかである。
+     * <p><b>印だけを見る</b>（{@link #HELD}）。立てるのも外すのも、置き換えが済んだかを
+     * 知っている側である（{@code DocumentWriter#move}）。
+     *
+     * <p><b>★★ 「無いと確信できる」ときだけ開ける。</b>{@link Files#exists} は
+     * <b>「無い」と「確かめられない」を同じ {@code false} に潰す</b>ので、
+     * 権限や一時的な失敗で属性を読めないだけの作業場所を「印は無い」と読み、
+     * <b>唯一の控えごと消しにいく。</b>関門は消さない側へ倒す（{@code CLAUDE.md} 優先順位 1）。
      *
      * <p><b>★ 出力先の側を見に行かない。</b>「同じ名前が隣に戻っているか」で判断する形も
      * 採れるが、それは<b>置き換えが済んだことの証拠にならない</b>——別の窓や他のアプリが
-     * その名前で何かを置いただけでも「済んだ」と読み、<b>唯一の控えを抱えた作業場所を
-     * 次の書き出しが消す。</b>作業場所が出力先の隣にあることも、
+     * その名前で何かを置いただけでも「済んだ」と読む。作業場所が出力先の隣にあることも、
      * <b>ボリュームを揃えるための判断であって</b>（このクラスの説明）、
      * <b>片づけの根拠に使ってよいものではない。</b>
      */
     private static boolean holdsTheOnlyCopy(Path workspace) {
-        return Files.exists(workspace.resolve(REPLACED));
+        return !Files.notExists(workspace.resolve(HELD));
     }
 
     /**

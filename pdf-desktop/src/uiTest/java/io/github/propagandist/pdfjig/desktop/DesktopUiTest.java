@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.ai.NoOpProvider;
 import io.github.propagandist.pdfjig.core.PageText;
 import io.github.propagandist.pdfjig.core.PdfBoxTextExtraction;
 import io.github.propagandist.pdfjig.core.PdfDocument;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -13,6 +14,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
@@ -265,5 +267,18 @@ abstract class DesktopUiTest {
 
     static String textOf(FxRobot robot, String id) {
         return robot.lookup(id).queryAs(Label.class).getText();
+    }
+
+    /**
+     * フォルダの直下にある名前を並べる。
+     *
+     * <p><b>ここに置いてあるのは、見たいものが「出来たファイル」だけではないからである</b>——
+     * 書き出しは作業場所（{@code .pdfjig-*}）も作るので、<b>片づいたかどうかは
+     * 隣に何も残っていないことでしか見えない</b>（#119）。
+     */
+    static List<String> namesIn(Path directory) throws IOException {
+        try (Stream<Path> entries = Files.list(directory)) {
+            return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+        }
     }
 }

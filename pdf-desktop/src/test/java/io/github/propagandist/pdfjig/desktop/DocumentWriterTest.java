@@ -14,10 +14,13 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -44,7 +47,7 @@ class DocumentWriterTest {
         Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
         Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
 
-        DocumentWriter.move(source, target, asideFor(target));
+        DocumentWriter.move(source, target, workspaceFor(target));
 
         assertEquals("新しいファイル", Files.readString(target));
         assertTrue(Files.notExists(source), "移した元が残るなら、それは移動ではなく複製である");
@@ -65,12 +68,12 @@ class DocumentWriterTest {
     void setsTheOriginalAsideInsteadOfReplacingIt(@TempDir Path directory) throws IOException {
         Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
         Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
-        Path aside = asideFor(target);
+        OutputWorkspace workspace = workspaceFor(target);
 
-        DocumentWriter.move(source, target, aside);
+        DocumentWriter.move(source, target, workspace);
 
         assertEquals("新しいファイル", Files.readString(target));
-        assertEquals("元のファイル", Files.readString(aside), "元を退避せずに置き換えている。落ちたときに戻すものが無い（#119）");
+        assertEquals("元のファイル", Files.readString(workspace.replaced()), "元を退避せずに置き換えている。落ちたときに戻すものが無い（#119）");
     }
 
     /**
@@ -84,13 +87,13 @@ class DocumentWriterTest {
     @DisplayName("入れ替えに失敗したら、元が戻る")
     void putsTheOriginalBackWhenTheSwapFails(@TempDir Path directory) throws IOException {
         Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
-        Path aside = asideFor(target);
+        OutputWorkspace workspace = workspaceFor(target);
         Path neverWritten = directory.resolve("nothing-was-written.pdf");
 
-        assertThrows(PdfjigException.class, () -> DocumentWriter.move(neverWritten, target, aside));
+        assertThrows(PdfjigException.class, () -> DocumentWriter.move(neverWritten, target, workspace));
 
         assertEquals("元のファイル", Files.readString(target), "巻き戻していない。元は退避先にしか無い（#119）");
-        assertTrue(Files.notExists(aside), "戻したのに控えが残るなら、それは移動ではなく複製である");
+        assertTrue(Files.notExists(workspace.replaced()), "戻したのに控えが残るなら、それは移動ではなく複製である");
     }
 
     @Test
@@ -98,12 +101,45 @@ class DocumentWriterTest {
     void hasNothingToSetAsideWhenTheOutputIsNew(@TempDir Path directory) throws IOException {
         Path target = directory.resolve("out.pdf");
         Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
-        Path aside = asideFor(target);
+        OutputWorkspace workspace = workspaceFor(target);
 
-        DocumentWriter.move(source, target, aside);
+        DocumentWriter.move(source, target, workspace);
 
         assertEquals("新しいファイル", Files.readString(target));
-        assertTrue(Files.notExists(aside), "退避するものが無いのに何かを置いている");
+        assertTrue(Files.notExists(workspace.replaced()), "退避するものが無いのに何かを置いている");
+    }
+
+    /**
+     * 読み取り専用の出力先には手を出さない。
+     *
+     * <p><b>★★ 改名は読み取り専用属性を無視して通る。</b>見ずに退避すると、
+     * <b>利用者が読み取り専用にした文書が警告なく置き換わり、属性まで落ちる</b>——
+     * 2026-09-01 に Windows 10 / JDK 21.0.8 で実測した（退避も入れ替えも成功し、
+     * 出来上がったファイルは読み取り専用ではなくなっていた）。
+     * <b>#119 より前は置き換えが {@code AccessDenied} で断られ、保存そのものが失敗していた</b>ので、
+     * これは直しが連れてきた振る舞いの変化である（{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>★ 縛れるのは Windows でだけである。</b>POSIX の書き込み権限は
+     * {@code @TempDir} の下では立て直せる（所有者は書き込み権を付け直せる）ため、
+     * <b>読み取り専用属性を持つ側でしか同じ条件を作れない。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("読み取り専用の出力先には手を出さない")
+    void refusesToTouchAReadOnlyOutput(@TempDir Path directory) throws IOException {
+        Path target = Files.writeString(directory.resolve("out.pdf"), "元のファイル");
+        Files.getFileAttributeView(target, DosFileAttributeView.class).setReadOnly(true);
+        Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
+        OutputWorkspace workspace = workspaceFor(target);
+
+        assertThrows(PdfjigException.class, () -> DocumentWriter.move(source, target, workspace));
+
+        assertEquals("元のファイル", Files.readString(target), "読み取り専用の文書が黙って置き換わっている");
+        assertTrue(
+                Files.getFileAttributeView(target, DosFileAttributeView.class)
+                        .readAttributes()
+                        .isReadOnly(),
+                "読み取り専用のままでなければ、利用者の意思表示を落としている");
     }
 
     @Test
@@ -203,7 +239,7 @@ class DocumentWriterTest {
         Path source = Files.writeString(directory.resolve("new.pdf"), "新しいファイル");
 
         try (FileChannel held = FileChannel.open(target, StandardOpenOption.READ)) {
-            DocumentWriter.move(source, target, asideFor(target));
+            DocumentWriter.move(source, target, workspaceFor(target));
 
             // 掴んだ実体は置き換わらず、名前の指す先だけが変わる。サムネイルが古い絵を
             // 出し続けるのはこのためであり、保存が失敗したことを意味しない。
@@ -238,7 +274,7 @@ class DocumentWriterTest {
         try (FileSystem foreign = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
             Path source = Files.writeString(foreign.getPath("/new.pdf"), "新しいファイル");
 
-            DocumentWriter.move(source, target, asideFor(target));
+            DocumentWriter.move(source, target, workspaceFor(target));
 
             assertTrue(Files.notExists(source), "移した元が残るなら、それは移動ではなく複製である");
         }
@@ -246,18 +282,16 @@ class DocumentWriterTest {
     }
 
     /**
-     * 退避先。
+     * 作業場所。
      *
-     * <p><b>★ 本物に訊く。</b>作業場所の名前も控えの名前も {@link OutputWorkspace} の private な
-     * 決めごとであり、<b>ここで組み直すと、あちらが形を変えても気づかないまま緑になる</b>
-     * ——しかも組み直した形は、<b>片づけの判断（あちらの {@code holdsTheOnlyCopy}）が
-     * 見ているものと違う。</b>
+     * <p><b>★ 本物を使う。</b>作業場所の名前も控えの名前も印の名前も {@link OutputWorkspace} の
+     * private な決めごとであり、<b>ここで組み直すと、あちらが形を変えても気づかないまま緑になる。</b>
      *
      * <p><b>閉じない。</b>{@code @TempDir} が片づける。ここで見たいのは
      * {@link DocumentWriter#move} だけで、作業場所の後始末は別のテストが持つ
      * （{@code OutputWorkspaceTest}）。
      */
-    private static Path asideFor(Path target) {
-        return OutputWorkspace.nextTo(target).replaced();
+    private static OutputWorkspace workspaceFor(Path target) {
+        return OutputWorkspace.nextTo(target);
     }
 }

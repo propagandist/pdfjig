@@ -4,13 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -53,8 +57,9 @@ class OutputWorkspaceTest {
      * <b>元の実体はここにしか無い</b>ので、片づけると利用者の文書が消える
      * （{@code CLAUDE.md} 優先順位 1）。
      *
-     * <p><b>済んだ控えがここに残ることは無い</b>——{@code DocumentWriter#assemble} が
-     * 置き換えの直後に捨てる。<b>だから「在る」を「まだ済んでいない」と読んでよい。</b>
+     * <p><b>抱えているかどうかは印で決まる</b>（{@code holdOriginal} / {@code releaseOriginal}）。
+     * 控えそのものを印にすると、<b>いちど消せなかっただけで片づけが永久に閉じる</b>——
+     * それを見るのが {@link #stopsHoldingEvenWhenTheCopyCannotBeDeleted} である。
      */
     @Test
     @DisplayName("控えを抱えていれば、片づけない")
@@ -62,11 +67,70 @@ class OutputWorkspaceTest {
         Path kept;
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            workspace.holdOriginal();
             kept = workspace.replaced();
             Files.writeString(kept, "元のファイル");
         }
 
         assertEquals("元のファイル", Files.readString(kept), "元がここにしか無いのに片づけている（#119）");
+    }
+
+    @Test
+    @DisplayName("抱えるのをやめれば、片づく")
+    void discardsOnceItStopsHolding(@TempDir Path directory) throws IOException {
+        Path workspace;
+
+        try (OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            workspace = place.file().getParent();
+            place.holdOriginal();
+            Files.writeString(place.replaced(), "元のファイル");
+            // 置き換えが済んだ。控えはもう唯一の実体ではない。
+            place.releaseOriginal();
+        }
+
+        assertFalse(Files.exists(workspace));
+        assertEquals(List.of(), namesIn(directory));
+    }
+
+    /**
+     * 控えを消せなくても、抱えるのはやめられる。
+     *
+     * <p><b>★★ ここが「印を控えそのものにしない」理由である。</b>控えを印にすると、
+     * <b>いちど消せなかっただけで {@code discard} の関門が永久に閉じる</b>——
+     * {@link OutputWorkspace#close} からも、以後どの {@code discardAbandoned} からも
+     * 素通りするので、<b>成功した保存のたびに利用者の文書の複製が 1 つずつ積み上がる。</b>
+     *
+     * <p><b>実際に起きる</b>——出力先が読み取り専用だと、改名は通るのに削除だけが
+     * {@code AccessDenied} で落ちる（2026-09-01 実測）。ここでは<b>掴んだままにして代える</b>——
+     * {@link java.io.FileOutputStream} は {@code FILE_SHARE_DELETE} を付けないので、
+     * Windows では開いている間そのファイルを消せない。
+     * <b>作業場所は残ってよい。残ってはならないのは、二度と片づけられなくなることである。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("控えを消せなくても、抱えるのはやめられる")
+    void stopsHoldingEvenWhenTheCopyCannotBeDeleted(@TempDir Path directory) throws IOException {
+        // try-with-resources にしない。掴んでいる最中に片づけさせるのがこのテストである。
+        OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
+        Path workspace = place.file().getParent();
+        Path kept = place.replaced();
+        place.holdOriginal();
+        Files.writeString(kept, "元のファイル");
+        place.releaseOriginal();
+
+        // ★ java.io で開く。java.nio の Files#newOutputStream は FILE_SHARE_DELETE を付けるので、
+        //   掴んでいても消せてしまい、この筋を再現できない（2026-09-01 実測）。
+        try (OutputStream held = new FileOutputStream(kept.toFile(), true)) {
+            place.close();
+            assertTrue(Files.exists(kept), "この筋では消せないはずで、消えているなら前提が変わっている");
+            held.flush();
+        }
+
+        // 掴みが外れた後。閉じ込められていなければ、次の書き出しが片づけ直せる。
+        try (OutputWorkspace next = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            assertTrue(Files.exists(next.file().getParent()));
+        }
+        assertFalse(Files.exists(workspace), "控えを消せなかっただけで、片づけが永久に閉じている（#119）");
     }
 
     /**
@@ -140,15 +204,17 @@ class OutputWorkspaceTest {
     /**
      * 前の書き出しが落ちて、控えを抱えたまま残った作業場所を作る。
      *
-     * <p><b>生きた API では作れない</b>——{@link OutputWorkspace#close} が走らないまま
-     * JVM ごと落ちた状態だからである。<b>名前は {@link OutputWorkspace} の private な決めごとと
-     * 揃っていなければならない</b>ので、ここで 1 か所にまとめてある。
+     * <p><b>★ 本物で作る。</b>{@link OutputWorkspace#close} を呼ばなければ、それが
+     * <b>JVM ごと落ちた状態そのもの</b>である。<b>名前を手で組み直さない</b>——
+     * 組み直すと、{@link OutputWorkspace} が形を変えても気づかないまま緑になる
+     * （{@code DocumentWriterTest} の {@code workspaceFor} と同じ理由）。
      *
      * @return 抱えられている控え
      */
     private static Path abandonedCopyIn(Path directory) throws IOException {
-        Path abandoned = Files.createDirectory(directory.resolve(".pdfjig-abandoned"));
-        return Files.writeString(abandoned.resolve("replaced.pdf"), "元のファイル");
+        OutputWorkspace abandoned = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
+        abandoned.holdOriginal();
+        return Files.writeString(abandoned.replaced(), "元のファイル");
     }
 
     /** フォルダの直下にある名前を並べる。 */

@@ -3,11 +3,9 @@ package io.github.propagandist.pdfjig.desktop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Stream;
+import java.util.concurrent.TimeoutException;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -194,14 +192,16 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         robot.clickOn("#tool-rotate-right");
         saveOver(robot, document);
 
-        waitFor(() -> namesIn(dir).equals(List.of("doc.pdf")));
-        assertEquals(List.of("doc.pdf"), namesIn(dir), "置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）");
-    }
+        // ★ 中身も見る。片づいたことだけを見ると、何も書けていない保存でも緑になる。
+        assertEquals(List.of(90, 0), TestPdfs.rotationsOf(document), "書き出せていない");
 
-    /** フォルダの直下にある名前を並べる。 */
-    private static List<String> namesIn(Path directory) throws IOException {
-        try (Stream<Path> entries = Files.list(directory)) {
-            return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+        // ★ 待つのは後始末が書き出しの後ろで続くからである。saveOver が見ているのは
+        //   出力先の更新時刻までで、作業場所を片づけるのはその先にある。
+        //   ★★ 上限で落ちるのは TimeoutException であり、理由は出ない。捕まえて書く。
+        try {
+            waitFor(() -> namesIn(dir).equals(List.of("doc.pdf")));
+        } catch (TimeoutException e) {
+            throw new AssertionError("置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）。残っているもの: " + namesIn(dir), e);
         }
     }
 }

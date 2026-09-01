@@ -76,9 +76,7 @@ final class DocumentWriter {
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
             operations.assemble(sources, pages, workspace.file());
-            move(workspace.file(), output, workspace.replaced());
-            // 置き換えが済んだ。控えを残すと作業場所が片づかない（OutputWorkspace#discard）。
-            dropKept(workspace.replaced());
+            move(workspace.file(), output, workspace);
         }
         return List.copyOf(warnings);
     }
@@ -166,9 +164,10 @@ final class DocumentWriter {
      * 元は作業場所の中に実体として残る（{@link OutputWorkspace} は控えを抱えた作業場所を消さない）。
      * 2 本目に失敗したら 1 本目を巻き戻す（{@link #restore}）。
      *
-     * <p><b>★ 済んだあとの控えはここでは捨てない。</b>捨てるのは {@link #assemble} である——
-     * <b>ここが返った時点で控えが残っていることが、「まだ済んでいない」の印そのもの</b>であり、
-     * <b>それを外から見えるようにしておくために残す</b>（{@code DocumentWriterTest}）。
+     * <p><b>★ 済んだあとも控えそのものは残す。</b>片づけるのは {@link OutputWorkspace} の仕事で、
+     * ここが下ろすのは<b>「抱えている」という印だけである</b>（{@link OutputWorkspace#releaseOriginal}）。
+     * <b>控えを印にすると、いちど消せなかっただけで片づけが永久に閉じる</b>
+     * （{@link OutputWorkspace#HELD}）。
      *
      * <p><b>★★ 素直に置き換えないのは、いちばんありふれた経路がそれを断るからである。</b>
      * {@code MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)} は<b>置き換え先が開かれていると
@@ -178,9 +177,17 @@ final class DocumentWriter {
      * そのハンドルに依存している）。#113 はそこで普通の置き換えに落としており、
      * <b>「開いて、直して、同じ名前で保存する」だけが 2 段のまま残っていた。</b>
      *
-     * <p><b>★ 置き換えでない改名は、掴まれたままでも通る。</b>2026-08-31 に
-     * Windows 10 / JDK 21.0.8 で、{@code PdfDocument} で実際に開いたまま実測した——
+     * <p><b>★ 断られるのは「掴まれている宛先を置き換える」ときだけである。</b>
+     * <b>掴まれているものを改名して、空いた名前へ入れるのは通る</b>——2026-08-31 に
+     * Windows 10 / JDK 21.0.8 で、{@code PdfDocument} で実際に開いたまま実測した。
      * 退避・入れ替え・巻き戻しの 3 本とも成功し、掴んだ実体は読めたままだった。
+     *
+     * <p><b>★★ 「置き換えを頼まない改名だから通る」ではない。</b>JDK は
+     * {@code ATOMIC_MOVE} を頼まれた時点で<b>{@code MOVEFILE_REPLACE_EXISTING} を必ず渡す</b>
+     * ——{@code REPLACE_EXISTING} を書かなくても、既存の宛先は黙って置き換わる
+     * （2026-09-01 実測）。<b>効いているのは宛先が空いていることであって、旗の有無ではない。</b>
+     * <b>{@link #setAside} が退避先を壊さないのは、作業場所が作りたてで中が空だからである</b>
+     * （{@link OutputWorkspace}。#53）。
      * <b>PDFBox 3.0.5 が {@code FileChannel#open} で開いている</b>ことがその根拠である
      * （{@code RandomAccessReadBufferedFile}）——<b>{@code FILE_SHARE_DELETE} が要る。</b>
      * <b>★★ {@code java.io.RandomAccessFile} で開くと退避そのものが共有違反で落ちる</b>
@@ -207,39 +214,61 @@ final class DocumentWriter {
      * <b>呼んでよいのはこのクラスの中だけである</b>——ArchUnit が縛っている
      * （{@code replaceIsCalledOnlyByDocumentWriter}）。
      *
-     * @param from  書けたもの。作業場所の中にある
-     * @param to    出力先
-     * @param aside 出力先に元からあったものを退避する先（{@link OutputWorkspace#replaced}）
+     * @param from      書けたもの。作業場所の中にある
+     * @param to        出力先
+     * @param workspace 退避先と、抱えていることの印を持つ（{@link OutputWorkspace#replaced}）
      */
-    static void move(Path from, Path to, Path aside) {
-        boolean kept = setAside(to, aside);
+    static void move(Path from, Path to, OutputWorkspace workspace) {
+        Path aside = workspace.replaced();
+        boolean kept = setAside(to, aside, workspace);
         try {
             replaceWith(from, to);
         } catch (RuntimeException failed) {
-            if (kept) {
-                restore(aside, to);
+            if (kept && restore(aside, to)) {
+                // 元の場所へ返した。もう抱えていない。
+                workspace.releaseOriginal();
             }
             throw failed;
+        }
+        if (kept) {
+            // 置き換えが済んだ。控えはもう要らない（作業場所ごと片づく）。
+            workspace.releaseOriginal();
         }
     }
 
     /**
      * 出力先に元からあったものを、消さずに作業場所へどける。
      *
+     * <p><b>★★ 書けない出力先には手を出さない。</b>Windows の<b>改名は読み取り専用属性を
+     * 無視して通る</b>——見ずに退避すると、<b>利用者が読み取り専用にした文書が警告なく
+     * 置き換わり、属性まで落ちる</b>（2026-09-01 実測。以前は置き換えが
+     * {@code AccessDenied} で断られ、保存そのものが失敗していた）。
+     * <b>属性は利用者の意思表示であり、直しの巻き添えで無効にしてよいものではない</b>
+     * （{@code CLAUDE.md} 優先順位 2）。
+     *
      * <p><b>★ 退避できなければ書き出しを失敗させる。</b>普通の置き換えに落とす手もあるが、
      * それは<b>この修正が消したかった経路そのもの</b>である。失敗すれば元は手つかずで残り、
      * 利用者は失敗を見て選び直せる（{@code CLAUDE.md} 優先順位 1）。
      *
+     * <p><b>★ 印を先に立てる。</b>退避してから立てると、その間に落ちたときに
+     * <b>印の無い控えが残り、次の書き出しがそれを消す</b>（{@link OutputWorkspace#holdOriginal}）。
+     *
      * @return 退避したなら {@code true}。出力先がまだ無ければ {@code false}
      */
-    private static boolean setAside(Path to, Path aside) {
+    private static boolean setAside(Path to, Path aside, OutputWorkspace workspace) {
         if (Files.notExists(to)) {
             return false;
         }
+        if (!Files.isWritable(to)) {
+            throw new PdfjigException(ErrorCode.IO_FAILURE);
+        }
+        workspace.holdOriginal();
         try {
             Files.move(to, aside, StandardCopyOption.ATOMIC_MOVE);
             return true;
         } catch (IOException e) {
+            // 退避していないので、印を残すと空の作業場所が片づかなくなる。
+            workspace.releaseOriginal();
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
     }
@@ -280,31 +309,20 @@ final class DocumentWriter {
      * <b>元は作業場所の中にしか無い</b>——{@link OutputWorkspace} はそれを消さないが、
      * <b>消さなかったことがどこにも残らなければ、利用者にも読む側にも辿れない。</b>
      * <b>この経路が {@link LogEvent#REPLACED_FILE_KEPT} の唯一の出どころである。</b>
+     *
+     * <p><b>★ {@code RuntimeException} で受ける。</b>{@link #replaceWith} が投げるのは
+     * {@link PdfjigException} だけだが、<b>狭く書くと上の約束が型で保証されない</b>——
+     * 別の非チェック例外が抜けた瞬間に、呼ぶ側の {@code throw failed} へ到達しなくなる。
+     *
+     * @return 戻せたなら {@code true}
      */
-    private static void restore(Path kept, Path to) {
+    private static boolean restore(Path kept, Path to) {
         try {
             replaceWith(kept, to);
-        } catch (PdfjigException e) {
+            return true;
+        } catch (RuntimeException e) {
             Logs.warn(LogEvent.REPLACED_FILE_KEPT, e);
-        }
-    }
-
-    /**
-     * 置き換えが済んだので、控えを捨てる。
-     *
-     * <p><b>★★ 済んだかどうかを知っているのはここだけである。</b>{@link OutputWorkspace} から
-     * 見えるのは控えが在るか無いかだけで、<b>在ることをそのまま「まだ済んでいない」と読む</b>
-     * ——だから<b>済んだ時点で捨てるのはこちらの責務である。</b>残すと、
-     * 成功した保存のたびに作業場所が片づかなくなる。
-     *
-     * <p><b>消せなくても保存は成功している。</b>出力先には新しいものが載っており、
-     * <b>失うものは無い</b>——残るのは利用者から見える {@code .pdfjig-*} が 1 つだけである。
-     */
-    private static void dropKept(Path kept) {
-        try {
-            Files.deleteIfExists(kept);
-        } catch (IOException e) {
-            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return false;
         }
     }
 }
