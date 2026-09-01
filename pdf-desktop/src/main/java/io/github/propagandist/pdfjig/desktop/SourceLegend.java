@@ -30,18 +30,6 @@ final class SourceLegend {
     private static final double NAME_WIDTH = 260;
 
     /**
-     * 「×」の id の頭。後ろに並びの位置が付く（{@code source-remove-0}）。
-     *
-     * <p><b>★ 位置で区別するのは、ファイルごとに 1 つずつ増えるからである</b>——
-     * サムネイルのタイルと同じ形にしてある（{@code CLAUDE.md}「命名」）。
-     *
-     * <p><b>★ 消えたぶんの id が残らないことは {@link #update} が保っている。</b>
-     * あちらは節点を作り直すので、タイルのような付け替えが要らない——
-     * <b>使い回す形に変えるなら、そこで id も付け替えること。</b>
-     */
-    private static final String REMOVE_ID_PREFIX = "source-remove-";
-
-    /**
      * ファイルが多いと 1 行に収まらない。切り捨てず折り返す。
      *
      * <p>横スクロールにすると、隠れているファイルがあること自体に気づけない。
@@ -69,6 +57,10 @@ final class SourceLegend {
 
     /**
      * 表示を作り直す。
+     *
+     * <p><b>★ 節点ごと作り直す。</b>だから「×」の id を付け替える必要がない——
+     * <b>サムネイルのタイルは行を使い回すので付け替えが要る</b>が（{@code CLAUDE.md}「命名」）、
+     * こちらは消えたぶんの節点ごと捨てられる。<b>使い回す形に変えるなら、そこで付け替えること。</b>
      *
      * @param session 表示中の編集セッション。{@code null} なら隠す
      */
@@ -128,7 +120,8 @@ final class SourceLegend {
         // ★★ この道具で唯一取り消せない操作の入口である（#115）。
         //   id はテストとの契約（CLAUDE.md「命名」）、accessibleText は支援技術から見える
         //   唯一の手がかりである——Windows の UI Automation に setId は届かない。
-        remove.setId(REMOVE_ID_PREFIX + sourceIndex);
+        //   ★ 位置で区別するのは、ファイルごとに 1 つずつ増えるからである（ThumbnailTile と同じ形）。
+        remove.setId("source-remove-" + sourceIndex);
         remove.getStyleClass().add("source-remove");
         remove.setGraphic(ToolIcons.of(ToolIcons.REMOVE));
         remove.setFocusTraversable(false);
@@ -137,9 +130,9 @@ final class SourceLegend {
         //   取り消せない操作でそれは危うい（CLAUDE.md 優先順位 2）。
         //   ★ 新しい漏れにはならない。この一覧は既に名前を出しており、
         //     ツールチップにも同じ文が入っている。
-        String action = name + " をこの編集から外す";
-        remove.setTooltip(new Tooltip(action));
-        remove.setAccessibleText(action);
+        String removeText = name + " をこの編集から外す";
+        remove.setTooltip(new Tooltip(removeText));
+        remove.setAccessibleText(removeText);
         remove.setOnAction(event -> onRemove.accept(sourceIndex));
 
         HBox chip = new HBox(6, swatch, label, count, remove);

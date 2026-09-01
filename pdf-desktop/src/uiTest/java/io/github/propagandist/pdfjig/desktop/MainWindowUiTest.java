@@ -162,8 +162,7 @@ class MainWindowUiTest extends DesktopUiTest {
     void 足したページは並びの末尾に付く(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 2));
 
-        dialogs.willOpenMultiple(TestPdfs.plain(dir.resolve("more.pdf"), 3));
-        clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+        addFixtures(robot, TestPdfs.plain(dir.resolve("more.pdf"), 3));
 
         // 読み込みは背景で走る。waitForFxEvents はイベントキューを捌くだけで、
         // 読み終わりは待たない。速い環境ではたまたま間に合っていたが、Sandbox の

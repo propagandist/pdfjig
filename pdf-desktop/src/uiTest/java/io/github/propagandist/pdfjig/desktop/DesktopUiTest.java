@@ -127,6 +127,17 @@ abstract class DesktopUiTest {
     }
 
     /**
+     * 「追加」ボタンでフィクスチャを足す。
+     *
+     * <p><b>出そろうのを待つのは呼ぶ側である</b>——何を待てばよいかは足した中身に依る
+     * （末尾のタイル、あるいは一覧が出ること）。<b>ここが持つのは、押すところまでである。</b>
+     */
+    void addFixtures(FxRobot robot, Path... fixtures) throws Exception {
+        dialogs.willOpenMultiple(fixtures);
+        clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+    }
+
+    /**
      * 効くまで押す。
      *
      * <p>Windows は活性でない窓への 1 回目のクリックを窓の活性化に使い、その下の

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
-import javafx.scene.control.Button;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,8 +22,12 @@ import org.testfx.util.WaitForAsyncUtils;
  *
  * <p><b>★★ #115 まで、その入口には id が 1 つも無く、自動テストが 1 本も通っていなかった。</b>
  * 確認ダイアログの側の id は #57 で付いていたが、<b>そこへ至る「×」を掴めなかったので、
- * ダイアログごと誰も通っていなかった。</b>守っていたのは
- * {@code docs/HANDOVER.md} 4-4 の 11 番——<b>人がリリース前に見る手順だけ</b>である。
+ * ダイアログごと誰も通っていなかった。</b>触れる手順は
+ * {@code docs/HANDOVER.md} 4-4 の 11 番にしかなかった。
+ *
+ * <p><b>★ 11 番が自動化されたわけではない。</b>あちらが見ているのは<b>サムネイルの描き直し</b>
+ * （外した後に絵が入れ替わらないこと／空のタイルが残らないこと）であり、
+ * <b>どちらもここでは見ていない。</b>「×」を押すという<b>動作が同じ</b>だけである。
  *
  * <p><b>★ 一覧は 2 ファイル以上でしか出ない。</b>1 つしか開いていなければ表題で足りる
  * （{@code SourceLegend}）ので、どのテストもまず「追加」でもう 1 つ開く。
@@ -52,7 +55,7 @@ class SourceLegendUiTest extends DesktopUiTest {
     void 承認するとそのファイルのページが外れる(@TempDir Path dir, FxRobot robot) throws Exception {
         openTwo(robot, dir);
 
-        clickUntilAccepted(robot, "#source-remove-1", () -> !dialogShowing(robot));
+        robot.clickOn("#source-remove-1");
         clickWhenReady(robot, "#remove-source-ok");
 
         waitFor(() -> statusText(robot).equals("2 / 2 ページ"));
@@ -72,7 +75,7 @@ class SourceLegendUiTest extends DesktopUiTest {
     void 取り消せば何も外れない(@TempDir Path dir, FxRobot robot) throws Exception {
         openTwo(robot, dir);
 
-        clickUntilAccepted(robot, "#source-remove-1", () -> !dialogShowing(robot));
+        robot.clickOn("#source-remove-1");
         clickWhenReady(robot, "#remove-source-cancel");
         WaitForAsyncUtils.waitForFxEvents();
 
@@ -97,13 +100,17 @@ class SourceLegendUiTest extends DesktopUiTest {
         addFiles(robot, TestPdfs.withText(dir.resolve("b.pdf"), "B1"), TestPdfs.withText(dir.resolve("c.pdf"), "C1"));
         assertEquals("3 / 3 ページ（3 ファイル）", statusText(robot));
 
-        clickUntilAccepted(robot, "#source-remove-0", () -> !dialogShowing(robot));
+        robot.clickOn("#source-remove-0");
         clickWhenReady(robot, "#remove-source-ok");
 
         waitFor(() -> statusText(robot).equals("2 / 2 ページ（2 ファイル）"));
         // 3 つ目の位置は空いた。残っていると、次に 3 ファイル開いたとき同じ id が 2 つ並ぶ。
         assertTrue(robot.lookup("#source-remove-2").tryQuery().isEmpty(), "外したぶんの id が一覧に残っている（#115）");
-        assertTrue(robot.lookup("#source-remove-1").tryQuery().isPresent(), "残った 2 つぶんが揃っていない");
+
+        // ★★ 位置で決まる id なので、繰り下がった先が別のファイルを指す。そこまで見ないと、
+        //   この変更が防ごうとしている失敗——ある「×」が別のファイルを外すこと——が緑のまま通る。
+        assertEquals("b.pdf をこの編集から外す", accessibleTextOf(robot, "#source-remove-0"), "繰り下がった先が元のファイルを指したままである");
+        assertEquals("c.pdf をこの編集から外す", accessibleTextOf(robot, "#source-remove-1"));
     }
 
     /**
@@ -130,27 +137,14 @@ class SourceLegendUiTest extends DesktopUiTest {
         assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot));
     }
 
-    /** 「追加」で開く。一覧が出そろうまで待つ。 */
+    /** 「追加」で足して、一覧が出そろうまで待つ。 */
     private void addFiles(FxRobot robot, Path... paths) throws Exception {
-        dialogs.willOpenMultiple(paths);
-        clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+        addFixtures(robot, paths);
         waitForNode(robot, "#source-remove-0");
-    }
-
-    /**
-     * 確認ダイアログが出ているか。
-     *
-     * <p><b>押した結果が起きたかを見るために要る</b>（{@link DesktopUiTest#clickUntilAccepted}）。
-     * <b>「×」は主画面のボタンなので、ふつうは押し直しが要らない</b>——だが
-     * <b>この一覧は文書を開いた直後に作り直される節点であり、
-     * 前面に出るまでの取りこぼしを他のボタンと同じ形で吸収しておく。</b>
-     */
-    private static boolean dialogShowing(FxRobot robot) {
-        return robot.lookup("#remove-source-dialog").tryQuery().isPresent();
     }
 
     /** 節点に付いた、支援技術から読まれる名前。 */
     private static String accessibleTextOf(FxRobot robot, String id) {
-        return robot.lookup(id).queryAs(Button.class).getAccessibleText();
+        return button(robot, id).getAccessibleText();
     }
 }

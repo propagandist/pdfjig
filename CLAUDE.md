@@ -140,8 +140,7 @@ Public リポジトリであり、一度コミットされた機密文書は取�
 | ツールバー | `tool-<操作>` | `tool-open` `tool-rotate-right` |
 | メニュー | `menu-<操作>` | `menu-open` `menu-about` |
 | 主画面の部品 | `<役割>` | `thumbnail-list` `status-label` |
-| サムネイル | `thumbnail-tile-<並びの位置>` | `thumbnail-tile-0` |
-| ファイル一覧の「×」 | `source-remove-<並びの位置>` | `source-remove-0` |
+| 並びの中で繰り返す部品 | `<部品>-<操作>-<並びの位置>` | `thumbnail-tile-0` `source-remove-0` |
 | ダイアログ | `<用途>-dialog` | `password-dialog` `range-dialog` |
 | ダイアログの中身 | `<用途>-<役割>` | `password-field` `range-first` `page-count-input` |
 
@@ -161,10 +160,13 @@ Public リポジトリであり、一度コミットされた機密文書は取�
 - Windows のネイティブなファイル選択は `FileDialogs` の向こう側に置く。
   直に `FileChooser` / `DirectoryChooser` を使わない。あの境界の外は自動テストから
   操作できず、「開く → 編集 → 保存」を画面の上で通せなくなる
-- ツールバーのボタンには `setAccessibleText` を付ける。Windows の UI Automation から
-  見えるのは Name だけで、`setId` は届かない（JavaFX は AutomationId に内部の連番を返す）。
-  **これは起動スモーク `tools/smoke/Verify-AppImage.ps1` との契約であり、
-  文言を変えるならあちらも変える**
+- **文字を持たないボタンには `setAccessibleText` を付ける**（ツールバー・一覧の「×」など、
+  絵だけのもの全部）。Windows の UI Automation から見えるのは Name だけで、`setId` は届かない
+  （JavaFX は AutomationId に内部の連番を返す）。**`setId` を付けたから足りる、にはならない。**
+  ★ **同じものが並ぶなら Name で区別が付くこと**——「外す」が 3 つ並ぶと、
+  読み上げからはどれを押しているのか分からない（#115）
+  ── **ツールバーの文言は起動スモーク `tools/smoke/Verify-AppImage.ps1` との契約であり、
+  変えるならあちらも変える。** **一覧の「×」の文言は `SourceLegendUiTest` との契約である**
 
 ### テスト
 
