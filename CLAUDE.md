@@ -140,7 +140,7 @@ Public リポジトリであり、一度コミットされた機密文書は取�
 | ツールバー | `tool-<操作>` | `tool-open` `tool-rotate-right` |
 | メニュー | `menu-<操作>` | `menu-open` `menu-about` |
 | 主画面の部品 | `<役割>` | `thumbnail-list` `status-label` |
-| 並びの中で繰り返す部品 | `<部品>-<操作>-<並びの位置>` | `thumbnail-tile-0` `source-remove-0` |
+| 並びの中で繰り返す部品 | `<役割>-<並びの位置>` | `thumbnail-tile-0` `source-remove-0` |
 | ダイアログ | `<用途>-dialog` | `password-dialog` `range-dialog` |
 | ダイアログの中身 | `<用途>-<役割>` | `password-field` `range-first` `page-count-input` |
 
