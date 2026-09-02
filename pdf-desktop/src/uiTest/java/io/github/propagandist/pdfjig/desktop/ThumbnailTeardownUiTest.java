@@ -1,20 +1,14 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import javafx.application.Platform;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.testfx.api.FxToolkit;
+import org.testfx.util.WaitForAsyncUtils;
 
 /**
  * 文書を手放すときの片づけの順（#129）。
@@ -33,26 +27,31 @@ import org.testfx.api.FxToolkit;
  *
  * <p><b>画面は出さない。</b>{@link ThumbnailSourceUiTest} と同じ流儀で、Toolkit だけを起こす
  * ——<b>TestFX の robot を使わないので、開発機のマウスとキーボードを取り上げない。</b>
- * ここで見たいのは片づけの順だけであり、一覧のセルは要らない。
+ * ここで見たいのは取り消しの後始末だけであり、一覧のセルは要らない。
  *
- * <p><b>★★ ここが縛っているのは {@code ThumbnailTile} の側だけである</b>（2026-09-02 実測）。
- * <b>{@code ThumbnailGrid#clear} の順を戻してもここは緑になる</b>——このテストは
- * <b>タイルを一覧のセルとして持たせていない</b>ので、{@code grid.clear()} が
- * タイルを片づけず、<b>実際の経路（セル更新の発火）を通らない。</b>
- * <b>あちらを縛るには一覧のセルが要り、それには画面が要る</b>——
- * <b>実際の経路を見ているのは {@code MainWindowUiTest} の側である</b>
- * （#129 はそこで 2 回赤くなった）。
+ * <p><b>★★ 「描画が終わる前」は構造では作れていない。余裕で作っている。</b>
+ * 当初はここに「FX スレッドを離さない限り {@code Task} は成功へ移れない」と書いたが、
+ * <b>それは誤りである</b>（門の 1 段目が突いた）——{@code Task} は
+ * {@code Platform.runLater} で成功を<b>通知する</b>が、{@code FutureTask} の状態そのものは
+ * <b>描画スレッドの上で先に決まる。</b>そこまで進んでいれば {@code cancel(false)} は偽を返し、
+ * <b>取り消しの後始末は走らない——つまり偽の緑になりうる。</b>
+ * <b>実際には 3 行の代入より PDF 1 枚の描画のほうが桁で遅いので当たらない</b>が、
+ * <b>「構造で保証している」と書くのは嘘である。</b>
+ * ── ★ <b>構造にするには {@code GatedRendering}</b>（{@link ThumbnailSourceUiTest}）
+ * <b>のような差し替えが要る。</b>いまは {@code DocumentSession} が {@code ThumbnailSource} を
+ * 直に組んでおり、差し込む口が無い。
  *
- * <p><b>★ 待ち合わせに頼らない。</b>描画が終わる前に片づける、という状態を
- * <b>時間で作りにいくと機械の速さで結果が決まる</b>（{@code CLAUDE.md}「不安定なテストの扱い」）。
- * 代わりに<b>すべてを FX スレッドの 1 回の実行の中で済ませる</b>——
- * {@code Task} が成功へ移るのは {@code Platform.runLater} を通るので、
- * <b>こちらが FX スレッドを離さない限り、頼んだ描画は必ず「まだ終わっていない」ままである。</b>
+ * <p><b>★ 縛れているのは {@code cancelPending} がハンドラを外すことだけである</b>
+ * （2026-09-02 実測。外すと赤、それ以外の変異では緑）。
+ * <b>{@code show} の側の再入</b>——タイルが別のページへ回されたとき、
+ * <b>離れたばかりのページを頼み直し、その依頼を取り消せないまま捨てる</b>——
+ * <b>は同じ 1 行が直すが、ここでは見ていない。</b>外から見える違いが
+ * 「要らない描画が 1 つ走る」だけだからである。
  */
 class ThumbnailTeardownUiTest {
 
     /** 何かが起きるのを待つ上限。CI のランナーは遅いので短くしない。 */
-    private static final int TIMEOUT_SECONDS = 20;
+    private static final long TIMEOUT_MILLIS = 20_000L;
 
     @BeforeAll
     static void startToolkit() throws Exception {
@@ -71,54 +70,26 @@ class ThumbnailTeardownUiTest {
      * <b>{@code stillShowing} が真のまま本体へ戻り、消えた {@code thumbnails} を引く。</b>
      */
     @Test
-    @DisplayName("描画待ちのタイルが居ても、文書を手放せる")
-    void letsGoOfTheDocumentWhileATileIsStillWaitingForItsImage(@TempDir Path directory) throws Exception {
+    void 描画待ちのタイルが居ても文書を手放せる(@TempDir Path directory) throws Exception {
         Path pdf = TestPdfs.plain(directory.resolve("doc.pdf"), 3);
 
         try (DocumentSession session = DocumentSession.open(pdf)) {
-            AtomicReference<Throwable> failure = onFxThread(() -> {
-                ThumbnailGrid grid = new ThumbnailGrid();
-                grid.show(session);
-
-                ThumbnailTile tile = new ThumbnailTile(grid);
-                // 絵はまだ無い。ここで頼んだ描画は、この実行を抜けるまで終われない。
-                tile.show(0, session.order().pages().get(0));
-
-                // 利用者から見れば「別の文書を開く」か「窓を閉じる」である。
-                grid.clear();
-                tile.clear();
-                return null;
-            });
-
+            // ★ waitForAsyncFx は FX スレッドで走らせ、投げられたものを呼んだ側へ返す。
+            //   Platform.runLater だけでは、中で投げたものが呼んだ側に届かない。
             assertDoesNotThrow(
-                    () -> {
-                        if (failure.get() != null) {
-                            throw failure.get();
-                        }
-                    },
+                    () -> WaitForAsyncUtils.waitForAsyncFx(TIMEOUT_MILLIS, () -> {
+                        ThumbnailGrid grid = new ThumbnailGrid();
+                        grid.show(session);
+
+                        ThumbnailTile tile = new ThumbnailTile(grid);
+                        // 絵はまだ無い。ここで頼んだ描画は、まだ終わっていない（上の★★）。
+                        tile.show(0, session.order().pages().get(0));
+
+                        // 利用者から見れば「別の文書を開く」か「窓を閉じる」である。
+                        grid.clear();
+                        tile.clear();
+                    }),
                     "描画待ちのタイルを抱えたまま文書を手放すと落ちる（#129）");
         }
-    }
-
-    /**
-     * FX スレッドで走らせ、投げられたものを持ち帰る。
-     *
-     * <p><b>★ 例外を握り潰さない。</b>{@code Platform.runLater} の中で投げると
-     * <b>既定の扱いでは呼んだ側に届かない</b>——それではこのテストが見たいものを見られない。
-     */
-    private static AtomicReference<Throwable> onFxThread(Callable<Void> work) throws Exception {
-        AtomicReference<Throwable> thrown = new AtomicReference<>();
-        CountDownLatch done = new CountDownLatch(1);
-        Platform.runLater(() -> {
-            try {
-                work.call();
-            } catch (Throwable t) {
-                thrown.set(t);
-            } finally {
-                done.countDown();
-            }
-        });
-        assertTrue(done.await(TIMEOUT_SECONDS, TimeUnit.SECONDS), "FX スレッドが返ってこない");
-        return thrown;
     }
 }

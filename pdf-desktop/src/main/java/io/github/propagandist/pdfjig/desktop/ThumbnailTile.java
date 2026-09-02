@@ -272,20 +272,11 @@ final class ThumbnailTile {
         return shown != null && shown.sourceIndex() == sourceIndex && shown.pageNumber() == pageNumber;
     }
 
-    /**
-     * 余った桁を空にする。行の幅は保ったままにして、桁が詰まらないようにする。
-     *
-     * <p><b>★★ 取り消しより先に「もう表示していない」と記す</b>（#129）。
-     * {@link Task#cancel} は {@code onCancelled} を<b>同期で</b>発火するので、
-     * <b>後に記すと {@link #stillShowing} が真のまま {@link #show} へ戻り、
-     * 手放したばかりの供給元を引きにいく。</b>
-     * <b>あちらの Javadoc が言う「タイルが別のページへ回されて取り消したときは外れる」を、
-     * 片づけの経路でも成り立たせる。</b>
-     */
+    /** 余った桁を空にする。行の幅は保ったままにして、桁が詰まらないようにする。 */
     void clear() {
+        cancelPending();
         index = -1;
         shown = null;
-        cancelPending();
         // 空きタイルに古い id を残さない。残すと、同じ id の節点が一覧に 2 つ並びうる。
         root.setId(null);
         imageView.setImage(null);
@@ -332,10 +323,30 @@ final class ThumbnailTile {
         event.consume();
     }
 
+    /**
+     * このタイルの都合で、頼んでいた描画を取り消す。
+     *
+     * <p><b>★★ 取り消す前にハンドラを外す</b>（#129）。{@link Task#cancel} は
+     * {@code onCancelled} を<b>同期で</b>発火するので、外さないと
+     * <b>これから書き換える {@link #shown} を見て「まだ同じページを受け持っている」と判定し、
+     * {@link #show} へ戻ってしまう。</b>
+     *
+     * <p><b>外さないと 2 通りに壊れた。</b>{@link #clear} からは<b>手放したばかりの供給元を
+     * 引いて落ち</b>（{@code ThumbnailGrid#thumbnails} が {@code null}）、{@link #show} からは
+     * <b>タイルが離れたばかりのページを頼み直す</b>——しかもその依頼は、戻った先の
+     * {@code pending = null} で<b>取り消す手立てごと捨てられる。</b>
+     *
+     * <p><b>★ 頼み直しそのものは要る。</b>ただし<b>それが要るのは、ファイルを外す側が
+     * 描画を捨てたときだけである</b>（{@code ThumbnailSource#awaitRendering}。#52 / #88）。
+     * <b>あちらはこのメソッドを通らずに {@code Task#cancel} を呼ぶ</b>ので、
+     * ここでハンドラを外しても、あちらの頼み直しは働く。
+     */
     private void cancelPending() {
-        if (pending != null) {
-            pending.cancel(false);
-            pending = null;
+        Task<Image> task = pending;
+        pending = null;
+        if (task != null) {
+            task.setOnCancelled(null);
+            task.cancel(false);
         }
     }
 
