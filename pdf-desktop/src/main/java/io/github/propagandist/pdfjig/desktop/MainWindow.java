@@ -94,6 +94,23 @@ public final class MainWindow {
      */
     private final BooleanProperty stale = new SimpleBooleanProperty(false);
 
+    /**
+     * 文書の中身を変える操作を通してはならない条件。
+     *
+     * <p><b>★★ ここが唯一の門である</b>（#114）。以前は {@link Action} から作られた節点だけが
+     * {@code busy} を見ており、<b>一覧の「×」・サムネイルの DELETE キー・タイルのドラッグは
+     * 素通りしていた</b>——{@code busy} を入口ごとに書くと、<b>入口が増えた日にまた漏れる。</b>
+     *
+     * <p>成り立ちは 3 つ。<b>文書が開かれていること</b>、<b>操作が走っていないこと</b>、
+     * <b>書き出したものと食い違っていないこと</b>（{@link #stale}。#118）——
+     * 食い違っている間は並びが書き出す前のファイルに対する指定のままなので、
+     * そこから何を書き出しても同じ変換が二重に掛かる。
+     *
+     * <p><b>★ 「閉じる」と「開く」はここで縛らない。</b>「開き直してください」と出しておいて
+     * 閉じられないのでは、利用者に打つ手が無くなる（開き直すと印は下りる）。
+     */
+    private final BooleanBinding editingBlocked;
+
     /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
     private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
 
@@ -138,6 +155,7 @@ public final class MainWindow {
         this.dialogs = dialogs;
         this.tasks = tasks;
         this.messages = new Messages(stage);
+        this.editingBlocked = documentOpen.not().or(tasks.busy()).or(stale);
     }
 
     /**
@@ -148,6 +166,9 @@ public final class MainWindow {
     public Parent build() {
         thumbnails.setOnDelete(this::deleteSelected);
         legend.setOnRemove(this::removeSource);
+        // ★ この 2 つは Action を通らない入口である（#114）。同じ門を差す。
+        thumbnails.setEditingBlockedWhen(editingBlocked);
+        legend.setRemoveBlockedWhen(editingBlocked);
 
         Actions actions = buildActions();
 
@@ -197,27 +218,15 @@ public final class MainWindow {
         // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
         BooleanBinding needsDocument = documentOpen.not().or(busy);
 
-        // ★★ 食い違っている間は、中身に対する操作をさせない（{@link #stale}。#118）。
-        //   並びは書き出す前のファイルに対する指定のままなので、そこから何を書き出しても
-        //   同じ変換が二重に掛かる。
-        //   ★ 「閉じる」はここに含めない——「開き直してください」と出しておいて閉じられないのでは、
-        //     利用者に打つ手が無くなる。「開く」も busy だけで縛ってある（開き直すと印は下りる）。
-        ObservableValue<Boolean> needsFreshDocument = needsDocument.or(stale);
-
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
-        ObservableValue<Boolean> breakUnavailable = documentOpen
-                .not()
-                .or(busy)
-                .or(stale)
-                .or(thumbnails.selectedIndexProperty().lessThan(1));
+        ObservableValue<Boolean> breakUnavailable =
+                editingBlocked.or(thumbnails.selectedIndexProperty().lessThan(1));
 
-        ObservableValue<Boolean> noBreaks =
-                documentOpen.not().or(busy).or(stale).or(breakCount.isEqualTo(0));
+        ObservableValue<Boolean> noBreaks = editingBlocked.or(breakCount.isEqualTo(0));
 
         // 1 ページしかなければ 1 枚ずつには分けられない。できるのは元と同じ 1 ファイルだけで、
         // 区切りが無いときと違って利用者に打つ手も無い。断るより初めから押させない。
-        ObservableValue<Boolean> notSplittable =
-                documentOpen.not().or(busy).or(stale).or(pageCount.lessThan(2));
+        ObservableValue<Boolean> notSplittable = editingBlocked.or(pageCount.lessThan(2));
 
         return new Actions(
                 new Action(
@@ -235,7 +244,7 @@ public final class MainWindow {
                         ToolIcons.SAVE,
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
                         this::saveAs,
-                        needsFreshDocument),
+                        editingBlocked),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
                 new Action("quit", "終了", null, null, null, stage::close, null),
                 new Action(
@@ -245,7 +254,7 @@ public final class MainWindow {
                         ToolIcons.DELETE,
                         new KeyCodeCombination(KeyCode.DELETE),
                         this::deleteSelected,
-                        needsFreshDocument),
+                        editingBlocked),
                 new Action(
                         "rotate-right",
                         "右に 90 度回転",
@@ -253,7 +262,7 @@ public final class MainWindow {
                         ToolIcons.ROTATE_RIGHT,
                         new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.CLOCKWISE_90),
-                        needsFreshDocument),
+                        editingBlocked),
                 new Action(
                         "rotate-left",
                         "左に 90 度回転",
@@ -261,9 +270,8 @@ public final class MainWindow {
                         ToolIcons.ROTATE_LEFT,
                         new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90),
-                        needsFreshDocument),
-                new Action(
-                        "keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsFreshDocument),
+                        editingBlocked),
+                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, editingBlocked),
                 new Action(
                         "toggle-break",
                         "ここで区切る / 区切りを外す",
@@ -272,12 +280,11 @@ public final class MainWindow {
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
                         this::toggleBreak,
                         breakUnavailable),
-                new Action(
-                        "break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsFreshDocument),
+                new Action("break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, editingBlocked),
                 new Action("clear-breaks", "区切りをすべて外す", null, null, null, this::clearBreaks, noBreaks),
-                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsFreshDocument),
-                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsFreshDocument),
-                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsFreshDocument),
+                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, editingBlocked),
+                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, editingBlocked),
+                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, editingBlocked),
                 new Action(
                         "split-pages",
                         "1 ページずつに分割…",
@@ -299,6 +306,14 @@ public final class MainWindow {
      * @param path 開くファイル
      */
     public void open(Path path) {
+        if (tasks.busy().get()) {
+            // ★ 走っている間は受けない（#114）。今日の呼び出し元は起動引数だけで、そこでは
+            //   何も走っていない——ファイルの関連付けから呼ばれる日に、ここが素通りしないようにしてある。
+            //   ★ 下の rememberReadFile より先に見る。開かないものを「次に探す場所」にしない。
+            Logs.warn(LogEvent.OPERATION_REFUSED);
+            return;
+        }
+
         // 開くのに失敗しても覚える。パスワードが要る文書でも壊れた文書でも、
         // 次に PDF を探す場所は同じフォルダである。
         //
@@ -411,9 +426,10 @@ public final class MainWindow {
      * どちらでもセッションは古いままで、<b>続けて保存すると同じ変換が二重に掛かる。</b>
      * <b>書き出し自体は成功しておりファイルはできているので、失うものは無い</b>——開き直せば続けられる。
      *
-     * <p><b>★ 書き出している間の編集を捨てない。</b>{@code busy} を素通りする入口が実際にある
-     * （{@code BackgroundTasks}。#114）。そこで並べ替えや削除がされていたら、
+     * <p><b>★ 書き出している間の編集を捨てない。</b>そこで並べ替えや削除がされていたら、
      * <b>寄せ直すとその編集ごと消える</b>——直しながら別のものを壊すことになる（優先順位 1）。
+     * <b>いまは門があるので、利用者の操作からはそこへ届かない</b>（{@link #editingBlocked}。#114）
+     * ——<b>それでも見るのは、門が漏れた日にここが最後の砦になるからである。</b>
      */
     private void reopenAt(DocumentSession saving, Path output, List<Boolean> breaks, int selected) {
         if (session != saving) {

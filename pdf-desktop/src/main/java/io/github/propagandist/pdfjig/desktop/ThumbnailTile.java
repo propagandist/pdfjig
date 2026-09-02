@@ -366,6 +366,11 @@ final class ThumbnailTile {
         if (dragged < 0) {
             return;
         }
+        if (grid.editingBlocked()) {
+            // ★ 走っている間は掴ませない（#114）。落とし先でも見ているが、そちらだけだと
+            //   「掴んで運べたのに戻る」になる——押せないことが見えるのは、始まりの側だけである。
+            return;
+        }
         grid.select(dragged);
 
         Dragboard board = root.startDragAndDrop(TransferMode.MOVE);

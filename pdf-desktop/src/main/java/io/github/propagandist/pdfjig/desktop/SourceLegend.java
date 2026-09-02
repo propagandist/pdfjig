@@ -2,6 +2,8 @@ package io.github.propagandist.pdfjig.desktop;
 
 import java.util.List;
 import java.util.function.IntConsumer;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -39,6 +41,14 @@ final class SourceLegend {
     /** 「×」で呼ぶ処理。画面側が差す。 */
     private IntConsumer onRemove = sourceIndex -> {};
 
+    /**
+     * 「×」を押せなくする条件。画面側が差す（#114）。
+     *
+     * <p>差されるまでは押せる。<b>この一覧だけで判断できるものではない</b>——
+     * 走っている仕事があるかを持っているのは画面の側である。
+     */
+    private ObservableValue<Boolean> removeBlocked = new SimpleBooleanProperty(false);
+
     SourceLegend() {
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
@@ -53,6 +63,22 @@ final class SourceLegend {
     /** ファイルを外すときに呼ぶ処理を差す。 */
     void setOnRemove(IntConsumer action) {
         this.onRemove = action;
+    }
+
+    /**
+     * ファイルを外せない条件を差す。
+     *
+     * <p><b>★★ この入口は {@link Action} を通らない</b>——ツールバーにもメニューにも無く、
+     * <b>{@code disableProperty} を 1 つも束ねていなかった</b>（#114）。
+     * <b>この道具で唯一取り消せない操作</b>が、走っている最中でも通る形だった。
+     *
+     * <p><b>差すのは節点を作る前でよい。</b>「×」は {@link #update} のたびに作り直され、
+     * そのときの条件に束ねられる。
+     *
+     * @param condition 押せなくする間 {@code true} になるもの
+     */
+    void setRemoveBlockedWhen(ObservableValue<Boolean> condition) {
+        this.removeBlocked = condition;
     }
 
     /**
@@ -134,6 +160,8 @@ final class SourceLegend {
         remove.setTooltip(new Tooltip(removeText));
         remove.setAccessibleText(removeText);
         remove.setOnAction(event -> onRemove.accept(sourceIndex));
+        // 走っている間は押させない。押しても何も起きないのと、押せないのは違う（#114）。
+        remove.disableProperty().bind(removeBlocked);
 
         HBox chip = new HBox(6, swatch, label, count, remove);
         chip.setAlignment(Pos.CENTER_LEFT);

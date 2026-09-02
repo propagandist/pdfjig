@@ -234,9 +234,14 @@ final class ThumbnailGrid {
         reveal(index);
     }
 
-    /** ページを動かす。タイルのドロップから呼ぶ。 */
+    /**
+     * ページを動かす。タイルのドロップから呼ぶ。
+     *
+     * <p><b>★ 落とし先はここ 1 か所である。</b>掴む側も止めてあるが（{@code ThumbnailTile}）、
+     * <b>掴んだ後に走り出した仕事に追い越されうる</b>ので、当てる直前にもう一度見る（#114）。
+     */
     void move(int fromIndex, int toIndex) {
-        if (order == null || fromIndex == toIndex) {
+        if (order == null || fromIndex == toIndex || editingBlocked()) {
             return;
         }
         order.move(fromIndex, toIndex);
@@ -337,7 +342,11 @@ final class ThumbnailGrid {
             return;
         }
         if (event.getCode() == KeyCode.DELETE) {
-            onDelete.run();
+            // ★ 同じ操作のメニュー項目が無効でも、このキーはそこを通らない（#114）。
+            //   握り潰すところは変えない——無効なメニュー項目のアクセラレータと同じ見え方にする。
+            if (!editingBlocked()) {
+                onDelete.run();
+            }
             event.consume();
             return;
         }
