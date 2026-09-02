@@ -221,7 +221,12 @@ final class ThumbnailTile {
             // ファイルを外すとき、まだ始まっていない描画は捨てられる
             // （ThumbnailSource#awaitRendering）。このタイルがまだ同じページを受け持っていれば、
             // 絵の無いまま取り残される——一覧の組み直しは、中身の変わらなかった行を描き直さない。
-            // タイルが別のページへ回されて取り消したときは、下の条件で外れる。
+            //
+            // ★★ この条件は「自分で取り消した」ぶんを外さない（#129）。Task#cancel は
+            //   onCancelled を同期で発火するので、cancelPending が shown を書き換える前に
+            //   ここへ来る——真を返して頼み直しに入っていた。外しているのは cancelPending が
+            //   ハンドラそのものを捨てるからであり、この条件ではない。
+            //   ★ だから cancelPending の setOnCancelled(null) を「要らない」と読まないこと。
             if (stillShowing(sourceIndex, pageNumber)) {
                 show(pageIndex, entry);
             }
