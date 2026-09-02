@@ -72,11 +72,22 @@ abstract class DesktopUiTest {
         return new NoOpProvider();
     }
 
+    /**
+     * 使う非同期の実行の手段。
+     *
+     * <p><b>「操作が走っている間」を作りたいテストだけが差し替える</b>
+     * （{@link EditingGateUiTest}）。実際の書き出しの速さで待ち合わせに行くと、
+     * 落ちるかどうかが機械の速さで決まるテストになる。
+     */
+    BackgroundTasks tasks() {
+        return new BackgroundTasks();
+    }
+
     /** 各テストクラスの {@code @Start} から呼ぶ。 */
     void setUp(Stage stage) {
         this.stage = stage;
         dialogs = new StubFileDialogs();
-        window = new MainWindow(stage, aiProvider(), null, dialogs);
+        window = new MainWindow(stage, aiProvider(), null, dialogs, tasks());
 
         Scene scene = new Scene(window.build(), 960, 720);
         scene.getStylesheets()

@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javafx.beans.property.ReadOnlyIntegerProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -80,6 +82,14 @@ final class ThumbnailGrid {
     /** Delete キーで呼ぶ処理。画面側が差す。 */
     private Runnable onDelete = () -> {};
 
+    /**
+     * 文書を変える操作を通してはならない条件。画面側が差す（#114）。
+     *
+     * <p>差されるまでは通す。<b>この一覧だけで判断できるものではない</b>——
+     * 走っている仕事があるか、書き出したものと食い違っているかを持っているのは画面の側である。
+     */
+    private ObservableValue<Boolean> editingBlocked = new SimpleBooleanProperty(false);
+
     ThumbnailGrid() {
         rows.setId("thumbnail-list");
         rows.getStyleClass().add("thumbnail-list");
@@ -117,6 +127,23 @@ final class ThumbnailGrid {
     /** Delete キーで呼ぶ処理を差す。 */
     void setOnDelete(Runnable action) {
         this.onDelete = action;
+    }
+
+    /**
+     * 文書を変える操作を通してはならない条件を差す。
+     *
+     * <p><b>ここを通る入口は {@link Action} を通らない</b>——DELETE キーは処理を直に呼び、
+     * ドラッグの落とし先は {@link #move} を直に呼ぶ。<b>メニュー項目が無効かどうかは見ていない。</b>
+     *
+     * @param condition 通してはならない間 {@code true} になるもの
+     */
+    void setEditingBlockedWhen(ObservableValue<Boolean> condition) {
+        this.editingBlocked = condition;
+    }
+
+    /** いま、文書を変える操作を通してはならないか。タイル（ドラッグの始まり）からも見る。 */
+    boolean editingBlocked() {
+        return Boolean.TRUE.equals(editingBlocked.getValue());
     }
 
     /**

@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.beans.property.ReadOnlyBooleanProperty;
@@ -24,8 +25,22 @@ import javafx.concurrent.Task;
  * <p><b>★ 書き込みできる口を外へ出さない。</b>{@link #busy()} が返すのは読み取り専用であり、
  * <b>立てるのも下ろすのもここだけ</b>である。誰かが外から下ろせると、
  * 走っている最中に操作が通る形ができる。
+ *
+ * <p><b>★ 仕事の始め方だけを差し替えられる</b>（{@link #BackgroundTasks(Executor)}）。
+ * <b>「走っている間」をテストから作るためである</b>——実際の書き出しの速さで待ち合わせに
+ * いくと、<b>落ちるかどうかが機械の速さで決まるテストになる</b>
+ * （{@code CLAUDE.md}「不安定なテストの扱い」。{@code ThumbnailSource} に
+ * {@code PageRendering} を差し込んであるのと同じ形である）。
  */
 final class BackgroundTasks {
+
+    /**
+     * 仕事を始める手。
+     *
+     * <p><b>既定は仕事ごとの daemon スレッドである。</b>差し替えるのはテストだけで、
+     * 配布物はこの既定しか通らない。
+     */
+    private final Executor starter;
 
     /**
      * 進行中の仕事があるか。
@@ -35,6 +50,19 @@ final class BackgroundTasks {
      * {@code run} が縛っているからではなく、呼ぶ側がたまたま重ねていないだけである（#114）。
      */
     private final ReadOnlyBooleanWrapper busy = new ReadOnlyBooleanWrapper(false);
+
+    BackgroundTasks() {
+        this(BackgroundTasks::startWorker);
+    }
+
+    /**
+     * 仕事の始め方を指定して作る。
+     *
+     * @param starter 仕事を始める手。渡されたものを走らせれば、どこで走らせてもよい
+     */
+    BackgroundTasks(Executor starter) {
+        this.starter = starter;
+    }
 
     /** 進行中の仕事があるか。操作の有効・無効を縛るのに使う。 */
     ReadOnlyBooleanProperty busy() {
@@ -66,8 +94,12 @@ final class BackgroundTasks {
         });
 
         busy.set(true);
-        // 常駐させない。仕事は利用者の操作ごとに 1 つで、使い回す相手がいない。
-        Thread worker = new Thread(task, "pdfjig-operation");
+        starter.execute(task);
+    }
+
+    /** 既定の始め方。常駐させない——仕事は利用者の操作ごとに 1 つで、使い回す相手がいない。 */
+    private static void startWorker(Runnable work) {
+        Thread worker = new Thread(work, "pdfjig-operation");
         worker.setDaemon(true);
         worker.start();
     }

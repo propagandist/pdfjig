@@ -73,7 +73,7 @@ public final class MainWindow {
     private final FileDialogs dialogs;
 
     /** 画面を止めずに走らせる手段。進行中かどうかもここが持つ。 */
-    private final BackgroundTasks tasks = new BackgroundTasks();
+    private final BackgroundTasks tasks;
 
     /** 利用者に伝える手段。 */
     private final Messages messages;
@@ -118,10 +118,25 @@ public final class MainWindow {
      * @param dialogs ファイルとフォルダを選ばせる手段
      */
     MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices, FileDialogs dialogs) {
+        this(stage, aiProvider, hostServices, dialogs, new BackgroundTasks());
+    }
+
+    /**
+     * 非同期の実行の手段まで指定して作る。
+     *
+     * <p><b>差し替えるのはテストだけである</b>（{@link BackgroundTasks#BackgroundTasks(java.util.concurrent.Executor)}）。
+     * <b>「操作が走っている間」は、実際の書き出しの速さでは狙って作れない</b>——
+     * 待ち合わせに行くと、落ちるかどうかが機械の速さで決まるテストになる。
+     *
+     * @param tasks 画面を止めずに走らせる手段
+     */
+    MainWindow(
+            Stage stage, AiProvider aiProvider, HostServices hostServices, FileDialogs dialogs, BackgroundTasks tasks) {
         this.stage = stage;
         this.aiProvider = aiProvider;
         this.hostServices = hostServices;
         this.dialogs = dialogs;
+        this.tasks = tasks;
         this.messages = new Messages(stage);
     }
 
