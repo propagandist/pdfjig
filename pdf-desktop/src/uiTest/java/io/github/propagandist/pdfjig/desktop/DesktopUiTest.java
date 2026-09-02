@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.ai.NoOpProvider;
 import io.github.propagandist.pdfjig.core.PageText;
 import io.github.propagandist.pdfjig.core.PdfBoxTextExtraction;
 import io.github.propagandist.pdfjig.core.PdfDocument;
+import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -146,6 +147,21 @@ abstract class DesktopUiTest {
     void addFixtures(FxRobot robot, Path... fixtures) throws Exception {
         dialogs.willOpenMultiple(fixtures);
         clickUntilAccepted(robot, "#tool-add", dialogs::openMultiplePending);
+    }
+
+    /**
+     * A（2 ページ）と B（1 ページ）を開き、ファイル一覧が出そろうまで待つ。
+     *
+     * <p><b>一覧は 2 ファイル以上でしか出ない</b>（{@code SourceLegend}）。
+     * 「×」を通るテストはどれもまずここを通る。
+     *
+     * @return 開いた後の状態表示。呼ぶ側が assert に使う
+     */
+    String openTwoFiles(FxRobot robot, Path directory) throws Exception {
+        openFixture(robot, TestPdfs.withText(directory.resolve("a.pdf"), "A1", "A2"));
+        addFixtures(robot, TestPdfs.withText(directory.resolve("b.pdf"), "B1"));
+        waitForNode(robot, "#source-remove-0");
+        return statusText(robot);
     }
 
     /**

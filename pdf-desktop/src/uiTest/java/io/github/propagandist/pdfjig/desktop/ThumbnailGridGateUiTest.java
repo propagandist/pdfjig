@@ -104,8 +104,7 @@ class ThumbnailGridGateUiTest {
     /** 一覧を組み立てて文書を差す。門は {@link #blocked} が握る。 */
     private ThumbnailGrid attach(DocumentSession session) throws Exception {
         return WaitForAsyncUtils.waitForAsyncFx(TIMEOUT_MILLIS, () -> {
-            ThumbnailGrid grid = new ThumbnailGrid();
-            grid.setEditingBlockedWhen(blocked);
+            ThumbnailGrid grid = new ThumbnailGrid(blocked);
             grid.show(session);
             return grid;
         });

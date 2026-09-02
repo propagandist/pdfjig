@@ -5,9 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javafx.beans.property.ReadOnlyIntegerProperty;
-import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
-import javafx.beans.value.ObservableValue;
+import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.ListChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -83,14 +82,21 @@ final class ThumbnailGrid {
     private Runnable onDelete = () -> {};
 
     /**
-     * 文書を変える操作を通してはならない条件。画面側が差す（#114）。
+     * 文書を変える操作を通してはならない条件（#114）。
      *
-     * <p>差されるまでは通す。<b>この一覧だけで判断できるものではない</b>——
-     * 走っている仕事があるか、書き出したものと食い違っているかを持っているのは画面の側である。
+     * <p><b>★★ 受け取らずには作れない。</b>差し忘れを既定値で埋めると<b>「通す」側に倒れ</b>、
+     * <b>それはこの門が作られた原因そのもの</b>——入口が条件を見ていないこと——を
+     * <b>1 段上で作り直すことになる。</b>
      */
-    private ObservableValue<Boolean> editingBlocked = new SimpleBooleanProperty(false);
+    private final ObservableBooleanValue editingBlocked;
 
-    ThumbnailGrid() {
+    /**
+     * @param editingBlocked 文書を変える操作を通してはならない間 {@code true} になるもの。
+     *                       この一覧だけでは決まらない（走っている仕事があるか、
+     *                       書き出したものと食い違っているかを持っているのは画面の側である）
+     */
+    ThumbnailGrid(ObservableBooleanValue editingBlocked) {
+        this.editingBlocked = editingBlocked;
         rows.setId("thumbnail-list");
         rows.getStyleClass().add("thumbnail-list");
         rows.setPlaceholder(new Label("PDF を開いてください。"));
@@ -130,20 +136,13 @@ final class ThumbnailGrid {
     }
 
     /**
-     * 文書を変える操作を通してはならない条件を差す。
+     * いま、文書を変える操作を通してはならないか。タイル（ドラッグの始まり）からも見る。
      *
      * <p><b>ここを通る入口は {@link Action} を通らない</b>——DELETE キーは処理を直に呼び、
      * ドラッグの落とし先は {@link #move} を直に呼ぶ。<b>メニュー項目が無効かどうかは見ていない。</b>
-     *
-     * @param condition 通してはならない間 {@code true} になるもの
      */
-    void setEditingBlockedWhen(ObservableValue<Boolean> condition) {
-        this.editingBlocked = condition;
-    }
-
-    /** いま、文書を変える操作を通してはならないか。タイル（ドラッグの始まり）からも見る。 */
     boolean editingBlocked() {
-        return Boolean.TRUE.equals(editingBlocked.getValue());
+        return editingBlocked.get();
     }
 
     /**
@@ -239,14 +238,20 @@ final class ThumbnailGrid {
      *
      * <p><b>★ 落とし先はここ 1 か所である。</b>掴む側も止めてあるが（{@code ThumbnailTile}）、
      * <b>掴んだ後に走り出した仕事に追い越されうる</b>ので、当てる直前にもう一度見る（#114）。
+     *
+     * <p><b>★ 動かせたかを返す。</b>落とし先は「移した」とジェスチャに答えるので、
+     * <b>断ったのに成功と答えると、掴んだ側には嘘になる。</b>
+     *
+     * @return 動かしたなら {@code true}
      */
-    void move(int fromIndex, int toIndex) {
+    boolean move(int fromIndex, int toIndex) {
         if (order == null || fromIndex == toIndex || editingBlocked()) {
-            return;
+            return false;
         }
         order.move(fromIndex, toIndex);
         // 動かした先が別の行になることがある。掴んでいたページを見失わせない。
         selectAndReveal(toIndex);
+        return true;
     }
 
     /** その節点がこの一覧の中のものか。文書間のドラッグを弾くために使う。 */

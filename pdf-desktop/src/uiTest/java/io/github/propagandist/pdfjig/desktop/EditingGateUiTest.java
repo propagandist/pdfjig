@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.input.KeyCode;
@@ -57,6 +58,22 @@ import org.testfx.util.WaitForAsyncUtils;
  */
 class EditingGateUiTest extends DesktopUiTest {
 
+    /** 2 ファイルを開いた直後の状態表示。 */
+    private static final String TWO_FILES = "3 / 3 ページ（2 ファイル）";
+
+    /** 2 ファイルを開いた直後の中身。書き出しを伴う筋は、ここまで確かめる。 */
+    private static final List<String> TWO_FILE_PAGES = List.of("A1", "A2", "B1");
+
+    /**
+     * 出ないはずの窓が本当に出ないことを見るための猶予。
+     *
+     * <p><b>「待てば直る」種類の待ちではない。</b>直っていれば窓は<b>いつまで待っても出ない</b>ので、
+     * 長く取っても偽の緑にならない。短すぎると、窓が立ち上がりきっていないだけの状態を
+     * 「出ていない」と読みうるので、そちら側に倒してある
+     * （{@link ThumbnailSourceUiTest} の猶予と同じ考え方である）。
+     */
+    private static final int GRACE_SECONDS = 2;
+
     /** 放すまで仕事を持ったままにできる実行係。 */
     private final HeldTasks held = new HeldTasks();
 
@@ -72,6 +89,9 @@ class EditingGateUiTest extends DesktopUiTest {
 
     @Stop
     void stop() {
+        // ★ 抱えたまま落ちたときのために放す。assert が途中で倒れると finishHeldSave まで
+        //   行かず、捨てる文書を掴んだ仕事が残る。
+        held.release();
         tearDown();
     }
 
@@ -84,18 +104,18 @@ class EditingGateUiTest extends DesktopUiTest {
      */
     @Test
     void 保存が走っている間はファイル一覧から外せない(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path output = dir.resolve("out.pdf");
         openTwo(robot, dir);
-        startHeldSave(robot, dir.resolve("out.pdf"));
+        startHeldSave(robot, output);
 
         assertTrue(button(robot, "#source-remove-0").isDisabled(), "保存が走っている間に「×」が押せる");
 
         robot.clickOn("#source-remove-0");
-        WaitForAsyncUtils.waitForFxEvents();
+        assertTrue(dialogButton(robot, "#remove-source-ok").isEmpty(), "押せてしまい、確認まで出ている");
+        assertEquals(TWO_FILES, statusText(robot));
 
-        assertTrue(robot.lookup("#remove-source-ok").tryQuery().isEmpty(), "押せてしまい、確認まで出ている");
-        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot));
-
-        finishHeldSave(robot, dir.resolve("out.pdf"));
+        finishHeldSave(robot, output);
+        assertEquals(TWO_FILE_PAGES, pageTexts(output));
     }
 
     /**
@@ -107,16 +127,20 @@ class EditingGateUiTest extends DesktopUiTest {
      */
     @Test
     void 保存が走っている間はDELETEキーでページが消えない(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path output = dir.resolve("out.pdf");
         openTwo(robot, dir);
-        startHeldSave(robot, dir.resolve("out.pdf"));
+        startHeldSave(robot, output);
 
         robot.clickOn("#thumbnail-tile-0");
         robot.type(KeyCode.DELETE);
         WaitForAsyncUtils.waitForFxEvents();
 
-        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot), "DELETE キーが素通りしてページが消えた");
+        assertEquals(TWO_FILES, statusText(robot), "DELETE キーが素通りしてページが消えた");
 
-        finishHeldSave(robot, dir.resolve("out.pdf"));
+        finishHeldSave(robot, output);
+        // ★ 画面が変わっていないことだけでは足りない（CLAUDE.md「画面のテスト」）。
+        //   書き出しの最中に並びが削られていれば、それはファイルの側に出る。
+        assertEquals(TWO_FILE_PAGES, pageTexts(output));
     }
 
     /**
@@ -141,19 +165,18 @@ class EditingGateUiTest extends DesktopUiTest {
         startHeldSave(robot, output);
 
         robot.clickOn("#source-remove-0");
-        WaitForAsyncUtils.waitForFxEvents();
         // 門が漏れていれば確認が出る。出たら承認まで進む——直っていれば、そもそも出ない。
-        robot.lookup("#remove-source-ok").tryQuery().ifPresent(robot::clickOn);
+        dialogButton(robot, "#remove-source-ok").ifPresent(robot::clickOn);
         WaitForAsyncUtils.waitForFxEvents();
 
         finishHeldSave(robot, output);
 
-        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot), "書き出したものと画面が食い違っている");
-        assertEquals(List.of("A1", "A2", "B1"), pageTexts(output));
+        assertEquals(TWO_FILES, statusText(robot), "書き出したものと画面が食い違っている");
+        assertEquals(TWO_FILE_PAGES, pageTexts(output));
 
         robot.clickOn("#tool-reset");
         WaitForAsyncUtils.waitForFxEvents();
-        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot), "元に戻したら並びが変わった");
+        assertEquals(TWO_FILES, statusText(robot), "元に戻したら並びが変わった");
     }
 
     /**
@@ -165,7 +188,7 @@ class EditingGateUiTest extends DesktopUiTest {
      * <b>利用者が説明されたのとは違う文書から外れる。</b>
      *
      * <p><b>入れ替える手は {@code MainWindow#open} である。</b>起動引数と
-     * ファイルの関連付けの入口で、<b>{@code busy} を 1 度も見ずに走り出す。</b>
+     * ファイルの関連付けの入口で、<b>窓が出ている間も走り出せる。</b>
      *
      * <p><b>★ ここで見えるのは「失敗が出ること」までである。</b>入れ替わった先が
      * <b>1 ファイルしか含まないので、外すとページが 1 枚も残らず {@code EMPTY_RESULT} になる。</b>
@@ -186,11 +209,10 @@ class EditingGateUiTest extends DesktopUiTest {
         Platform.runLater(() -> window.open(other));
         waitFor(() -> statusText(robot).equals("1 / 1 ページ"));
 
-        robot.clickOn("#remove-source-ok");
-        WaitForAsyncUtils.waitForFxEvents();
+        clickWhenReady(robot, "#remove-source-ok");
 
         // 出ていたら閉じてから落とす。開いたままにすると、この後のテストがクリックを奪われる。
-        Optional<Node> failure = robot.lookup("#message-ok").tryQuery();
+        Optional<Node> failure = dialogButton(robot, "#message-ok");
         failure.ifPresent(robot::clickOn);
         assertTrue(failure.isEmpty(), "確認していない文書から外そうとして失敗した（#114）");
 
@@ -210,6 +232,7 @@ class EditingGateUiTest extends DesktopUiTest {
         openTwo(robot, dir);
         startHeldSave(robot, output);
         finishHeldSave(robot, output);
+        assertEquals(TWO_FILE_PAGES, pageTexts(output));
 
         assertFalse(button(robot, "#source-remove-0").isDisabled(), "保存が済んでも「×」が押せない");
 
@@ -220,12 +243,29 @@ class EditingGateUiTest extends DesktopUiTest {
 
     // ── 補助 ────────────────────────────────────────────────────────────────
 
-    /** A（2 ページ）と B（1 ページ）を開く。一覧が出るのは 2 ファイル以上のときだけである。 */
+    /** A（2 ページ）と B（1 ページ）を開く。作法は {@link DesktopUiTest#openTwoFiles} が持つ。 */
     private void openTwo(FxRobot robot, Path dir) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1", "A2"));
-        addFixtures(robot, TestPdfs.withText(dir.resolve("b.pdf"), "B1"));
-        waitForNode(robot, "#source-remove-0");
-        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot));
+        assertEquals(TWO_FILES, openTwoFiles(robot, dir));
+    }
+
+    /**
+     * ダイアログのボタンが出てくるなら掴む。
+     *
+     * <p><b>★★ 「出ない」を 1 回の lookup で決めない。</b>{@code Alert#showAndWait} は
+     * 新しい窓を立てるので、<b>クリックの直後に見ると間に合わないことがある</b>——
+     * そこで空を返すと、<b>門が漏れているのに緑になる</b>（{@link #GRACE_SECONDS}）。
+     */
+    private static Optional<Node> dialogButton(FxRobot robot, String id) {
+        try {
+            WaitForAsyncUtils.waitFor(
+                    GRACE_SECONDS,
+                    TimeUnit.SECONDS,
+                    () -> robot.lookup(id).tryQuery().isPresent());
+        } catch (Exception neverShown) {
+            return Optional.empty();
+        }
+        WaitForAsyncUtils.waitForFxEvents();
+        return robot.lookup(id).tryQuery();
     }
 
     /**
@@ -273,7 +313,7 @@ class EditingGateUiTest extends DesktopUiTest {
             holding = true;
         }
 
-        /** 抱えている仕事を放し、以降は抱えない。 */
+        /** 抱えている仕事を放し、以降は抱えない。何も抱えていなければ何もしない。 */
         synchronized void release() {
             holding = false;
             waiting.forEach(HeldTasks::start);

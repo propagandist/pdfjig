@@ -130,11 +130,9 @@ class SourceLegendUiTest extends DesktopUiTest {
         assertEquals("b.pdf をこの編集から外す", accessibleTextOf(robot, "#source-remove-1"));
     }
 
-    /** A（2 ページ）と B（1 ページ）を開く。一覧が出るのは 2 ファイル以上のときだけである。 */
+    /** A（2 ページ）と B（1 ページ）を開く。作法は {@link DesktopUiTest#openTwoFiles} が持つ。 */
     private void openTwo(FxRobot robot, Path dir) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1", "A2"));
-        addFiles(robot, TestPdfs.withText(dir.resolve("b.pdf"), "B1"));
-        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot));
+        assertEquals("3 / 3 ページ（2 ファイル）", openTwoFiles(robot, dir));
     }
 
     /** 「追加」で足して、一覧が出そろうまで待つ。 */
