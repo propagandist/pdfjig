@@ -310,6 +310,9 @@ public final class MainWindow {
             // ★ 走っている間は受けない（#114）。今日の呼び出し元は起動引数だけで、そこでは
             //   何も走っていない——ファイルの関連付けから呼ばれる日に、ここが素通りしないようにしてある。
             //   ★ 下の rememberReadFile より先に見る。開かないものを「次に探す場所」にしない。
+            //   ★★ ここは busy しか見ていない。窓が出ている間に呼ばれると、いまでも文書は
+            //      入れ替わる——確認や入力を挟む操作（removeSource / keepRange / addDocument）は、
+            //      挟んだ後に自分で検め直すこと。塞げているのは removeSource だけである。
             Logs.warn(LogEvent.OPERATION_REFUSED);
             return;
         }
@@ -385,7 +388,7 @@ public final class MainWindow {
                     return new SaveOutcome(replaced, DocumentWriter.assemble(sources, pages, output));
                 },
                 outcome -> {
-                    markSaved(saving, pages);
+                    markSaved(saving, sources, pages);
                     // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
                     //   出ている間は入れ子のイベントループに入る——後ろに置くと、
                     //   利用者が閉じるまで寄せ直しが始まらない。
@@ -475,10 +478,26 @@ public final class MainWindow {
      * 基準を動かしてはならない。渡すのは <b>書き出した並び</b> であって今の並びではない。
      * 書き出している間に並べ替えられていれば、その分はまだ書き出されていない。
      *
+     * <p><b>★★ 同じ文書であることを、同一性だけで見ない</b>（#114）。{@code session != saving} が
+     * 捕まえるのは<b>入れ替わりだけ</b>で、<b>{@link DocumentSession#remove} は
+     * 同じオブジェクトを書き換える。</b>出どころが 1 つ外れると<b>後ろの番号が繰り下がる</b>ので、
+     * <b>書き出した並びは、いまの出どころ一覧に対しては別のファイルを指す</b>——
+     * それを基準にすると「未保存の変更があります」が消えないうえ、
+     * <b>「編集を元に戻す」で、もう無い出どころ番号が戻ってくる。</b>
+     * <b>だから出どころ一覧まで見る。</b>
+     *
+     * <p><b>★ 並べ替えや回転は見なくてよい。</b>基準は書き出した並びで正しく、
+     * <b>いまの並びと食い違えば「未保存の変更があります」が出るのが正しい。</b>
+     * 壊れるのは<b>出どころ番号の意味が変わるとき</b>だけである。
+     *
      * <p>完了は JavaFX スレッドで走るため、比べるだけなら同期は要らない。
+     *
+     * @param saving  書き出しを始めたときの文書
+     * @param sources そのときの出どころ一覧
+     * @param pages   書き出した並び
      */
-    private void markSaved(DocumentSession saving, List<PageSelection> pages) {
-        if (session != saving) {
+    private void markSaved(DocumentSession saving, List<Path> sources, List<PageSelection> pages) {
+        if (session != saving || !saving.paths().equals(sources)) {
             return;
         }
         session.order().markSaved(pages);
@@ -576,27 +595,52 @@ public final class MainWindow {
         }
     }
 
-    /** ファイル一覧から 1 つ外す。取り消せないので、消える量を見せて確認を取る。 */
+    /**
+     * ファイル一覧から 1 つ外す。取り消せないので、消える量を見せて確認を取る。
+     *
+     * <p><b>★★ 確認の窓は入れ子のイベントループである</b>（#114）。{@code Alert#showAndWait} は
+     * {@code Platform.runLater} を回し続け、<b>{@code Task} の完了はそこに乗る</b>——
+     * <b>{@code APPLICATION_MODAL} が止めるのは入力だけで、積まれたものは止めない。</b>
+     * 検めたときと当てるときの間に文書が入れ替われば、
+     * <b>利用者が説明されたのとは違う文書からファイルが外れる。</b>
+     */
     private void removeSource(int sourceIndex) {
         if (session == null || sourceIndex >= session.sourceCount()) {
             return;
         }
-        String name = session.sourceName(sourceIndex);
-        long pageCount = session.order().pages().stream()
+        // ★ 検めた相手を掴んでおく。番号だけでは、入れ替わった先の別のファイルを指しうる。
+        DocumentSession target = session;
+        String name = target.sourceName(sourceIndex);
+        long pageCount = target.order().pages().stream()
                 .filter(entry -> entry.selection().sourceIndex() == sourceIndex)
                 .count();
 
         if (!messages.confirmRemoveSource(name, pageCount)) {
             return;
         }
+        if (!stillDescribes(target, sourceIndex, name)) {
+            // 確認の最中に入れ替わった。黙って戻る——利用者が見た説明はもう成り立たず、
+            // ここで何かを外せば、確認していない文書に当たる。
+            return;
+        }
 
         try {
-            session.remove(sourceIndex);
+            target.remove(sourceIndex);
         } catch (PdfjigException e) {
             messages.failure(e);
             return;
         }
         afterOrderChanged();
+    }
+
+    /**
+     * 確認のときに説明したものを、いまも同じ位置で指しているか。
+     *
+     * <p><b>名前まで見る。</b>文書が同じでも、その間に別のファイルが外れていれば
+     * <b>番号が繰り下がって、同じ位置が別のファイルを指す</b>（{@code PageOrder#removeSource}）。
+     */
+    private boolean stillDescribes(DocumentSession target, int sourceIndex, String name) {
+        return session == target && sourceIndex < target.sourceCount() && name.equals(target.sourceName(sourceIndex));
     }
 
     /** 含んでいるファイルが増えると、表題も一覧も状態表示も変わる。 */
