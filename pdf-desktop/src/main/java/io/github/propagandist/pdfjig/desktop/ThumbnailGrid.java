@@ -139,16 +139,24 @@ final class ThumbnailGrid {
         selectAndReveal(pageOrder.size() > 0 ? 0 : -1);
     }
 
-    /** 表示を空にする。 */
+    /**
+     * 表示を空にする。
+     *
+     * <p><b>★★ 一覧を空にしてから、持ち物を手放す</b>（#129）。
+     * {@code rows.getItems().clear()} は<b>セルの更新を発火し、その先でタイルが片づく</b>——
+     * <b>その片づけが {@link #thumbnails} を引く</b>ので、先に捨てると届かない。
+     * <b>発火先がまだ必要とするものを、発火の前に消してはならない。</b>
+     */
     void clear() {
         if (order != null) {
             order.pages().removeListener(pagesListener);
         }
+        selectedIndex.set(-1);
+        rows.getItems().clear();
+
         document = null;
         order = null;
         thumbnails = null;
-        selectedIndex.set(-1);
-        rows.getItems().clear();
     }
 
     /** サムネイルの供給元。タイルから使う。 */

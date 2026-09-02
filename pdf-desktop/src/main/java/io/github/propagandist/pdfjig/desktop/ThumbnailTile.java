@@ -272,11 +272,20 @@ final class ThumbnailTile {
         return shown != null && shown.sourceIndex() == sourceIndex && shown.pageNumber() == pageNumber;
     }
 
-    /** 余った桁を空にする。行の幅は保ったままにして、桁が詰まらないようにする。 */
+    /**
+     * 余った桁を空にする。行の幅は保ったままにして、桁が詰まらないようにする。
+     *
+     * <p><b>★★ 取り消しより先に「もう表示していない」と記す</b>（#129）。
+     * {@link Task#cancel} は {@code onCancelled} を<b>同期で</b>発火するので、
+     * <b>後に記すと {@link #stillShowing} が真のまま {@link #show} へ戻り、
+     * 手放したばかりの供給元を引きにいく。</b>
+     * <b>あちらの Javadoc が言う「タイルが別のページへ回されて取り消したときは外れる」を、
+     * 片づけの経路でも成り立たせる。</b>
+     */
     void clear() {
-        cancelPending();
         index = -1;
         shown = null;
+        cancelPending();
         // 空きタイルに古い id を残さない。残すと、同じ id の節点が一覧に 2 つ並びうる。
         root.setId(null);
         imageView.setImage(null);
