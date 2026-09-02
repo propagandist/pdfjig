@@ -35,42 +35,41 @@ class BackgroundTasksUiTest {
     /** 何かが起きるのを待つ上限。CI のランナーは遅いので短くしない。 */
     private static final long TIMEOUT_MILLIS = 20_000L;
 
-    /**
-     * 断られたほうが走り出してしまわないことを見るための猶予。
-     *
-     * <p><b>「待てば直る」種類の待ちではない。</b>断れていれば絶対に走り出さないので、
-     * 長く取っても偽の緑にならない。短すぎると、スレッドがまだ動き出していないだけの状態を
-     * 「断れている」と読みうるので、そちら側に倒してある。
-     */
-    private static final long GRACE_MILLIS = 2_000L;
-
     @BeforeAll
     static void startToolkit() throws Exception {
         // 画面は出さない。JavaFX Toolkit を起こすためだけに呼ぶ。
         FxToolkit.registerPrimaryStage();
     }
 
+    /**
+     * 走っている間に頼まれた仕事は始まらない。
+     *
+     * <p><b>★★ 「まだ走り出していない」ではなく「実行係へ渡していない」で見る。</b>
+     * 猶予を置いて走り出さないことを確かめる形にもできるが、<b>それは待つぶんだけ
+     * どの実行でも遅くなり、しかも弱い</b>——渡したうえで出遅れているだけの状態と
+     * 区別が付かない。<b>差し替えた実行係が数えれば、待たずに、より強く見える。</b>
+     */
     @Test
     void 走っている間に頼まれた仕事は始まらない() throws Exception {
-        BackgroundTasks tasks = new BackgroundTasks();
+        AtomicInteger submitted = new AtomicInteger();
+        BackgroundTasks tasks = new BackgroundTasks(work -> {
+            submitted.incrementAndGet();
+            start(work);
+        });
         CountDownLatch running = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch second = new CountDownLatch(1);
         AtomicInteger finished = new AtomicInteger();
 
         onFx(() -> tasks.run(
                 () -> held(running, release), value -> finished.incrementAndGet(), Throwable::printStackTrace));
         assertTrue(running.await(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS), "1 本目が走り出さない");
 
-        onFx(() -> tasks.run(
-                () -> {
-                    second.countDown();
-                    return "2 本目";
-                },
-                value -> finished.incrementAndGet(),
-                Throwable::printStackTrace));
+        boolean accepted = WaitForAsyncUtils.waitForAsyncFx(
+                TIMEOUT_MILLIS,
+                () -> tasks.run(() -> "2 本目", value -> finished.incrementAndGet(), Throwable::printStackTrace));
 
-        assertFalse(second.await(GRACE_MILLIS, TimeUnit.MILLISECONDS), "走っている間に 2 本目が始まった");
+        assertFalse(accepted, "走っている間の 2 本目を受けたと答えた");
+        assertEquals(1, submitted.get(), "断ったはずの 2 本目が実行係へ渡された");
 
         release.countDown();
         WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> finished.get() == 1);
@@ -100,6 +99,13 @@ class BackgroundTasksUiTest {
 
         onFx(() -> tasks.run(() -> "2 本目", value -> finished.incrementAndGet(), Throwable::printStackTrace));
         WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> finished.get() == 2);
+    }
+
+    /** 仕事を走らせる。{@code BackgroundTasks} の既定と同じ形である。 */
+    private static void start(Runnable work) {
+        Thread worker = new Thread(work, "counted-operation");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     /** 走り出したことを報せ、放されるまで戻らない仕事。 */

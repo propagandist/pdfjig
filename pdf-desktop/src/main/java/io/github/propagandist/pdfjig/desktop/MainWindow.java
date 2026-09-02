@@ -112,6 +112,14 @@ public final class MainWindow {
      */
     private final BooleanBinding editingBlocked;
 
+    /**
+     * 文書が開かれていて、かつ操作が走っていないか。
+     *
+     * <p><b>★ {@link #editingBlocked} の土台でもある。</b>同じ 2 項を別々に組むと、
+     * {@code documentOpen} と {@code busy} が動くたびに<b>同じ計算を 2 本の鎖が繰り返す。</b>
+     */
+    private final BooleanBinding needsDocument;
+
     /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
     private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
 
@@ -146,7 +154,8 @@ public final class MainWindow {
         this.dialogs = dialogs;
         this.tasks = tasks;
         this.messages = new Messages(stage);
-        this.editingBlocked = documentOpen.not().or(tasks.busy()).or(stale);
+        this.needsDocument = documentOpen.not().or(tasks.busy());
+        this.editingBlocked = needsDocument.or(stale);
         // ★★ 門は組み立てる前に決まっていなければならない（#114）。この 2 つは Action を
         //   通らない入口を持っており、後から差す形にすると「差し忘れると通る」を作る。
         this.thumbnails = new ThumbnailGrid(editingBlocked);
@@ -206,9 +215,6 @@ public final class MainWindow {
     private Actions buildActions() {
         // 走っている間は押させない。立てるのも下ろすのも BackgroundTasks だけである。
         ReadOnlyBooleanProperty busy = tasks.busy();
-
-        // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
-        BooleanBinding needsDocument = documentOpen.not().or(busy);
 
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
         ObservableValue<Boolean> breakUnavailable =
