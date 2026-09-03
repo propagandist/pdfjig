@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
+import javafx.beans.property.SimpleBooleanProperty;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -78,7 +79,7 @@ class ThumbnailTeardownUiTest {
             //   Platform.runLater だけでは、中で投げたものが呼んだ側に届かない。
             assertDoesNotThrow(
                     () -> WaitForAsyncUtils.waitForAsyncFx(TIMEOUT_MILLIS, () -> {
-                        ThumbnailGrid grid = new ThumbnailGrid();
+                        ThumbnailGrid grid = new ThumbnailGrid(new SimpleBooleanProperty(false));
                         grid.show(session);
 
                         ThumbnailTile tile = new ThumbnailTile(grid);

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import javafx.beans.property.ReadOnlyIntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.ListChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -80,7 +81,22 @@ final class ThumbnailGrid {
     /** Delete キーで呼ぶ処理。画面側が差す。 */
     private Runnable onDelete = () -> {};
 
-    ThumbnailGrid() {
+    /**
+     * 文書を変える操作を通してはならない条件（#114）。
+     *
+     * <p><b>★★ 受け取らずには作れない。</b>差し忘れを既定値で埋めると<b>「通す」側に倒れ</b>、
+     * <b>それはこの門が作られた原因そのもの</b>——入口が条件を見ていないこと——を
+     * <b>1 段上で作り直すことになる。</b>
+     */
+    private final ObservableBooleanValue editingBlocked;
+
+    /**
+     * @param editingBlocked 文書を変える操作を通してはならない間 {@code true} になるもの。
+     *                       この一覧だけでは決まらない（走っている仕事があるか、
+     *                       書き出したものと食い違っているかを持っているのは画面の側である）
+     */
+    ThumbnailGrid(ObservableBooleanValue editingBlocked) {
+        this.editingBlocked = editingBlocked;
         rows.setId("thumbnail-list");
         rows.getStyleClass().add("thumbnail-list");
         rows.setPlaceholder(new Label("PDF を開いてください。"));
@@ -117,6 +133,16 @@ final class ThumbnailGrid {
     /** Delete キーで呼ぶ処理を差す。 */
     void setOnDelete(Runnable action) {
         this.onDelete = action;
+    }
+
+    /**
+     * いま、文書を変える操作を通してはならないか。タイル（ドラッグの始まり）からも見る。
+     *
+     * <p><b>ここを通る入口は {@link Action} を通らない</b>——DELETE キーは処理を直に呼び、
+     * ドラッグの落とし先は {@link #move} を直に呼ぶ。<b>メニュー項目が無効かどうかは見ていない。</b>
+     */
+    boolean editingBlocked() {
+        return editingBlocked.get();
     }
 
     /**
@@ -207,14 +233,25 @@ final class ThumbnailGrid {
         reveal(index);
     }
 
-    /** ページを動かす。タイルのドロップから呼ぶ。 */
-    void move(int fromIndex, int toIndex) {
-        if (order == null || fromIndex == toIndex) {
-            return;
+    /**
+     * ページを動かす。タイルのドロップから呼ぶ。
+     *
+     * <p><b>★ 落とし先はここ 1 か所である。</b>掴む側も止めてあるが（{@code ThumbnailTile}）、
+     * <b>掴んだ後に走り出した仕事に追い越されうる</b>ので、当てる直前にもう一度見る（#114）。
+     *
+     * <p><b>★ 動かせたかを返す。</b>落とし先は「移した」とジェスチャに答えるので、
+     * <b>断ったのに成功と答えると、掴んだ側には嘘になる。</b>
+     *
+     * @return 動かしたなら {@code true}
+     */
+    boolean move(int fromIndex, int toIndex) {
+        if (order == null || fromIndex == toIndex || editingBlocked()) {
+            return false;
         }
         order.move(fromIndex, toIndex);
         // 動かした先が別の行になることがある。掴んでいたページを見失わせない。
         selectAndReveal(toIndex);
+        return true;
     }
 
     /** その節点がこの一覧の中のものか。文書間のドラッグを弾くために使う。 */
@@ -310,7 +347,11 @@ final class ThumbnailGrid {
             return;
         }
         if (event.getCode() == KeyCode.DELETE) {
-            onDelete.run();
+            // ★ 同じ操作のメニュー項目が無効でも、このキーはそこを通らない（#114）。
+            //   握り潰すところは変えない——無効なメニュー項目のアクセラレータと同じ見え方にする。
+            if (!editingBlocked()) {
+                onDelete.run();
+            }
             event.consume();
             return;
         }

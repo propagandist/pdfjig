@@ -1,7 +1,9 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntConsumer;
+import javafx.beans.value.ObservableBooleanValue;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -39,7 +41,32 @@ final class SourceLegend {
     /** 「×」で呼ぶ処理。画面側が差す。 */
     private IntConsumer onRemove = sourceIndex -> {};
 
-    SourceLegend() {
+    /**
+     * 「×」を押せなくする条件（#114）。
+     *
+     * <p><b>★★ 受け取らずには作れない。</b>差し忘れを既定値で埋めると<b>「押せる」側に倒れ</b>、
+     * <b>それはこの門が作られた原因そのもの</b>——入口が条件を見ていないこと——を
+     * <b>1 段上で作り直すことになる。</b>
+     */
+    private final ObservableBooleanValue removeBlocked;
+
+    /**
+     * いま出ている「×」。
+     *
+     * <p><b>★ 束ねずに書き換える。</b>この一覧は並びが変わるたびに作り直されるので、
+     * <b>節点ごとに束ねると、捨てた節点のぶんの聞き手が条件の側に積まれていく</b>
+     * （消えるのは次に条件が動いたときで、それはまさに保存を押した瞬間である）。
+     */
+    private final List<Button> removeButtons = new ArrayList<>();
+
+    /**
+     * @param removeBlocked ファイルを外せない間 {@code true} になるもの。この一覧だけでは
+     *                      決まらない（走っている仕事があるかを持っているのは画面の側である）
+     */
+    SourceLegend(ObservableBooleanValue removeBlocked) {
+        this.removeBlocked = removeBlocked;
+        removeBlocked.addListener(
+                (observable, was, blocked) -> removeButtons.forEach(button -> button.setDisable(blocked)));
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
         hide();
@@ -73,6 +100,7 @@ final class SourceLegend {
         int[] counts = countsPerSource(session);
 
         root.getChildren().clear();
+        removeButtons.clear();
         for (int sourceIndex = 0; sourceIndex < session.sourceCount(); sourceIndex++) {
             root.getChildren().add(chip(sourceIndex, session.sourceName(sourceIndex), counts[sourceIndex]));
         }
@@ -83,6 +111,7 @@ final class SourceLegend {
 
     private void hide() {
         root.getChildren().clear();
+        removeButtons.clear();
         root.setVisible(false);
         // 場所も空けない。1 ファイルのときに帯だけが残ると、何かがあると思わせる。
         root.setManaged(false);
@@ -134,6 +163,9 @@ final class SourceLegend {
         remove.setTooltip(new Tooltip(removeText));
         remove.setAccessibleText(removeText);
         remove.setOnAction(event -> onRemove.accept(sourceIndex));
+        // 走っている間は押させない。押しても何も起きないのと、押せないのは違う（#114）。
+        remove.setDisable(removeBlocked.get());
+        removeButtons.add(remove);
 
         HBox chip = new HBox(6, swatch, label, count, remove);
         chip.setAlignment(Pos.CENTER_LEFT);

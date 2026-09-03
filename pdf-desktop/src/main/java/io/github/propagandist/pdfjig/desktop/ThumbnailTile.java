@@ -366,6 +366,14 @@ final class ThumbnailTile {
         if (dragged < 0) {
             return;
         }
+        if (grid.editingBlocked()) {
+            // ★ 走っている間は掴ませない（#114）。落とし先でも見ているが、そちらだけだと
+            //   「掴んで運べたのに戻る」になる——押せないことが見えるのは、始まりの側だけである。
+            //   ★ 握り潰すのは、この手の他の出口と揃えるためである。断ったジェスチャを
+            //     上（行セル・一覧）へ流すと、そちらが拾い直す形をいつか作る。
+            event.consume();
+            return;
+        }
         grid.select(dragged);
 
         Dragboard board = root.startDragAndDrop(TransferMode.MOVE);
@@ -396,9 +404,10 @@ final class ThumbnailTile {
         }
 
         int from = Integer.parseInt(event.getDragboard().getString());
-        grid.move(from, target);
 
-        event.setDropCompleted(true);
+        // ★ 移せたかをそのまま答える（#114）。走り出した仕事に追い越されて断られることがあり、
+        //   そこで「移した」と答えると、掴んだ側には嘘になる。
+        event.setDropCompleted(grid.move(from, target));
         event.consume();
     }
 

@@ -8,6 +8,7 @@ import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -61,10 +62,10 @@ public final class MainWindow {
     /** リンクを既定のブラウザに渡すために使う。バージョン情報のダイアログで使う。 */
     private final HostServices hostServices;
 
-    private final ThumbnailGrid thumbnails = new ThumbnailGrid();
+    private final ThumbnailGrid thumbnails;
 
     /** いま含んでいるファイルの一覧。1 ファイルのときは出ない。 */
-    private final SourceLegend legend = new SourceLegend();
+    private final SourceLegend legend;
 
     /** ダイアログを始めるフォルダ。読む用と書く用を分けて覚える。 */
     private final RecentFolders folders = new RecentFolders();
@@ -73,7 +74,7 @@ public final class MainWindow {
     private final FileDialogs dialogs;
 
     /** 画面を止めずに走らせる手段。進行中かどうかもここが持つ。 */
-    private final BackgroundTasks tasks = new BackgroundTasks();
+    private final BackgroundTasks tasks;
 
     /** 利用者に伝える手段。 */
     private final Messages messages;
@@ -94,6 +95,31 @@ public final class MainWindow {
      */
     private final BooleanProperty stale = new SimpleBooleanProperty(false);
 
+    /**
+     * 文書の中身を変える操作を通してはならない条件。
+     *
+     * <p><b>★★ ここが唯一の門である</b>（#114）。以前は {@link Action} から作られた節点だけが
+     * {@code busy} を見ており、<b>一覧の「×」・サムネイルの DELETE キー・タイルのドラッグは
+     * 素通りしていた</b>——{@code busy} を入口ごとに書くと、<b>入口が増えた日にまた漏れる。</b>
+     *
+     * <p>成り立ちは 3 つ。<b>文書が開かれていること</b>、<b>操作が走っていないこと</b>、
+     * <b>書き出したものと食い違っていないこと</b>（{@link #stale}。#118）——
+     * 食い違っている間は並びが書き出す前のファイルに対する指定のままなので、
+     * そこから何を書き出しても同じ変換が二重に掛かる。
+     *
+     * <p><b>★ 「閉じる」と「開く」はここで縛らない。</b>「開き直してください」と出しておいて
+     * 閉じられないのでは、利用者に打つ手が無くなる（開き直すと印は下りる）。
+     */
+    private final BooleanBinding editingBlocked;
+
+    /**
+     * 文書が開かれていて、かつ操作が走っていないか。
+     *
+     * <p><b>★ {@link #editingBlocked} の土台でもある。</b>同じ 2 項を別々に組むと、
+     * {@code documentOpen} と {@code busy} が動くたびに<b>同じ計算を 2 本の鎖が繰り返す。</b>
+     */
+    private final BooleanBinding needsDocument;
+
     /** 効いている区切りの数。操作の有効・無効と状態表示に使う。 */
     private final IntegerProperty breakCount = new SimpleIntegerProperty(0);
 
@@ -106,23 +132,34 @@ public final class MainWindow {
     private DocumentSession session;
 
     public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
-        this(stage, aiProvider, hostServices, new NativeFileDialogs(stage));
+        this(stage, aiProvider, hostServices, new NativeFileDialogs(stage), new BackgroundTasks());
     }
 
     /**
-     * ファイル選択の手段を指定して作る。
+     * 差し替えられるものを指定して作る。<b>これを呼ぶのはテストだけである。</b>
      *
-     * <p>Windows の共通ダイアログは自動テストから操作できない。差し替えられるのは
-     * この経路だけであり、画面の操作を試すテストはここから組み立てる。
+     * <p>Windows の共通ダイアログは自動テストから操作できない（{@link FileDialogs}）。
+     * <b>「操作が走っている間」も、実際の書き出しの速さでは狙って作れない</b>
+     * （{@link BackgroundTasks#BackgroundTasks(java.util.concurrent.Executor)}）——
+     * 待ち合わせに行くと、落ちるかどうかが機械の速さで決まるテストになる。
      *
      * @param dialogs ファイルとフォルダを選ばせる手段
+     * @param tasks   画面を止めずに走らせる手段
      */
-    MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices, FileDialogs dialogs) {
+    MainWindow(
+            Stage stage, AiProvider aiProvider, HostServices hostServices, FileDialogs dialogs, BackgroundTasks tasks) {
         this.stage = stage;
         this.aiProvider = aiProvider;
         this.hostServices = hostServices;
         this.dialogs = dialogs;
+        this.tasks = tasks;
         this.messages = new Messages(stage);
+        this.needsDocument = documentOpen.not().or(tasks.busy());
+        this.editingBlocked = needsDocument.or(stale);
+        // ★★ 門は組み立てる前に決まっていなければならない（#114）。この 2 つは Action を
+        //   通らない入口を持っており、後から差す形にすると「差し忘れると通る」を作る。
+        this.thumbnails = new ThumbnailGrid(editingBlocked);
+        this.legend = new SourceLegend(editingBlocked);
     }
 
     /**
@@ -179,30 +216,15 @@ public final class MainWindow {
         // 走っている間は押させない。立てるのも下ろすのも BackgroundTasks だけである。
         ReadOnlyBooleanProperty busy = tasks.busy();
 
-        // 文書が開かれていて、かつ操作が走っていないときだけ触れる。
-        BooleanBinding needsDocument = documentOpen.not().or(busy);
-
-        // ★★ 食い違っている間は、中身に対する操作をさせない（{@link #stale}。#118）。
-        //   並びは書き出す前のファイルに対する指定のままなので、そこから何を書き出しても
-        //   同じ変換が二重に掛かる。
-        //   ★ 「閉じる」はここに含めない——「開き直してください」と出しておいて閉じられないのでは、
-        //     利用者に打つ手が無くなる。「開く」も busy だけで縛ってある（開き直すと印は下りる）。
-        ObservableValue<Boolean> needsFreshDocument = needsDocument.or(stale);
-
         // 先頭のページには区切りを付けられない。先頭は区切らなくてもファイルの始まりである。
-        ObservableValue<Boolean> breakUnavailable = documentOpen
-                .not()
-                .or(busy)
-                .or(stale)
-                .or(thumbnails.selectedIndexProperty().lessThan(1));
+        ObservableValue<Boolean> breakUnavailable =
+                editingBlocked.or(thumbnails.selectedIndexProperty().lessThan(1));
 
-        ObservableValue<Boolean> noBreaks =
-                documentOpen.not().or(busy).or(stale).or(breakCount.isEqualTo(0));
+        ObservableValue<Boolean> noBreaks = editingBlocked.or(breakCount.isEqualTo(0));
 
         // 1 ページしかなければ 1 枚ずつには分けられない。できるのは元と同じ 1 ファイルだけで、
         // 区切りが無いときと違って利用者に打つ手も無い。断るより初めから押させない。
-        ObservableValue<Boolean> notSplittable =
-                documentOpen.not().or(busy).or(stale).or(pageCount.lessThan(2));
+        ObservableValue<Boolean> notSplittable = editingBlocked.or(pageCount.lessThan(2));
 
         return new Actions(
                 new Action(
@@ -220,7 +242,7 @@ public final class MainWindow {
                         ToolIcons.SAVE,
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
                         this::saveAs,
-                        needsFreshDocument),
+                        editingBlocked),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
                 new Action("quit", "終了", null, null, null, stage::close, null),
                 new Action(
@@ -230,7 +252,7 @@ public final class MainWindow {
                         ToolIcons.DELETE,
                         new KeyCodeCombination(KeyCode.DELETE),
                         this::deleteSelected,
-                        needsFreshDocument),
+                        editingBlocked),
                 new Action(
                         "rotate-right",
                         "右に 90 度回転",
@@ -238,7 +260,7 @@ public final class MainWindow {
                         ToolIcons.ROTATE_RIGHT,
                         new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.CLOCKWISE_90),
-                        needsFreshDocument),
+                        editingBlocked),
                 new Action(
                         "rotate-left",
                         "左に 90 度回転",
@@ -246,9 +268,8 @@ public final class MainWindow {
                         ToolIcons.ROTATE_LEFT,
                         new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHORTCUT_DOWN),
                         () -> rotateSelected(Rotation.COUNTERCLOCKWISE_90),
-                        needsFreshDocument),
-                new Action(
-                        "keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, needsFreshDocument),
+                        editingBlocked),
+                new Action("keep-range", "範囲を指定して残す…", "範囲", ToolIcons.RANGE, null, this::keepRange, editingBlocked),
                 new Action(
                         "toggle-break",
                         "ここで区切る / 区切りを外す",
@@ -257,12 +278,11 @@ public final class MainWindow {
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN),
                         this::toggleBreak,
                         breakUnavailable),
-                new Action(
-                        "break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, needsFreshDocument),
+                new Action("break-every-n", "N ページごとに区切る…", null, null, null, this::breakEveryNPages, editingBlocked),
                 new Action("clear-breaks", "区切りをすべて外す", null, null, null, this::clearBreaks, noBreaks),
-                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, needsFreshDocument),
-                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, needsFreshDocument),
-                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, needsFreshDocument),
+                new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, editingBlocked),
+                new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, editingBlocked),
+                new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, editingBlocked),
                 new Action(
                         "split-pages",
                         "1 ページずつに分割…",
@@ -281,23 +301,36 @@ public final class MainWindow {
      * <p>起動引数やファイルの関連付けから呼ばれる。読み込みは非同期に行うため、
      * このメソッドは待たずに戻る。
      *
+     * <p><b>★ 走っている間は {@link BackgroundTasks} が断る</b>（#114）。
+     * <b>断られたときは「次に探す場所」も覚えない</b>——開かなかったものを覚えると、
+     * 次のダイアログが利用者の知らない場所から始まる。
+     *
+     * <p><b>★★ ここが通ると文書が入れ替わる。</b>窓（確認・入力・ファイル選択）が出ている間も
+     * {@code Platform.runLater} は回るので、<b>入れ替わりは窓の内側でも起きる</b>——
+     * <b>確認や入力を挟む操作は、挟んだ後に自分で検め直すこと。</b>
+     * <b>いま検め直しているのは {@link #removeSource} だけである</b>——
+     * {@code keepRange} / {@code addDocument} / {@code addWithPassword} / {@code writeSegments} は
+     * まだであり、#133 が持つ。<b>今日の呼び出し元は起動引数だけなので届かない。</b>
+     *
      * @param path 開くファイル
      */
     public void open(Path path) {
-        // 開くのに失敗しても覚える。パスワードが要る文書でも壊れた文書でも、
-        // 次に PDF を探す場所は同じフォルダである。
-        //
-        // openDocument ではなくここに置くのは、起動引数から開く経路（PdfjigApplication、
-        // ファイルの関連付け）も通すためである。
-        folders.rememberReadFile(path);
-
-        tasks.run(() -> DocumentSession.open(path), this::adopt, failure -> {
+        boolean started = tasks.run(() -> DocumentSession.open(path), this::adopt, failure -> {
             if (errorCodeOf(failure) == ErrorCode.PASSWORD_REQUIRED) {
                 askPasswordAndOpen(path, false);
             } else {
                 messages.failure(failure);
             }
         });
+
+        // 開くのに失敗しても覚える。パスワードが要る文書でも壊れた文書でも、
+        // 次に PDF を探す場所は同じフォルダである。
+        //
+        // openDocument ではなくここに置くのは、起動引数から開く経路（PdfjigApplication、
+        // ファイルの関連付け）も通すためである。
+        if (started) {
+            folders.rememberReadFile(path);
+        }
     }
 
     /**
@@ -313,13 +346,18 @@ public final class MainWindow {
         }
         // この配列は DocumentSession.open の中でゼロ埋めされる。
         char[] password = entered.get();
-        tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
+        boolean started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
             if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
                 askPasswordAndOpen(path, true);
             } else {
                 messages.failure(failure);
             }
         });
+        if (!started) {
+            // ★★ 断られると仕事そのものが呼ばれない。ゼロ埋めはその中でしか起きないので、
+            //   ここで消す（INV-5）。入力欄から出た平文を、そのまま置き去りにしない。
+            Arrays.fill(password, '\0');
+        }
     }
 
     private static ErrorCode errorCodeOf(Throwable failure) {
@@ -346,26 +384,29 @@ public final class MainWindow {
         List<Boolean> breaks = saving.order().breaks();
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
-        // 書き出しは非同期で、成否は後から届く。選んだ時点で覚える。
-        folders.rememberWrittenFile(output);
-        run(
+        boolean started = run(
                 () -> {
                     // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
                     boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
                     return new SaveOutcome(replaced, DocumentWriter.assemble(sources, pages, output));
                 },
                 outcome -> {
-                    markSaved(saving, pages);
+                    markSaved(saving, sources, pages);
                     // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
                     //   出ている間は入れ子のイベントループに入る——後ろに置くと、
                     //   利用者が閉じるまで寄せ直しが始まらない。
                     //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
                     //   これは例外的な経路ではない。
                     if (outcome.replacedASource()) {
-                        reopenAt(saving, output, breaks, selected);
+                        reopenAt(saving, sources, output, breaks, selected);
                     }
                     messages.warnings(outcome.warnings());
                 });
+        // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
+        // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。
+        if (started) {
+            folders.rememberWrittenFile(output);
+        }
     }
 
     /**
@@ -396,25 +437,30 @@ public final class MainWindow {
      * どちらでもセッションは古いままで、<b>続けて保存すると同じ変換が二重に掛かる。</b>
      * <b>書き出し自体は成功しておりファイルはできているので、失うものは無い</b>——開き直せば続けられる。
      *
-     * <p><b>★ 書き出している間の編集を捨てない。</b>{@code busy} を素通りする入口が実際にある
-     * （{@code BackgroundTasks}。#114）。そこで並べ替えや削除がされていたら、
+     * <p><b>★ 書き出している間の編集を捨てない。</b>そこで並べ替えや削除がされていたら、
      * <b>寄せ直すとその編集ごと消える</b>——直しながら別のものを壊すことになる（優先順位 1）。
+     * <b>いまは門があるので、利用者の操作からはそこへ届かない</b>（{@link #editingBlocked}。#114）
+     * ——<b>それでも見るのは、門が漏れた日にここが最後の砦になるからである。</b>
+     *
+     * <p><b>★★ 出どころが外れたことは {@code modified()} には出ない</b>（#114）。
+     * {@code PageOrder#removeSource} は<b>並びと基準を同じだけずらす</b>ので、
+     * <b>編集していない文書からファイルを 1 つ外しても「変わっていない」と答える。</b>
+     * <b>出どころ一覧まで見る</b>——{@link #markSaved} と同じ検め方である。
      */
-    private void reopenAt(DocumentSession saving, Path output, List<Boolean> breaks, int selected) {
+    private void reopenAt(DocumentSession saving, List<Path> sources, Path output, List<Boolean> breaks, int selected) {
         if (session != saving) {
             // 書き出している間に別の文書を開かれていた。そちらを置き換えてはならない。
             return;
         }
-        if (saving.order().modified()) {
+        if (!stillHolds(saving, sources) || saving.order().modified()) {
             // ★★ 書き出している間に並べ替え・削除・ファイルの解除がされていた。
             //   寄せ直すとその編集ごと消える——直す前はそれが生き残っていたので、
             //   直しながら別のものを壊すことになる（CLAUDE.md 優先順位 1）。
             //   寄せないので古いままである。保存を押せなくして、そこで止める。
-            stale.set(true);
-            updateStatus();
+            markStale();
             return;
         }
-        tasks.run(
+        boolean started = tasks.run(
                 () -> DocumentSession.open(output),
                 opened -> {
                     if (session != saving) {
@@ -431,10 +477,20 @@ public final class MainWindow {
                 failure -> {
                     // 開き直せなかった。書き出しは成功しておりファイルはできているが、
                     // セッションは古いままである。押せなくして止める。
-                    stale.set(true);
-                    updateStatus();
+                    markStale();
                     messages.failure(failure);
                 });
+        if (!started) {
+            // ★★ 断られた。寄せ直していないのだから古いままである——
+            //   黙って戻ると「寄せ直せた」と同じ見た目になり、次の保存で変換が二重に掛かる（#118）。
+            markStale();
+        }
+    }
+
+    /** 開いている文書が、書き出したファイルと食い違っていることを記す。 */
+    private void markStale() {
+        stale.set(true);
+        updateStatus();
     }
 
     /**
@@ -444,14 +500,42 @@ public final class MainWindow {
      * 基準を動かしてはならない。渡すのは <b>書き出した並び</b> であって今の並びではない。
      * 書き出している間に並べ替えられていれば、その分はまだ書き出されていない。
      *
+     * <p><b>★ 並べ替えや回転は見なくてよい</b>（{@link #stillHolds} が見るのは出どころだけである）。
+     * 基準は書き出した並びで正しく、
+     * <b>いまの並びと食い違えば「未保存の変更があります」が出るのが正しい。</b>
+     * 壊れるのは<b>出どころ番号の意味が変わるとき</b>だけである。
+     *
      * <p>完了は JavaFX スレッドで走るため、比べるだけなら同期は要らない。
+     *
+     * @param saving  書き出しを始めたときの文書
+     * @param sources そのときの出どころ一覧
+     * @param pages   書き出した並び
      */
-    private void markSaved(DocumentSession saving, List<PageSelection> pages) {
-        if (session != saving) {
+    private void markSaved(DocumentSession saving, List<Path> sources, List<PageSelection> pages) {
+        if (!stillHolds(saving, sources)) {
             return;
         }
         session.order().markSaved(pages);
         updateStatus();
+    }
+
+    /**
+     * 掴んでおいた文書が、いまも同じ出どころを同じ順で持っているか。
+     *
+     * <p><b>★★ 同一性だけでは足りない</b>（#114）。{@code session != saving} が捕まえるのは
+     * <b>入れ替わりだけ</b>で、<b>{@link DocumentSession#remove} は同じオブジェクトを書き換える。</b>
+     * 出どころが 1 つ外れると<b>後ろの番号が繰り下がる</b>ので、
+     * <b>掴んでおいた番号も並びも、いまの一覧に対しては別のファイルを指す。</b>
+     *
+     * <p><b>★ 名前ではなくパスの並びで見る。</b>{@code sourceName} はファイル名しか返さないので、
+     * <b>別のフォルダにある同じ名前のファイルを見分けられない</b>——
+     * <b>取り消せない操作の番人がそこで通ると、確認していないファイルが外れる。</b>
+     *
+     * @param target  掴んでおいた文書
+     * @param sources 掴んだときの出どころ一覧
+     */
+    private boolean stillHolds(DocumentSession target, List<Path> sources) {
+        return session == target && target.paths().equals(sources);
     }
 
     private void deleteSelected() {
@@ -545,22 +629,38 @@ public final class MainWindow {
         }
     }
 
-    /** ファイル一覧から 1 つ外す。取り消せないので、消える量を見せて確認を取る。 */
+    /**
+     * ファイル一覧から 1 つ外す。取り消せないので、消える量を見せて確認を取る。
+     *
+     * <p><b>★★ 確認の窓は入れ子のイベントループである</b>（#114）。{@code Alert#showAndWait} は
+     * {@code Platform.runLater} を回し続け、<b>{@code Task} の完了はそこに乗る</b>——
+     * <b>{@code APPLICATION_MODAL} が止めるのは入力だけで、積まれたものは止めない。</b>
+     * 検めたときと当てるときの間に文書が入れ替われば、
+     * <b>利用者が説明されたのとは違う文書からファイルが外れる。</b>
+     */
     private void removeSource(int sourceIndex) {
         if (session == null || sourceIndex >= session.sourceCount()) {
             return;
         }
-        String name = session.sourceName(sourceIndex);
-        long pageCount = session.order().pages().stream()
+        // ★ 検めた相手を掴んでおく。番号だけでは、入れ替わった先の別のファイルを指しうる。
+        DocumentSession target = session;
+        List<Path> sources = target.paths();
+        String name = target.sourceName(sourceIndex);
+        long pageCount = target.order().pages().stream()
                 .filter(entry -> entry.selection().sourceIndex() == sourceIndex)
                 .count();
 
         if (!messages.confirmRemoveSource(name, pageCount)) {
             return;
         }
+        if (!stillHolds(target, sources)) {
+            // 確認の最中に入れ替わった。黙って戻る——利用者が見た説明はもう成り立たず、
+            // ここで何かを外せば、確認していない文書に当たる。
+            return;
+        }
 
         try {
-            session.remove(sourceIndex);
+            target.remove(sourceIndex);
         } catch (PdfjigException e) {
             messages.failure(e);
             return;
@@ -645,9 +745,10 @@ public final class MainWindow {
 
         List<Path> sources = session.paths();
         Path outputDir = directory.get();
-        folders.rememberWrittenFolder(outputDir);
 
-        run(() -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult);
+        if (run(() -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
+            folders.rememberWrittenFolder(outputDir);
+        }
     }
 
     /** 選択中のページの区切りを付け外しする。 */
@@ -749,9 +850,13 @@ public final class MainWindow {
         return Optional.ofNullable(session.path().getParent()).filter(Files::isDirectory);
     }
 
-    /** 失敗の伝え方を既定にして走らせる。分けたい経路だけが {@link BackgroundTasks} を直に呼ぶ。 */
-    private <T> void run(Supplier<T> work, Consumer<T> onSucceeded) {
-        tasks.run(work, onSucceeded, messages::failure);
+    /**
+     * 失敗の伝え方を既定にして走らせる。分けたい経路だけが {@link BackgroundTasks} を直に呼ぶ。
+     *
+     * @return 走り出したなら {@code true}
+     */
+    private <T> boolean run(Supplier<T> work, Consumer<T> onSucceeded) {
+        return tasks.run(work, onSucceeded, messages::failure);
     }
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
