@@ -34,14 +34,6 @@ import org.testfx.util.WaitForAsyncUtils;
  */
 class QuitDuringSaveUiTest extends DesktopUiTest {
 
-    /**
-     * 閉じないはずの窓が本当に閉じないことを見るための猶予。
-     *
-     * <p><b>「待てば直る」種類の待ちではない。</b>直っていれば窓は<b>いつまで待っても閉じない</b>ので、
-     * 長く取っても偽の緑にならない。<b>短すぎると、閉じる処理が始まる前を「閉じていない」と読む。</b>
-     */
-    private static final int GRACE_SECONDS = 2;
-
     private final HeldTasks held = new HeldTasks();
 
     @Override
@@ -70,7 +62,7 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
     @Test
     void 書き出しが走っている間はメニューの終了で閉じない(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
-        startHeldSave(robot, dir.resolve("out.pdf"));
+        startHeldSave(robot, held, dir.resolve("out.pdf"));
 
         quitFromMenu(robot);
 
@@ -86,7 +78,7 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
     @Test
     void 書き出しが走っている間は窓の閉じるボタンでも閉じない(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
-        startHeldSave(robot, dir.resolve("out.pdf"));
+        startHeldSave(robot, held, dir.resolve("out.pdf"));
 
         quitFromWindowButton();
 
@@ -102,11 +94,37 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
     @Test
     void 書き終わったら頼まれていた終了が効く(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
-        startHeldSave(robot, dir.resolve("out.pdf"));
+        startHeldSave(robot, held, dir.resolve("out.pdf"));
         quitFromMenu(robot);
 
         held.release();
 
+        waitFor(() -> !stage.isShowing());
+    }
+
+    /**
+     * 窓が出ている最中に閉じない。
+     *
+     * <p><b>★★ ここが「待ち方」を縛っている。</b>{@code busy} が下りたのを見て
+     * {@code Platform#runLater} でずらす形にすると、<b>ずらしたものは
+     * {@code Alert#showAndWait} の入れ子のイベントループで動く</b>——
+     * <b>窓が出ている最中に主画面が閉じる。</b>
+     *
+     * <p><b>いちばん困るのは #124 の窓である</b>——「保存に失敗しました。元のファイルは
+     * ここに残っています」を読んでいる最中に、その親の窓が消える。
+     * <b>ここでは 2 ファイルから書き出して、必ず出る文書情報の警告で同じ形を作る。</b>
+     */
+    @Test
+    void 窓が出ている最中には閉じない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openTwoFiles(robot, dir);
+        startHeldSave(robot, held, dir.resolve("out.pdf"));
+        quitFromMenu(robot);
+
+        held.release();
+        waitForNode(robot, "#message-ok");
+
+        assertTrue(stage.isShowing(), "警告の窓が出ている最中に主画面が閉じている。読んでいるものの親が消える（#134）");
+        clickWhenReady(robot, "#message-ok");
         waitFor(() -> !stage.isShowing());
     }
 
@@ -155,13 +173,5 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
         assertTrue(
                 stage.isShowing(), "書き出しの最中に窓が閉じている。退避と入れ替えの 2 本の改名の間で JVM が死ぬと、" + "出力先には何も無く、元は作業場所の中にしか残らない（#134）");
         assertTrue(statusText(robot).contains("終了します"), "閉じない理由が出ていない。利用者からは固まったようにしか見えない");
-    }
-
-    /** 書き出しを始めて、始まったところで止める。止まったことをツールバーで確かめてから戻る。 */
-    private void startHeldSave(FxRobot robot, Path output) throws Exception {
-        held.hold();
-        dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
-        waitFor(() -> button(robot, "#tool-save").isDisabled());
     }
 }

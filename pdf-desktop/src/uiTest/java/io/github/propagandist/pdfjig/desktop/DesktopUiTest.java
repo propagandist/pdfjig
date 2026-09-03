@@ -76,9 +76,8 @@ abstract class DesktopUiTest {
     /**
      * 使う非同期の実行の手段。
      *
-     * <p><b>「操作が走っている間」を作りたいテストだけが差し替える</b>
-     * （{@link EditingGateUiTest}）。実際の書き出しの速さで待ち合わせに行くと、
-     * 落ちるかどうかが機械の速さで決まるテストになる。
+     * <p><b>「操作が走っている間」を作りたいテストだけが差し替える</b>（{@link HeldTasks}）。
+     * 実際の書き出しの速さで待ち合わせに行くと、落ちるかどうかが機械の速さで決まるテストになる。
      */
     BackgroundTasks tasks() {
         return new BackgroundTasks();
@@ -273,6 +272,29 @@ abstract class DesktopUiTest {
         }
         Bounds bounds = node.localToScene(node.getBoundsInLocal());
         return bounds.getWidth() > 0 && bounds.getHeight() > 0 && scene.getWidth() > 0 && scene.getHeight() > 0;
+    }
+
+    /**
+     * 出ないはず・閉じないはずのものを、本当にそうだと見るための猶予。
+     *
+     * <p><b>「待てば直る」種類の待ちではない。</b>直っていれば<b>いつまで待っても起きない</b>ので、
+     * 長く取っても偽の緑にならない。<b>短すぎると、始まる前を「起きていない」と読む。</b>
+     */
+    static final int GRACE_SECONDS = 2;
+
+    /**
+     * 書き出しを始めて、始まったところで止める。
+     *
+     * <p><b>止まったことをツールバーで確かめてから戻る。</b>{@code busy} が立っていなければ、
+     * この後の「効かない」は門ではなく別の理由になる。
+     *
+     * @param held その書き出しを抱える手。{@code tasks()} で差し込んだものを渡すこと
+     */
+    void startHeldSave(FxRobot robot, HeldTasks held, Path output) throws Exception {
+        held.hold();
+        dialogs.willSaveTo(output);
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        waitFor(() -> button(robot, "#tool-save").isDisabled());
     }
 
     static void waitFor(Callable<Boolean> condition) throws Exception {

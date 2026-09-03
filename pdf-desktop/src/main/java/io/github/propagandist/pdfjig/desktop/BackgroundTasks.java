@@ -58,6 +58,13 @@ final class BackgroundTasks {
      */
     private final ReadOnlyBooleanWrapper busy = new ReadOnlyBooleanWrapper(false);
 
+    /**
+     * 走っている仕事が無くなったら 1 度だけ呼ぶもの。無ければ {@code null}。
+     *
+     * <p><b>★★ 印が下りた瞬間ではなく、後始末まで済んでから呼ぶ</b>（{@link #drainIdle}）。
+     */
+    private Runnable idle;
+
     BackgroundTasks() {
         this(BackgroundTasks::startWorker);
     }
@@ -74,6 +81,45 @@ final class BackgroundTasks {
     /** 進行中の仕事があるか。操作の有効・無効を縛るのに使う。 */
     ReadOnlyBooleanProperty busy() {
         return busy.getReadOnlyProperty();
+    }
+
+    /**
+     * 走っている仕事が無くなったら 1 度だけ行う。既に無ければその場で行う。
+     *
+     * <p><b>★★ {@link #busy()} を見張る形にしてはならない。</b>あの印は
+     * <b>成功したときの後始末より先に下りる</b>ので、そこで動くと<b>後始末がまだ走っていない。</b>
+     * <b>そして {@code Platform#runLater} で 1 拍ずらしても足りない</b>——
+     * 後始末の中で {@code Alert#showAndWait} が入れ子のイベントループを回すため、
+     * <b>ずらしたものは窓が出ている最中に動く</b>（{@code Messages}）。
+     * <b>「保存に失敗しました。元のファイルはここにあります」を読んでいる最中に
+     * 主画面が閉じる</b>のがその形である（#124 / #134）。
+     *
+     * <p><b>だからここが呼ぶ。</b>受け手が戻ってから見るので、<b>窓を閉じるところまで済んでいる。</b>
+     *
+     * <p><b>★ 後始末が次の仕事を始めていたら、まだ行わない</b>（上書き保存のあとの寄せ直し。#118）。
+     * <b>その仕事が終わるときに、またここへ来る。</b>
+     *
+     * @param action 行うこと。<b>取り消す手は無い</b>——頼めるのは「終了」だけであり、
+     *               <b>押した意思を打ち消す入口が画面に無い</b>
+     */
+    void whenIdle(Runnable action) {
+        idle = action;
+        drainIdle();
+    }
+
+    /**
+     * 頼まれていたことを、走っている仕事が無ければ行う。
+     *
+     * <p><b>先に取り出してから呼ぶ。</b>行った先で {@link #whenIdle} が呼ばれても、
+     * <b>取り出したぶんが上書きされて消えない。</b>
+     */
+    private void drainIdle() {
+        if (idle == null || busy.get()) {
+            return;
+        }
+        Runnable action = idle;
+        idle = null;
+        action.run();
     }
 
     /**
@@ -105,14 +151,20 @@ final class BackgroundTasks {
         task.setOnSucceeded(event -> {
             busy.set(false);
             onSucceeded.accept(task.getValue());
+            // ★★ 受け手が戻ってから見る。中で窓が出ていれば、閉じるところまで済んでいる（whenIdle）。
+            drainIdle();
         });
         task.setOnFailed(event -> {
             busy.set(false);
             onFailed.accept(task.getException());
+            drainIdle();
         });
         // ★ 取り消しでも下ろす。いまは誰も取り消さないが、下ろす経路が 2 つしか無い形にしておくと、
         //   取り消しを足した日に「進行中のまま二度と戻らない」を作る（#114）。
-        task.setOnCancelled(event -> busy.set(false));
+        task.setOnCancelled(event -> {
+            busy.set(false);
+            drainIdle();
+        });
 
         busy.set(true);
         try {
@@ -121,6 +173,9 @@ final class BackgroundTasks {
             // ★★ 始められなかった。ここで下ろさないと、この門は二度と開かない——
             //   走っている印が立ったまま、以降の頼みはすべて上で断られる（#114）。
             busy.set(false);
+            // ★ 始められなかったぶんも見る。ここで見ないと、頼まれていたことが
+            //   「次に何かを走らせるまで」宙に浮く——次が無ければ永久に浮く。
+            drainIdle();
             throw e;
         }
         return true;

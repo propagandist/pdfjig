@@ -15,7 +15,6 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
-import javafx.application.Platform;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -169,6 +168,14 @@ public final class MainWindow {
         //   通らない入口を持っており、後から差す形にすると「差し忘れると通る」を作る。
         this.thumbnails = new ThumbnailGrid(editingBlocked);
         this.legend = new SourceLegend(editingBlocked);
+        // ★★ 窓の × も「終了」と同じ道を通す（#134）。必ず断ってから自分で閉じる形にする——
+        //   OS に閉じさせる道を残すと、そちらだけが門を通らない（#114 と同じ形の漏れ）。
+        //   ★ 組み立てではなく、ここで決める。build を 2 度呼べる形にすると、
+        //     門が上書きされうる（上の★★と同じ理由）。
+        stage.setOnCloseRequest(event -> {
+            event.consume();
+            requestQuit();
+        });
     }
 
     /**
@@ -179,22 +186,6 @@ public final class MainWindow {
     public Parent build() {
         thumbnails.setOnDelete(this::deleteSelected);
         legend.setOnRemove(this::removeSource);
-
-        // ★★ 窓の × も「終了」と同じ道を通す（#134）。必ず断ってから自分で閉じる形にする——
-        //   OS に閉じさせる道を残すと、そちらだけが門を通らない（#114 と同じ形の漏れ）。
-        stage.setOnCloseRequest(event -> {
-            event.consume();
-            requestQuit();
-        });
-        // ★ 走っている仕事が終わったら、覚えてある終了を効かせる（#134）。
-        tasks.busy().addListener((observable, wasBusy, isBusy) -> {
-            if (!isBusy) {
-                // ★★ そのまま閉じない。この通知は BackgroundTasks が印を下ろした瞬間に来るので、
-                //   成功したときの後始末（markSaved / reopenAt）がまだ走っていない。
-                //   ここで閉じると、そのあとの後始末が閉じた文書に触る。
-                Platform.runLater(this::quitIfIdle);
-            }
-        });
 
         Actions actions = buildActions();
 
@@ -253,23 +244,14 @@ public final class MainWindow {
     private void requestQuit() {
         if (tasks.busy().get()) {
             quitWhenIdle = true;
+            // ★★ 待ち方は BackgroundTasks が持つ（whenIdle）。busy を自分で見張る形にすると、
+            //   印が下りた瞬間——後始末より前——に閉じることになり、
+            //   しかも runLater でずらしても窓が出ている最中に動く。
+            tasks.whenIdle(stage::close);
             updateStatus();
             return;
         }
         stage.close();
-    }
-
-    /**
-     * 頼まれていた終了を、走っている仕事が無くなった時点で効かせる。
-     *
-     * <p><b>★ もう一度確かめてから閉じる。</b>{@code busy} が下りた直後に次の仕事が始まることがある
-     * （上書き保存のあとの寄せ直し。#118）——<b>そこで閉じると、守りたかった区間の 2 本目に入る。</b>
-     * 立ったままなら何もしない。<b>次に下りたときの通知でまたここへ来る。</b>
-     */
-    private void quitIfIdle() {
-        if (quitWhenIdle && !tasks.busy().get()) {
-            stage.close();
-        }
     }
 
     /**
@@ -995,7 +977,7 @@ public final class MainWindow {
             // ★★ なぜ閉じないのかを出す（#134）。何も言わずに閉じないと、利用者は
             //   固まったと読んで、より乱暴な終わらせ方をする——それがまさに守りたい場面である。
             //   ★ 文書が開かれていなくても出す。走っているのは書き出しだけではない。
-            text.append(session == null ? "" : "　").append("処理が終わったら終了します。");
+            text.append("　処理が終わったら終了します。");
         }
         // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、
         // 版の性格を混ぜると読み分けられない。出す先はバージョン情報（AppInfo#aiStatus）。
