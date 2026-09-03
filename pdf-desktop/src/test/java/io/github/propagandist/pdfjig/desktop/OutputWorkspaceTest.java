@@ -2,8 +2,12 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -90,6 +94,87 @@ class OutputWorkspaceTest {
 
         assertFalse(Files.exists(workspace));
         assertEquals(List.of(), namesIn(directory));
+    }
+
+    /**
+     * 控えが実在するときだけ、失敗に在り処を載せる。
+     *
+     * <p><b>★★ 印だけでは足りない。</b>{@code releaseOriginal} は<b>印を消せなくても続ける</b>ので、
+     * <b>巻き戻して元へ返したのに印が残る</b>ことがありうる。印だけを見ると、そのとき
+     * <b>出力先に無事にあるものを「作業場所にしか無い」と伝える</b>——
+     * <b>利用者は無事なファイルを探しに行って、見つけられない</b>（優先順位 2）。
+     *
+     * <p><b>原因はそのまま連ねる。</b>何が起きたのかを持っているのは原因の側であり、
+     * <b>落とすと「場所は分かるが理由が分からない」失敗になる。</b>
+     */
+    @Test
+    @DisplayName("控えが実在するときだけ、失敗に在り処を載せる")
+    void putsTheKeptPlaceOnTheFailureOnlyWhenTheCopyIsThere(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            PdfjigException failed = new PdfjigException(ErrorCode.IO_FAILURE);
+            assertTrue(workspace.failing(failed).isEmpty(), "何も退避していないのに控えの在り処を載せている");
+
+            workspace.holdOriginal();
+            assertTrue(workspace.failing(failed).isEmpty(), "印だけを見て在り処を載せている。控えが無いのに「ここに残っている」と言うことになる（#124）");
+
+            Files.writeString(workspace.replaced(), "元のファイル");
+            ReplacedFileKeptException kept = assertInstanceOf(
+                    ReplacedFileKeptException.class, workspace.failing(failed).orElseThrow());
+            assertEquals(workspace.replaced(), kept.kept(), "控えの在り処が退避先と違う");
+            assertSame(failed, kept.getCause(), "何が起きたのかを落としている");
+
+            workspace.releaseOriginal();
+            assertTrue(workspace.failing(failed).isEmpty(), "元の場所へ返したのに、控えの在り処を載せている");
+        }
+    }
+
+    /**
+     * 控えの在り処を、例外のメッセージには入れない。
+     *
+     * <p><b>★★ {@link Logs} は例外のメッセージを読まないが、捕まらなかった例外は
+     * {@code printStackTrace} も通る</b>（{@link Logs#start}）。<b>文書のパスを
+     * 残り続ける記録へ入れないという線は、そこでも守られていなければならない</b>
+     * （{@code docs/SPEC.md} §10.4）。<b>取り出す口は {@code kept()} だけである。</b>
+     *
+     * <p><b>丸ごと一致で見る。</b>作業場所の名前だけを探す形にすると、
+     * <b>別の書き方でパスが混ざった日に素通りする。</b>
+     */
+    @Test
+    @DisplayName("控えの在り処を、例外のメッセージには入れない")
+    void keepsTheKeptPlaceOutOfTheMessage(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            workspace.holdOriginal();
+            Files.writeString(workspace.replaced(), "元のファイル");
+
+            RuntimeException reported =
+                    workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)).orElseThrow();
+
+            assertEquals(
+                    "元の実体を作業場所に残したまま失敗した",
+                    reported.getMessage(),
+                    "例外のメッセージにパスが混ざっている。printStackTrace を通れば、そのまま残り続ける記録になる（SPEC §10.4）");
+        }
+    }
+
+    /**
+     * Error でも、控えの在り処は載る。
+     *
+     * <p><b>★★ 受けるのは {@code Throwable} である。</b>退避が済んだ後に
+     * {@code OutOfMemoryError} が上がっただけで在り処を言えなくなると、
+     * <b>控えは残るのに画面には汎用の失敗しか出ない</b>——#124 がそのまま戻る。
+     */
+    @Test
+    @DisplayName("Error でも、控えの在り処は載る")
+    void putsTheKeptPlaceOnAnErrorToo(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            workspace.holdOriginal();
+            Files.writeString(workspace.replaced(), "元のファイル");
+            OutOfMemoryError failed = new OutOfMemoryError();
+
+            RuntimeException reported = workspace.failing(failed).orElseThrow();
+
+            assertSame(failed, reported.getCause(), "Error を受け取れていない。控えが残るのに何も言わない道ができる");
+        }
     }
 
     /**

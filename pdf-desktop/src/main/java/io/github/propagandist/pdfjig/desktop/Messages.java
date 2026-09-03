@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ButtonType;
+import javafx.scene.layout.Region;
 import javafx.stage.Stage;
 
 /**
@@ -69,9 +70,50 @@ final class Messages {
      */
     void failure(Throwable failure) {
         Logs.warn(LogEvent.OPERATION_FAILED, failure);
-        String message =
-                failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
-        show(AlertType.ERROR, message);
+        show(AlertType.ERROR, describe(failure));
+    }
+
+    /**
+     * 失敗を、画面に出す文言に直す。
+     *
+     * <p><b>{@code static} なのは、画面を立てずに確かめるためである</b>（{@code MessagesTest}）。
+     * <b>ここが「出してよいものの線」そのもの</b>であり、窓の出し方とは別に見られなければならない。
+     *
+     * <p><b>★★ 控えが残ったなら、その場所まで言う</b>（{@link ReplacedFileKeptException}。#124）。
+     * <b>出力先には何も無く、元は作業場所の中にしか無い</b>ので、定型文だけでは
+     * 利用者から見えるのは「ファイルが消えた」である。
+     * <b>画面には出してよく、記録には書かない理由は {@code docs/SPEC.md} §10.4 が持つ。
+     * ここへ写さない。</b>
+     *
+     * <p><b>原因の文言はそのまま前に置く。</b>場所を足すために、
+     * <b>何が起きたのかを落とさない。</b>
+     *
+     * @param failure 起きた失敗。{@code null} でもよい
+     * @return 画面に出す文言
+     */
+    static String describe(Throwable failure) {
+        if (failure instanceof ReplacedFileKeptException kept) {
+            // 改行は "\n" で足りる。OS ごとの改行を持ち込む必要がない（warnings も同じ）。
+            // ★ 1 段だけ解く。再帰にすると、入れ子が起きた日に同じ段落が重なって出る——
+            //   包むのは OutputWorkspace#failing の 1 か所だけなので、深さは必ず 1 である。
+            return stockPhrase(kept.getCause())
+                    + "\n\n元のファイルは次の場所に残っています。\n"
+                    + kept.kept()
+                    // ★ 片づけまで案内する。この作業場所は控えを抱えた印が残ったままで、
+                    //   pdfjig からはもう消せない——言わないと、利用者の隣に残り続ける。
+                    + "\n\n取り出して、元の名前を付け直してください。そのあと、このフォルダは消してかまいません。";
+        }
+        return stockPhrase(failure);
+    }
+
+    /**
+     * 何が起きたのかの定型文。
+     *
+     * <p><b>例外そのもののメッセージは決して出さない</b>（{@link #failure}）。
+     * 出してよいのは {@link ErrorCode} の定型文だけである。
+     */
+    private static String stockPhrase(Throwable failure) {
+        return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
     }
 
     /**
@@ -101,6 +143,11 @@ final class Messages {
         Alert alert = new Alert(type, message, ButtonType.OK);
         alert.setHeaderText(null);
         alert.initOwner(owner);
+        // ★ 折り返した本文の高さは、窓の大きさが決まった後にしか分からない。指定しないと
+        //   長い本文の末尾が切れる——控えの在り処（#124）はまさにその長い本文である。
+        alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+        // 切れても利用者が自分で広げられるようにしておく。読めなければ在り処を伝えたことにならない。
+        alert.setResizable(true);
         alert.getDialogPane().setId("message-dialog");
         alert.getDialogPane().lookupButton(ButtonType.OK).setId("message-ok");
         alert.showAndWait();

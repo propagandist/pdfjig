@@ -14,6 +14,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 編集した並びをファイルに書き出す。
@@ -65,6 +66,11 @@ final class DocumentWriter {
      * <b>{@link #splitInto} は代わりにならない</b>——書き出し先はフォルダで、
      * 名前を決めるのは pdf-core である。
      *
+     * <p><b>★★ 失敗して控えが残ったら、その在り処を載せて投げる</b>
+     * （{@link OutputWorkspace#failing}。#124）。<b>決めるのは作業場所の側である</b>——
+     * ここで印を見て包む形にすると、<b>2 つ目の {@link OutputWorkspace#nextTo} が足された日に
+     * 黙って素通りする。</b>
+     *
      * @param sources 元のファイル
      * @param pages   書き出すページの指定
      * @param output  書き出し先
@@ -75,8 +81,22 @@ final class DocumentWriter {
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
-            operations.assemble(sources, pages, workspace.file());
-            move(workspace.file(), output, workspace);
+            // ★ catch を内側に置く。try-with-resources の catch にすると close の失敗まで拾い、
+            //   書けているのに「失敗しました」と出す——呼ぶ側はそこで寄せ直しを飛ばすので、
+            //   次の保存で同じ変換が二重に掛かる（#118）。
+            try {
+                operations.assemble(sources, pages, workspace.file());
+                move(workspace.file(), output, workspace);
+            } catch (RuntimeException | Error failed) {
+                // ★★ Error まで受ける。狭く書くと、退避が済んだ後に OutOfMemoryError が
+                //    上がっただけで在り処を言えなくなる——控えは残るのに、画面は汎用の失敗を出す。
+                //    受けても握り潰さない。包まないときはそのまま投げ直す。
+                Optional<RuntimeException> kept = workspace.failing(failed);
+                if (kept.isPresent()) {
+                    throw kept.get();
+                }
+                throw failed;
+            }
         }
         return List.copyOf(warnings);
     }

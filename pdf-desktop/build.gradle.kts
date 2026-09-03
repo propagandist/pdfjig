@@ -9,6 +9,9 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    // 書き出しの筋を端から端まで通すには本物の PDF が要る。作法は pdf-core と共有する
+    // （CLAUDE.md INV-6。生成の作法をモジュールごとに書かない）。
+    testImplementation(testFixtures(project(":pdf-core")))
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
