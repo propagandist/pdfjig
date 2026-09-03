@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
+import javafx.application.Platform;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -129,6 +130,14 @@ public final class MainWindow {
     /** ページ並びが変わるたびに表示を更新する。 */
     private final ListChangeListener<PageEntry> orderListener = change -> onOrderChanged();
 
+    /**
+     * 終了を頼まれたが、走っている仕事があるので待っている。
+     *
+     * <p><b>一度立ったら下ろさない</b>（#134）。取り消す手を用意しない——
+     * <b>押した意思を打ち消す操作は、押した本人にしか意味が無く、それを表す入口が無い。</b>
+     */
+    private boolean quitWhenIdle;
+
     private DocumentSession session;
 
     public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
@@ -171,6 +180,22 @@ public final class MainWindow {
         thumbnails.setOnDelete(this::deleteSelected);
         legend.setOnRemove(this::removeSource);
 
+        // ★★ 窓の × も「終了」と同じ道を通す（#134）。必ず断ってから自分で閉じる形にする——
+        //   OS に閉じさせる道を残すと、そちらだけが門を通らない（#114 と同じ形の漏れ）。
+        stage.setOnCloseRequest(event -> {
+            event.consume();
+            requestQuit();
+        });
+        // ★ 走っている仕事が終わったら、覚えてある終了を効かせる（#134）。
+        tasks.busy().addListener((observable, wasBusy, isBusy) -> {
+            if (!isBusy) {
+                // ★★ そのまま閉じない。この通知は BackgroundTasks が印を下ろした瞬間に来るので、
+                //   成功したときの後始末（markSaved / reopenAt）がまだ走っていない。
+                //   ここで閉じると、そのあとの後始末が閉じた文書に触る。
+                Platform.runLater(this::quitIfIdle);
+            }
+        });
+
         Actions actions = buildActions();
 
         status.setId("status-label");
@@ -203,6 +228,48 @@ public final class MainWindow {
     /** ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。 */
     public void dispose() {
         closeSession();
+    }
+
+    /**
+     * 終了の要求を受ける。<b>メニューの「終了」も窓の × もここを通る</b>（#134）。
+     *
+     * <p><b>★★ 走っている間は閉じない。</b>置き換えは<b>「元をどけてから入れる」2 本の改名</b>
+     * であり（#119）、<b>その 2 本の間で JVM が死ぬと、出力先には何も無く、
+     * 元は作業場所の中にしか残らない</b>——書き出しは daemon スレッドで走るので、
+     * <b>止められずに消える。</b>
+     *
+     * <p><b>★ 断るのではなく、覚えて待つ。</b>断ると<b>利用者は押し直さなければならない</b>——
+     * 押した意思は消えていない。<b>「閉じられない」と「あとで閉じる」は違う。</b>
+     *
+     * <p><b>★★ 待たせる上限は置かない。</b>置いて切ると、<b>切った先はまさにこの不具合である</b>
+     * ——守るために作った仕組みが、上限のところで守らなくなる。<b>待っている間、窓は固まらない</b>
+     * （仕事は背景スレッドで走る）ので、<b>状態行に理由を出せば、なぜ閉じないかは伝わる</b>
+     * （{@code CLAUDE.md} 優先順位 2）。それでも待てないなら OS から終わらせる手が残っており、
+     * <b>それは今日と同じで、悪くならない。</b>
+     *
+     * <p><b>★ 走っている仕事の種類で分けない。</b>{@code busy} が立つのは書き出しだけではないが、
+     * <b>分けるとその判断が 2 か所になる</b>し、書き出し以外は 1 秒前後で終わる。
+     */
+    private void requestQuit() {
+        if (tasks.busy().get()) {
+            quitWhenIdle = true;
+            updateStatus();
+            return;
+        }
+        stage.close();
+    }
+
+    /**
+     * 頼まれていた終了を、走っている仕事が無くなった時点で効かせる。
+     *
+     * <p><b>★ もう一度確かめてから閉じる。</b>{@code busy} が下りた直後に次の仕事が始まることがある
+     * （上書き保存のあとの寄せ直し。#118）——<b>そこで閉じると、守りたかった区間の 2 本目に入る。</b>
+     * 立ったままなら何もしない。<b>次に下りたときの通知でまたここへ来る。</b>
+     */
+    private void quitIfIdle() {
+        if (quitWhenIdle && !tasks.busy().get()) {
+            stage.close();
+        }
     }
 
     /**
@@ -244,7 +311,7 @@ public final class MainWindow {
                         this::saveAs,
                         editingBlocked),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
-                new Action("quit", "終了", null, null, null, stage::close, null),
+                new Action("quit", "終了", null, null, null, this::requestQuit, null),
                 new Action(
                         "delete",
                         "選択したページを削除",
@@ -923,6 +990,12 @@ public final class MainWindow {
                 // 編集を始める前に知らせる。保存後の警告では遅い。
                 text.append("（電子署名があります）");
             }
+        }
+        if (quitWhenIdle) {
+            // ★★ なぜ閉じないのかを出す（#134）。何も言わずに閉じないと、利用者は
+            //   固まったと読んで、より乱暴な終わらせ方をする——それがまさに守りたい場面である。
+            //   ★ 文書が開かれていなくても出す。走っているのは書き出しだけではない。
+            text.append(session == null ? "" : "　").append("処理が終わったら終了します。");
         }
         // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、
         // 版の性格を混ぜると読み分けられない。出す先はバージョン情報（AppInfo#aiStatus）。
