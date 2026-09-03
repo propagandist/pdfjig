@@ -79,10 +79,28 @@ final class Messages {
      * そのものであり、<b>窓の出し方とは別に見られなければならない</b>
      * （{@code MessagesTest}）。
      *
+     * <p><b>★★ 控えが残ったなら、その場所まで言う</b>（{@link ReplacedFileKeptException}。#124）。
+     * <b>出力先には何も無く、元は作業場所の中にしか無い</b>——定型文だけでは、
+     * 利用者から見えるのは「ファイルが消えた」であり、
+     * <b>{@code .pdfjig-*} は消してよいゴミにしか見えない。</b>
+     *
+     * <p><b>★ ログの制約はここには掛からない。</b>{@code docs/SPEC.md} §10.4 が禁じているのは
+     * <b>残り続ける記録</b>に文書のパスを書くことであり、<b>その場限りのダイアログは別である。</b>
+     * <b>そこは利用者自身が選んだ場所であり、伝えなければ取り戻す手立てが無い</b>
+     * （{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>原因の文言はそのまま前に置く。</b>場所を足すために、
+     * <b>何が起きたのかを落とさない。</b>
+     *
      * @param failure 起きた失敗。{@code null} でもよい
      * @return 画面に出す文言
      */
     static String describe(Throwable failure) {
+        if (failure instanceof ReplacedFileKeptException kept) {
+            // 改行は "\n" で足りる。Alert の本文は JavaFX が折り返すので、
+            // OS ごとの改行を持ち込む必要がない（warnings も同じ）。
+            return describe(kept.getCause()) + "\n\n元のファイルは次の場所に残っています。\n" + kept.kept() + "\n\n取り出して、元の名前を付け直してください。";
+        }
         return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
     }
 

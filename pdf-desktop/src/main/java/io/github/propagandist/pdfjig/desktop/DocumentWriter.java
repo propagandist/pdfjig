@@ -65,6 +65,15 @@ final class DocumentWriter {
      * <b>{@link #splitInto} は代わりにならない</b>——書き出し先はフォルダで、
      * 名前を決めるのは pdf-core である。
      *
+     * <p><b>★★ 失敗して控えが残ったら、その在り処を載せて投げる</b>
+     * （{@link ReplacedFileKeptException#reporting}。#124）。<b>そのとき出力先には何も無く、
+     * 元は作業場所の中にしか無い</b>ので、汎用の失敗だけを返すと
+     * <b>利用者から見えるのは「ファイルが消えた」だけになる</b>（{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>★ 見るのは印だけで、失敗の仕方を数え上げない。</b>ここが<b>作業場所を閉じる
+     * 唯一の場所</b>なので、<b>この先どんな失敗の仕方が増えても、控えを残したまま外へ出るものは
+     * すべてここを通る。</b>
+     *
      * @param sources 元のファイル
      * @param pages   書き出すページの指定
      * @param output  書き出し先
@@ -74,9 +83,15 @@ final class DocumentWriter {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
+        // ★ try-with-resources の資源として使いつつ、catch からも触れる形にする。
+        //   Java は catch より先に close を走らせるが、抱えたままなら片づけは何もしないので、
+        //   印はそこで読める（OutputWorkspace#stillHoldsOriginal）。
+        OutputWorkspace workspace = OutputWorkspace.nextTo(output);
+        try (workspace) {
             operations.assemble(sources, pages, workspace.file());
             move(workspace.file(), output, workspace);
+        } catch (RuntimeException failed) {
+            throw ReplacedFileKeptException.reporting(failed, workspace);
         }
         return List.copyOf(warnings);
     }
