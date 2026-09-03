@@ -2,8 +2,12 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -93,40 +97,73 @@ class OutputWorkspaceTest {
     }
 
     /**
-     * 抱えているかどうかを、印のとおりに答える。
+     * 抱えたままなら、失敗に控えの在り処を載せる。
      *
-     * <p><b>この答えが、利用者に控えの在り処を伝えるかどうかを決める</b>
-     * （{@link ReplacedFileKeptException#reporting}。#124）。<b>片づけと同じ印を見る</b>ので、
-     * <b>「消さない」と「伝える」が食い違わない</b>——消さずに残したのに何も言わない、
-     * あるいは元へ返したのに「残っている」と言う、のどちらも起きない。
+     * <p><b>★ 見るのは印だけである</b>（{@code holdOriginal} / {@code releaseOriginal}）。
+     * 失敗の種類で分けると、<b>次に増えた失敗の仕方が黙って「場所を言わない」側へ落ちる</b>
+     * ——ここは同じ {@code IO_FAILURE} で、印だけが違う。
+     *
+     * <p><b>原因はそのまま連ねる。</b>何が起きたのかを持っているのは原因の側であり、
+     * <b>落とすと「場所は分かるが理由が分からない」失敗になる。</b>
      */
     @Test
-    @DisplayName("抱えているかどうかを、印のとおりに答える")
-    void answersWhetherItStillHoldsTheOriginal(@TempDir Path directory) {
+    @DisplayName("抱えたままなら、失敗に控えの在り処を載せる")
+    void putsTheKeptPlaceOnTheFailure(@TempDir Path directory) {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
-            assertFalse(workspace.stillHoldsOriginal(), "何も退避していないのに抱えていると答えている");
+            PdfjigException failed = new PdfjigException(ErrorCode.IO_FAILURE);
+            assertSame(failed, workspace.failing(failed), "何も退避していないのに控えの在り処を載せている");
 
             workspace.holdOriginal();
-            assertTrue(workspace.stillHoldsOriginal(), "退避したことを記したのに抱えていないと答えている");
+            ReplacedFileKeptException kept =
+                    assertInstanceOf(ReplacedFileKeptException.class, workspace.failing(failed));
+            assertEquals(workspace.replaced(), kept.kept(), "控えの在り処が退避先と違う");
+            assertSame(failed, kept.getCause(), "何が起きたのかを落としている");
 
             workspace.releaseOriginal();
-            assertFalse(workspace.stillHoldsOriginal(), "抱えるのをやめたのに抱えていると答えている");
+            assertSame(failed, workspace.failing(failed), "元の場所へ返したのに、控えの在り処を載せている");
         }
     }
 
     /**
-     * 片づけたあとでも、抱えたままであることを答えられる。
+     * 控えの在り処を、例外のメッセージには入れない。
+     *
+     * <p><b>★★ {@link Logs} は例外のメッセージを読まないが、捕まらなかった例外は
+     * {@code printStackTrace} も通る</b>（{@link Logs#start}）。<b>文書のパスを
+     * 残り続ける記録へ入れないという線は、そこでも守られていなければならない</b>
+     * （{@code docs/SPEC.md} §10.4）。<b>取り出す口は {@code kept()} だけである。</b>
+     *
+     * <p><b>丸ごと一致で見る。</b>作業場所の名前だけを探す形にすると、
+     * <b>別の書き方でパスが混ざった日に素通りする。</b>
+     */
+    @Test
+    @DisplayName("控えの在り処を、例外のメッセージには入れない")
+    void keepsTheKeptPlaceOutOfTheMessage(@TempDir Path directory) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            workspace.holdOriginal();
+
+            RuntimeException reported = workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE));
+
+            assertEquals(
+                    "元の実体を作業場所に残したまま失敗した",
+                    reported.getMessage(),
+                    "例外のメッセージにパスが混ざっている。printStackTrace を通れば、そのまま残り続ける記録になる（SPEC §10.4）");
+        }
+    }
+
+    /**
+     * 片づけたあとに訊いても、控えの在り処を答えられる。
      *
      * <p><b>★★ 読むのは片づけの後である。</b>{@code DocumentWriter#assemble} は
-     * try-with-resources で作業場所を閉じており、<b>Java は catch より先に close を走らせる</b>
-     * ——伝えるかどうかを決めるのはそのあとになる。
+     * try-with-resources で作業場所を閉じており、<b>Java は catch より先に close を走らせる</b>。
+     * <b>そちらが正しい順である</b>——利用者がこれから見に行くのは片づけたあとの状態であり、
+     * <b>先に読むと、片づけが持っていったものの在り処を伝えることになりうる。</b>
      *
      * <p><b>成り立つのは、抱えているときの片づけが何もしないからである</b>
      * （{@code OutputWorkspace#discard}）。<b>そこが「消せなかったものだけ残す」形に変われば、
      * 印ごと消えて何も伝えられなくなる</b>——このテストはその日に落ちる。
      */
     @Test
-    @DisplayName("片づけたあとでも、抱えたままであることを答えられる")
+    @DisplayName("片づけたあとに訊いても、控えの在り処を答えられる")
     void stillAnswersAfterBeingClosed(@TempDir Path directory) {
         // try-with-resources にしない。閉じたあとに訊くのがこのテストである。
         OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
@@ -134,7 +171,10 @@ class OutputWorkspaceTest {
 
         workspace.close();
 
-        assertTrue(workspace.stillHoldsOriginal(), "閉じたあとに印を読めないなら、控えの在り処を誰も伝えられない（#124）");
+        assertInstanceOf(
+                ReplacedFileKeptException.class,
+                workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)),
+                "閉じたあとに印を読めないなら、控えの在り処を誰も伝えられない（#124）");
     }
 
     /**

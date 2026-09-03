@@ -52,6 +52,9 @@ class ArchitectureTest {
     /** 既にあるファイルを置き換える書き出しを頼んでよい唯一のクラス。 */
     private static final String MAIN_WINDOW = "io.github.propagandist.pdfjig.desktop.MainWindow";
 
+    /** 書き出しの作業場所。控えを抱えたまま失敗したことを利用者へ伝える関門を持つ。 */
+    private static final String OUTPUT_WORKSPACE = "io.github.propagandist.pdfjig.desktop.OutputWorkspace";
+
     private static JavaClasses classes;
 
     @BeforeAll
@@ -360,6 +363,36 @@ class ArchitectureTest {
                 .because("move は既にあるファイルを問答無用で置き換える。#113 で private を外したのは"
                         + "テストから呼ぶためであり、他から呼んでよくなったわけではない"
                         + "（CLAUDE.md 優先順位 1）")
+                .check(classes);
+    }
+
+    /**
+     * 作業場所を開けるのは、控えの在り処を伝える経路の内側だけである。
+     *
+     * <p><b>★★ 控えを抱えたまま失敗したことを利用者へ伝える関門は、作業場所の側にある</b>
+     * （{@code OutputWorkspace#failing}。#124）。<b>呼ぶ側がそれを通すかどうかに懸かっている</b>
+     * ので、<b>2 つ目の {@code nextTo} が足された日に黙って素通りしうる</b>——
+     * そのとき戻るのは #124 そのもので、<b>出力先には何も無く、元は作業場所の中にしか無いのに、
+     * 画面には汎用の失敗しか出ない。</b>
+     *
+     * <p><b>★★ これは CI でしか守れない。</b>その状態は<b>テストから作れない</b>——
+     * 入れ替えと巻き戻しは同じ 2 つのパスの間の逆向きの改名であり、
+     * <b>片方を塞ぐ条件はもう片方も塞ぐ</b>（{@code MessagesTest} の説明）。
+     * <b>素通りしても赤くならないので、呼び出し元の数のほうを縛る。</b>
+     *
+     * <p>呼んでよいのは {@code DocumentWriter} だけである（{@code assemble} の中から）。
+     * <b>テストは対象外である</b>——{@code DO_NOT_INCLUDE_TESTS} で取り込んでいない。
+     */
+    @Test
+    @DisplayName("作業場所を開けるのは DocumentWriter の中だけである")
+    void workspaceIsOpenedOnlyByDocumentWriter() {
+        noClasses()
+                .that(not(named(DOCUMENT_WRITER)))
+                .should()
+                .callMethodWhere(target(owner(name(OUTPUT_WORKSPACE))).and(target(name("nextTo"))))
+                .because("控えを抱えたまま失敗したことを伝える関門は OutputWorkspace#failing にあり、"
+                        + "呼ぶ側がそれを通すかどうかに懸かっている。2 つ目の入口が足されると"
+                        + "黙って素通りし、しかもその状態はテストから作れない（#124）")
                 .check(classes);
     }
 

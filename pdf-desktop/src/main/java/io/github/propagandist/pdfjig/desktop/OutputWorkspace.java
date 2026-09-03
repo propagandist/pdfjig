@@ -140,21 +140,32 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * 元の実体を、まだ唯一の控えとして抱えたままか。
+     * 失敗を、利用者に控えの在り処まで伝えられる形にする。
      *
-     * <p><b>★★ 失敗が外へ出るときに、それを利用者へ伝えてよいかの判断がこれである</b>
-     * （{@link ReplacedFileKeptException#reporting}。#124）。真なら<b>出力先には何も無く、
-     * 元はこの中にしか無い</b>——{@link #replaced} がその場所である。
+     * <p><b>★★ 抱えたままなら、出力先には何も無く、元はこの中にしか無い</b>
+     * （{@link #replaced}。#124）。伝えなければ、利用者から見えるのは
+     * <b>「保存に失敗して、ファイルが消えた」だけである</b>——{@code .pdfjig-*} は
+     * <b>よく分からないゴミにしか見えない</b>ので、消される。
      *
-     * <p><b>★ 片づけと同じ印を見る。</b>別の見方を足すと、<b>「消さない」と「伝える」が
-     * 食い違う日が来る</b>——消さずに残したのに何も言わない、あるいは
-     * 巻き戻して元へ返したのに「残っている」と言う。どちらも優先順位 2 に触れる。
+     * <p><b>★★ 関門は消す側と同じくここに置く</b>（{@link #discard} の説明）。
+     * <b>呼ぶ側の {@code catch} に置くと、2 つ目の {@link #nextTo} が足された日に黙って素通りする</b>
+     * ——そのとき戻るのは #124 そのものである。<b>{@code nextTo} の呼び出し元は
+     * ArchUnit が 1 つに縛っている</b>（{@code workspaceIsOpenedOnlyByDocumentWriter}）。
      *
-     * <p><b>{@link #close} の後にも答えられる。</b>抱えているなら片づけは何もしないので、
-     * 印はそのまま残っている（{@link #discard}）。
+     * <p><b>★ 片づけと同じ印を見る</b>（{@link #HELD}）。別の見方を足すと、
+     * <b>「消さない」と「伝える」が食い違う日が来る</b>——消さずに残したのに何も言わない、
+     * あるいは巻き戻して元へ返したのに「残っている」と言う。どちらも優先順位 2 に触れる。
+     *
+     * <p><b>★★ {@link #close} の後に訊いてよい。むしろそちらが正しい。</b>
+     * 片づけたあとの状態こそが、利用者がこれから見に行く状態である——
+     * <b>先に読むと、片づけが持っていったものの在り処を伝えることになりうる。</b>
+     * 抱えているなら片づけは何もしないので、印はそのまま残っている（{@link #discard}）。
+     *
+     * @param failed 起きた失敗
+     * @return 控えを抱えたままなら在り処を載せたもの。そうでなければ {@code failed} そのもの
      */
-    boolean stillHoldsOriginal() {
-        return holdsTheOnlyCopy(workspace);
+    RuntimeException failing(RuntimeException failed) {
+        return holdsTheOnlyCopy(workspace) ? new ReplacedFileKeptException(replaced(), failed) : failed;
     }
 
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */

@@ -360,6 +360,14 @@ public final class MainWindow {
         }
     }
 
+    /**
+     * 届いた失敗の分類。分からなければ {@code null}。
+     *
+     * <p><b>★ 包まれた失敗は見ない。</b>書き出しの経路は控えの在り処を載せて包むことがあり
+     * （{@code OutputWorkspace#failing}。#124）、そこから来たものはここでは {@code null} になる。
+     * <b>いま呼んでいるのは「開く」の 2 か所だけで、そちらは包まれない</b>——
+     * <b>書き出しの側でも分類を見たくなったら、先に解く形にすること。</b>
+     */
     private static ErrorCode errorCodeOf(Throwable failure) {
         return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode() : null;
     }
