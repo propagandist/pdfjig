@@ -69,9 +69,21 @@ final class Messages {
      */
     void failure(Throwable failure) {
         Logs.warn(LogEvent.OPERATION_FAILED, failure);
-        String message =
-                failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
-        show(AlertType.ERROR, message);
+        show(AlertType.ERROR, describe(failure));
+    }
+
+    /**
+     * 失敗を、画面に出す文言に直す。
+     *
+     * <p><b>画面を立てずに確かめられるように分けてある。</b>ここが「出してよいものの線」
+     * そのものであり、<b>窓の出し方とは別に見られなければならない</b>
+     * （{@code MessagesTest}）。
+     *
+     * @param failure 起きた失敗。{@code null} でもよい
+     * @return 画面に出す文言
+     */
+    static String describe(Throwable failure) {
+        return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode().defaultMessage() : "操作に失敗しました。";
     }
 
     /**

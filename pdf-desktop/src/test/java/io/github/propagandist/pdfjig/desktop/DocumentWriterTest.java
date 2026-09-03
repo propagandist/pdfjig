@@ -74,6 +74,7 @@ class DocumentWriterTest {
 
         assertEquals("新しいファイル", Files.readString(target));
         assertEquals("元のファイル", Files.readString(workspace.replaced()), "元を退避せずに置き換えている。落ちたときに戻すものが無い（#119）");
+        assertFalse(workspace.stillHoldsOriginal(), "置き換えが済んだのに抱えたままである。次の失敗で「元は作業場所にしか無い」と伝えることになる（#124）");
     }
 
     /**
@@ -94,6 +95,7 @@ class DocumentWriterTest {
 
         assertEquals("元のファイル", Files.readString(target), "巻き戻していない。元は退避先にしか無い（#119）");
         assertTrue(Files.notExists(workspace.replaced()), "戻したのに控えが残るなら、それは移動ではなく複製である");
+        assertFalse(workspace.stillHoldsOriginal(), "元の場所へ返したのに抱えたままである。出力先にあるものを「作業場所にしか無い」と伝えることになる（#124）");
     }
 
     @Test

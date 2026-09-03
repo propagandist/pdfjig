@@ -139,6 +139,24 @@ final class OutputWorkspace implements AutoCloseable {
         }
     }
 
+    /**
+     * 元の実体を、まだ唯一の控えとして抱えたままか。
+     *
+     * <p><b>★★ 失敗が外へ出るときに、それを利用者へ伝えてよいかの判断がこれである</b>
+     * （{@link ReplacedFileKeptException#reporting}。#124）。真なら<b>出力先には何も無く、
+     * 元はこの中にしか無い</b>——{@link #replaced} がその場所である。
+     *
+     * <p><b>★ 片づけと同じ印を見る。</b>別の見方を足すと、<b>「消さない」と「伝える」が
+     * 食い違う日が来る</b>——消さずに残したのに何も言わない、あるいは
+     * 巻き戻して元へ返したのに「残っている」と言う。どちらも優先順位 2 に触れる。
+     *
+     * <p><b>{@link #close} の後にも答えられる。</b>抱えているなら片づけは何もしないので、
+     * 印はそのまま残っている（{@link #discard}）。
+     */
+    boolean stillHoldsOriginal() {
+        return holdsTheOnlyCopy(workspace);
+    }
+
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */
     @Override
     public void close() {

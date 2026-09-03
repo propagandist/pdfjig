@@ -93,6 +93,51 @@ class OutputWorkspaceTest {
     }
 
     /**
+     * 抱えているかどうかを、印のとおりに答える。
+     *
+     * <p><b>この答えが、利用者に控えの在り処を伝えるかどうかを決める</b>
+     * （{@link ReplacedFileKeptException#reporting}。#124）。<b>片づけと同じ印を見る</b>ので、
+     * <b>「消さない」と「伝える」が食い違わない</b>——消さずに残したのに何も言わない、
+     * あるいは元へ返したのに「残っている」と言う、のどちらも起きない。
+     */
+    @Test
+    @DisplayName("抱えているかどうかを、印のとおりに答える")
+    void answersWhetherItStillHoldsTheOriginal(@TempDir Path directory) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            assertFalse(workspace.stillHoldsOriginal(), "何も退避していないのに抱えていると答えている");
+
+            workspace.holdOriginal();
+            assertTrue(workspace.stillHoldsOriginal(), "退避したことを記したのに抱えていないと答えている");
+
+            workspace.releaseOriginal();
+            assertFalse(workspace.stillHoldsOriginal(), "抱えるのをやめたのに抱えていると答えている");
+        }
+    }
+
+    /**
+     * 片づけたあとでも、抱えたままであることを答えられる。
+     *
+     * <p><b>★★ 読むのは片づけの後である。</b>{@code DocumentWriter#assemble} は
+     * try-with-resources で作業場所を閉じており、<b>Java は catch より先に close を走らせる</b>
+     * ——伝えるかどうかを決めるのはそのあとになる。
+     *
+     * <p><b>成り立つのは、抱えているときの片づけが何もしないからである</b>
+     * （{@code OutputWorkspace#discard}）。<b>そこが「消せなかったものだけ残す」形に変われば、
+     * 印ごと消えて何も伝えられなくなる</b>——このテストはその日に落ちる。
+     */
+    @Test
+    @DisplayName("片づけたあとでも、抱えたままであることを答えられる")
+    void stillAnswersAfterBeingClosed(@TempDir Path directory) {
+        // try-with-resources にしない。閉じたあとに訊くのがこのテストである。
+        OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
+        workspace.holdOriginal();
+
+        workspace.close();
+
+        assertTrue(workspace.stillHoldsOriginal(), "閉じたあとに印を読めないなら、控えの在り処を誰も伝えられない（#124）");
+    }
+
+    /**
      * 控えを消せなくても、抱えるのはやめられる。
      *
      * <p><b>★★ ここが「印を控えそのものにしない」理由である。</b>控えを印にすると、
