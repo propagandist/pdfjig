@@ -7,6 +7,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -140,7 +141,7 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * 失敗を、利用者に控えの在り処まで伝えられる形にする。
+     * 控えを抱えたまま失敗したなら、その在り処を載せた例外を返す。
      *
      * <p><b>★★ 抱えたままなら、出力先には何も無く、元はこの中にしか無い</b>
      * （{@link #replaced}。#124）。伝えなければ、利用者から見えるのは
@@ -149,23 +150,32 @@ final class OutputWorkspace implements AutoCloseable {
      *
      * <p><b>★★ 関門は消す側と同じくここに置く</b>（{@link #discard} の説明）。
      * <b>呼ぶ側の {@code catch} に置くと、2 つ目の {@link #nextTo} が足された日に黙って素通りする</b>
-     * ——そのとき戻るのは #124 そのものである。<b>{@code nextTo} の呼び出し元は
-     * ArchUnit が 1 つに縛っている</b>（{@code workspaceIsOpenedOnlyByDocumentWriter}）。
+     * ——そのとき戻るのは #124 そのものである。<b>{@code nextTo} と {@code failing} を呼ぶ場所は
+     * ArchUnit が 1 つに縛っている</b>（{@code theWorkspaceIsOpenedAndReportedInOnePlace}）。
      *
-     * <p><b>★ 片づけと同じ印を見る</b>（{@link #HELD}）。別の見方を足すと、
-     * <b>「消さない」と「伝える」が食い違う日が来る</b>——消さずに残したのに何も言わない、
-     * あるいは巻き戻して元へ返したのに「残っている」と言う。どちらも優先順位 2 に触れる。
+     * <p><b>★★ 印だけでは足りない。控えが実在することまで見る。</b>{@link #HELD} を下ろすのは
+     * <b>best-effort である</b>（{@link #releaseOriginal} は消せなくても続ける）ので、
+     * <b>巻き戻して元へ返したのに印が残る</b>ことがありうる。そこで印だけを見ると、
+     * <b>出力先に無事にあるものを「作業場所にしか無い」と伝える</b>——
+     * <b>利用者は無事なファイルを探しに行って、見つけられない</b>（優先順位 2）。
      *
-     * <p><b>★★ {@link #close} の後に訊いてよい。むしろそちらが正しい。</b>
-     * 片づけたあとの状態こそが、利用者がこれから見に行く状態である——
-     * <b>先に読むと、片づけが持っていったものの在り処を伝えることになりうる。</b>
-     * 抱えているなら片づけは何もしないので、印はそのまま残っている（{@link #discard}）。
+     * <p><b>★★ 「有ると確信できる」ときだけ言う。</b>{@link #holdsTheOnlyCopy} は
+     * <b>「確かめられない」を「抱えている」に倒す</b>——<b>消さない判断には正しいが、
+     * 伝える判断には逆である。</b>片づけは倒しすぎても<b>ゴミが残るだけ</b>だが、
+     * こちらが倒しすぎると<b>嘘になる。</b>だから {@link Files#exists} で<b>正の証拠</b>を取る。
+     *
+     * <p><b>★ 読むのは {@link #close} より前である。</b>{@code close} の失敗まで
+     * 「書き出しの失敗」にしてしまうと、<b>書けているのに失敗として出る</b>——
+     * 呼ぶ側はそこで寄せ直しを飛ばし、次の保存で同じ変換が二重に掛かる（#118）。
      *
      * @param failed 起きた失敗
-     * @return 控えを抱えたままなら在り処を載せたもの。そうでなければ {@code failed} そのもの
+     * @return 控えを抱えたままなら在り処を載せた例外。そうでなければ空
      */
-    RuntimeException failing(RuntimeException failed) {
-        return holdsTheOnlyCopy(workspace) ? new ReplacedFileKeptException(replaced(), failed) : failed;
+    Optional<RuntimeException> failing(Throwable failed) {
+        Path copy = replaced();
+        return holdsTheOnlyCopy(workspace) && Files.exists(copy)
+                ? Optional.of(new ReplacedFileKeptException(copy, failed))
+                : Optional.empty();
     }
 
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */

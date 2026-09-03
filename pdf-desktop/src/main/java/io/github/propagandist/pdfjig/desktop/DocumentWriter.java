@@ -14,6 +14,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 編集した並びをファイルに書き出す。
@@ -79,15 +80,23 @@ final class DocumentWriter {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        // ★ try-with-resources の資源として使いつつ、catch からも触れる形にする。
-        //   Java は catch より先に close を走らせるが、そちらが正しい順である——
-        //   利用者がこれから見に行くのは、片づけたあとの状態のほうである（failing の説明）。
-        OutputWorkspace workspace = OutputWorkspace.nextTo(output);
-        try (workspace) {
-            operations.assemble(sources, pages, workspace.file());
-            move(workspace.file(), output, workspace);
-        } catch (RuntimeException failed) {
-            throw workspace.failing(failed);
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
+            // ★ catch を内側に置く。try-with-resources の catch にすると close の失敗まで拾い、
+            //   書けているのに「失敗しました」と出す——呼ぶ側はそこで寄せ直しを飛ばすので、
+            //   次の保存で同じ変換が二重に掛かる（#118）。
+            try {
+                operations.assemble(sources, pages, workspace.file());
+                move(workspace.file(), output, workspace);
+            } catch (RuntimeException | Error failed) {
+                // ★★ Error まで受ける。狭く書くと、退避が済んだ後に OutOfMemoryError が
+                //    上がっただけで在り処を言えなくなる——控えは残るのに、画面は汎用の失敗を出す。
+                //    受けても握り潰さない。包まないときはそのまま投げ直す。
+                Optional<RuntimeException> kept = workspace.failing(failed);
+                if (kept.isPresent()) {
+                    throw kept.get();
+                }
+                throw failed;
+            }
         }
         return List.copyOf(warnings);
     }

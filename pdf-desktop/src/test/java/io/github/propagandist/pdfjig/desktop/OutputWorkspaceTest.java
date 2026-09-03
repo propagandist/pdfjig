@@ -97,30 +97,34 @@ class OutputWorkspaceTest {
     }
 
     /**
-     * 抱えたままなら、失敗に控えの在り処を載せる。
+     * 控えが実在するときだけ、失敗に在り処を載せる。
      *
-     * <p><b>★ 見るのは印だけである</b>（{@code holdOriginal} / {@code releaseOriginal}）。
-     * 失敗の種類で分けると、<b>次に増えた失敗の仕方が黙って「場所を言わない」側へ落ちる</b>
-     * ——ここは同じ {@code IO_FAILURE} で、印だけが違う。
+     * <p><b>★★ 印だけでは足りない。</b>{@code releaseOriginal} は<b>印を消せなくても続ける</b>ので、
+     * <b>巻き戻して元へ返したのに印が残る</b>ことがありうる。印だけを見ると、そのとき
+     * <b>出力先に無事にあるものを「作業場所にしか無い」と伝える</b>——
+     * <b>利用者は無事なファイルを探しに行って、見つけられない</b>（優先順位 2）。
      *
      * <p><b>原因はそのまま連ねる。</b>何が起きたのかを持っているのは原因の側であり、
      * <b>落とすと「場所は分かるが理由が分からない」失敗になる。</b>
      */
     @Test
-    @DisplayName("抱えたままなら、失敗に控えの在り処を載せる")
-    void putsTheKeptPlaceOnTheFailure(@TempDir Path directory) {
+    @DisplayName("控えが実在するときだけ、失敗に在り処を載せる")
+    void putsTheKeptPlaceOnTheFailureOnlyWhenTheCopyIsThere(@TempDir Path directory) throws IOException {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
             PdfjigException failed = new PdfjigException(ErrorCode.IO_FAILURE);
-            assertSame(failed, workspace.failing(failed), "何も退避していないのに控えの在り処を載せている");
+            assertTrue(workspace.failing(failed).isEmpty(), "何も退避していないのに控えの在り処を載せている");
 
             workspace.holdOriginal();
-            ReplacedFileKeptException kept =
-                    assertInstanceOf(ReplacedFileKeptException.class, workspace.failing(failed));
+            assertTrue(workspace.failing(failed).isEmpty(), "印だけを見て在り処を載せている。控えが無いのに「ここに残っている」と言うことになる（#124）");
+
+            Files.writeString(workspace.replaced(), "元のファイル");
+            ReplacedFileKeptException kept = assertInstanceOf(
+                    ReplacedFileKeptException.class, workspace.failing(failed).orElseThrow());
             assertEquals(workspace.replaced(), kept.kept(), "控えの在り処が退避先と違う");
             assertSame(failed, kept.getCause(), "何が起きたのかを落としている");
 
             workspace.releaseOriginal();
-            assertSame(failed, workspace.failing(failed), "元の場所へ返したのに、控えの在り処を載せている");
+            assertTrue(workspace.failing(failed).isEmpty(), "元の場所へ返したのに、控えの在り処を載せている");
         }
     }
 
@@ -137,11 +141,13 @@ class OutputWorkspaceTest {
      */
     @Test
     @DisplayName("控えの在り処を、例外のメッセージには入れない")
-    void keepsTheKeptPlaceOutOfTheMessage(@TempDir Path directory) {
+    void keepsTheKeptPlaceOutOfTheMessage(@TempDir Path directory) throws IOException {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
             workspace.holdOriginal();
+            Files.writeString(workspace.replaced(), "元のファイル");
 
-            RuntimeException reported = workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE));
+            RuntimeException reported =
+                    workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)).orElseThrow();
 
             assertEquals(
                     "元の実体を作業場所に残したまま失敗した",
@@ -151,30 +157,24 @@ class OutputWorkspaceTest {
     }
 
     /**
-     * 片づけたあとに訊いても、控えの在り処を答えられる。
+     * Error でも、控えの在り処は載る。
      *
-     * <p><b>★★ 読むのは片づけの後である。</b>{@code DocumentWriter#assemble} は
-     * try-with-resources で作業場所を閉じており、<b>Java は catch より先に close を走らせる</b>。
-     * <b>そちらが正しい順である</b>——利用者がこれから見に行くのは片づけたあとの状態であり、
-     * <b>先に読むと、片づけが持っていったものの在り処を伝えることになりうる。</b>
-     *
-     * <p><b>成り立つのは、抱えているときの片づけが何もしないからである</b>
-     * （{@code OutputWorkspace#discard}）。<b>そこが「消せなかったものだけ残す」形に変われば、
-     * 印ごと消えて何も伝えられなくなる</b>——このテストはその日に落ちる。
+     * <p><b>★★ 受けるのは {@code Throwable} である。</b>退避が済んだ後に
+     * {@code OutOfMemoryError} が上がっただけで在り処を言えなくなると、
+     * <b>控えは残るのに画面には汎用の失敗しか出ない</b>——#124 がそのまま戻る。
      */
     @Test
-    @DisplayName("片づけたあとに訊いても、控えの在り処を答えられる")
-    void stillAnswersAfterBeingClosed(@TempDir Path directory) {
-        // try-with-resources にしない。閉じたあとに訊くのがこのテストである。
-        OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
-        workspace.holdOriginal();
+    @DisplayName("Error でも、控えの在り処は載る")
+    void putsTheKeptPlaceOnAnErrorToo(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+            workspace.holdOriginal();
+            Files.writeString(workspace.replaced(), "元のファイル");
+            OutOfMemoryError failed = new OutOfMemoryError();
 
-        workspace.close();
+            RuntimeException reported = workspace.failing(failed).orElseThrow();
 
-        assertInstanceOf(
-                ReplacedFileKeptException.class,
-                workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)),
-                "閉じたあとに印を読めないなら、控えの在り処を誰も伝えられない（#124）");
+            assertSame(failed, reported.getCause(), "Error を受け取れていない。控えが残るのに何も言わない道ができる");
+        }
     }
 
     /**

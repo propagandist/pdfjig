@@ -2,7 +2,6 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,8 +75,9 @@ class DocumentWriterTest {
 
         assertEquals("新しいファイル", Files.readString(target));
         assertEquals("元のファイル", Files.readString(workspace.replaced()), "元を退避せずに置き換えている。落ちたときに戻すものが無い（#119）");
-        PdfjigException anyFailure = new PdfjigException(ErrorCode.IO_FAILURE);
-        assertSame(anyFailure, workspace.failing(anyFailure), "置き換えが済んだのに抱えたままである。次の失敗で「元は作業場所にしか無い」と伝えることになる（#124）");
+        assertTrue(
+                workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)).isEmpty(),
+                "置き換えが済んだのに抱えたままである。次の失敗で「元は作業場所にしか無い」と伝えることになる（#124）");
     }
 
     /**
@@ -98,8 +98,9 @@ class DocumentWriterTest {
 
         assertEquals("元のファイル", Files.readString(target), "巻き戻していない。元は退避先にしか無い（#119）");
         assertTrue(Files.notExists(workspace.replaced()), "戻したのに控えが残るなら、それは移動ではなく複製である");
-        PdfjigException anyFailure = new PdfjigException(ErrorCode.IO_FAILURE);
-        assertSame(anyFailure, workspace.failing(anyFailure), "元の場所へ返したのに抱えたままである。出力先にあるものを「作業場所にしか無い」と伝えることになる（#124）");
+        assertTrue(
+                workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)).isEmpty(),
+                "元の場所へ返したのに抱えたままである。出力先にあるものを「作業場所にしか無い」と伝えることになる（#124）");
     }
 
     @Test

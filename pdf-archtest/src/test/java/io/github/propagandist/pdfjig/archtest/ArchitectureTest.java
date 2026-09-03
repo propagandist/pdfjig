@@ -55,6 +55,9 @@ class ArchitectureTest {
     /** 書き出しの作業場所。控えを抱えたまま失敗したことを利用者へ伝える関門を持つ。 */
     private static final String OUTPUT_WORKSPACE = "io.github.propagandist.pdfjig.desktop.OutputWorkspace";
 
+    /** 控えの在り処を運ぶ型。作ってよいのは、抱えているかどうかを知っている作業場所だけである。 */
+    private static final String KEPT_EXCEPTION = "io.github.propagandist.pdfjig.desktop.ReplacedFileKeptException";
+
     private static JavaClasses classes;
 
     @BeforeAll
@@ -367,33 +370,84 @@ class ArchitectureTest {
     }
 
     /**
-     * 作業場所を開けるのは、控えの在り処を伝える経路の内側だけである。
+     * 作業場所を開ける場所と、控えの在り処を伝える場所は、同じ 1 か所である。
      *
      * <p><b>★★ 控えを抱えたまま失敗したことを利用者へ伝える関門は、作業場所の側にある</b>
-     * （{@code OutputWorkspace#failing}。#124）。<b>呼ぶ側がそれを通すかどうかに懸かっている</b>
-     * ので、<b>2 つ目の {@code nextTo} が足された日に黙って素通りしうる</b>——
-     * そのとき戻るのは #124 そのもので、<b>出力先には何も無く、元は作業場所の中にしか無いのに、
-     * 画面には汎用の失敗しか出ない。</b>
+     * （{@code OutputWorkspace#failing}。#124）。<b>それでも、呼ぶ側がそれを通すかどうかには懸かっている</b>
+     * ——{@code nextTo} で作業場所を開いておきながら {@code failing} を通さない道が増えると、
+     * <b>出力先には何も無く、元は作業場所の中にしか無いのに、画面には汎用の失敗しか出ない。</b>
      *
-     * <p><b>★★ これは CI でしか守れない。</b>その状態は<b>テストから作れない</b>——
-     * 入れ替えと巻き戻しは同じ 2 つのパスの間の逆向きの改名であり、
-     * <b>片方を塞ぐ条件はもう片方も塞ぐ</b>（{@code MessagesTest} の説明）。
-     * <b>素通りしても赤くならないので、呼び出し元の数のほうを縛る。</b>
+     * <p><b>★★ クラスの粒度では足りない。</b>いちばん増えそうな場所は
+     * {@code DocumentWriter} の<b>中</b>である（{@code splitInto} はもう 1 つの書き出しであり、
+     * いまは作業場所を使っていない）。<b>「DocumentWriter 以外は呼ばない」で縛ると、そこが素通りする</b>
+     * ——{@code everyRenameAsksForAnAtomicMove} が #119 で学んだのと同じ形である。
      *
-     * <p>呼んでよいのは {@code DocumentWriter} だけである（{@code assemble} の中から）。
-     * <b>テストは対象外である</b>——{@code DO_NOT_INCLUDE_TESTS} で取り込んでいない。
+     * <p><b>★ 禁止の形では書かない。</b>{@code noClasses().should()} は<b>対象が 1 つも無ければ
+     * 黙って成功する</b>ので、{@code nextTo} を改名した日に何も見なくなる。
+     * <b>呼ぶメソッドの集合そのものを突き合わせる</b>——空になれば落ちる。
      */
     @Test
-    @DisplayName("作業場所を開けるのは DocumentWriter の中だけである")
-    void workspaceIsOpenedOnlyByDocumentWriter() {
+    @DisplayName("作業場所を開ける場所と、在り処を伝える場所は同じ 1 か所である")
+    void theWorkspaceIsOpenedAndReportedInOnePlace() {
+        Set<String> opens = methodsCalling("nextTo");
+        assertEquals(
+                Set.of("assemble"),
+                opens,
+                "作業場所を開ける場所が増減している。増えたなら、そこも OutputWorkspace#failing を"
+                        + "通しているかをここで見ること——通っていないと、控えを抱えたまま失敗しても"
+                        + "画面に在り処が出ない（#124）");
+        assertEquals(
+                opens,
+                methodsCalling("failing"),
+                "作業場所を開いておきながら、控えの在り処を伝えない道がある。"
+                        + "その状態は KeptCopyReportTest が windows でだけ作れるので、"
+                        + "別の道を足しても赤くならない（#124）");
+    }
+
+    /**
+     * 作業場所を開けるのも、控えの在り処を伝える型を作るのも、{@code DocumentWriter} の中だけである。
+     *
+     * <p><b>★ 上の {@link #theWorkspaceIsOpenedAndReportedInOnePlace} だけでは足りない。</b>
+     * あちらが見るのは<b>{@code DocumentWriter} の中</b>だけなので、
+     * <b>別のクラスが作業場所を開いても気づかない。</b>クラスをまたぐ側はここが縛る。
+     *
+     * <p><b>★★ 例外を直に作る道も塞ぐ。</b>{@code ReplacedFileKeptException} を
+     * <b>自分で組み立てられると、印も控えも見ずに「ここに残っています」と言える</b>——
+     * <b>作ってよいのは、抱えているかどうかを知っている作業場所だけである。</b>
+     */
+    @Test
+    @DisplayName("作業場所を開けるのも、在り処を運ぶ型を作るのも、決まった場所だけである")
+    void nobodyElseOpensAWorkspaceOrBuildsTheReport() {
         noClasses()
                 .that(not(named(DOCUMENT_WRITER)))
                 .should()
                 .callMethodWhere(target(owner(name(OUTPUT_WORKSPACE))).and(target(name("nextTo"))))
-                .because("控えを抱えたまま失敗したことを伝える関門は OutputWorkspace#failing にあり、"
-                        + "呼ぶ側がそれを通すかどうかに懸かっている。2 つ目の入口が足されると"
-                        + "黙って素通りし、しかもその状態はテストから作れない（#124）")
+                .because("作業場所を開いた側は、控えを抱えたまま失敗したことを OutputWorkspace#failing で" + "伝えなければならない。開ける場所が増えると、そこだけ黙る（#124）")
                 .check(classes);
+
+        noClasses()
+                .that(not(named(OUTPUT_WORKSPACE)))
+                .should()
+                .callConstructorWhere(target(owner(name(KEPT_EXCEPTION))))
+                .because("印も控えも見ずに在り処を名乗れると、無事なファイルを「作業場所にしか無い」と" + "伝えることになる。作ってよいのは抱えているかどうかを知っている側だけである（#124）")
+                .check(classes);
+    }
+
+    /**
+     * {@code DocumentWriter} の中で、{@link OutputWorkspace} のそのメソッドを呼んでいるものの名前。
+     *
+     * <p><b>探す相手が見つからなければ落とす。</b>取り込みが空でも、改名で当たらなくなっても、
+     * <b>集合が空になって突き合わせが落ちる</b>——黙って緑になる形を作らない。
+     */
+    private static Set<String> methodsCalling(String workspaceMethod) {
+        String target = OUTPUT_WORKSPACE + "." + workspaceMethod;
+        return classes.stream()
+                .filter(javaClass -> javaClass.getName().equals(DOCUMENT_WRITER))
+                .flatMap(javaClass -> javaClass.getMethods().stream())
+                .filter(method -> method.getCallsFromSelf().stream()
+                        .anyMatch(call -> call.getTarget().getFullName().startsWith(target)))
+                .map(method -> method.getName())
+                .collect(Collectors.toSet());
     }
 
     /**

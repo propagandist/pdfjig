@@ -363,12 +363,16 @@ public final class MainWindow {
     /**
      * 届いた失敗の分類。分からなければ {@code null}。
      *
-     * <p><b>★ 包まれた失敗は見ない。</b>書き出しの経路は控えの在り処を載せて包むことがあり
-     * （{@code OutputWorkspace#failing}。#124）、そこから来たものはここでは {@code null} になる。
-     * <b>いま呼んでいるのは「開く」の 2 か所だけで、そちらは包まれない</b>——
-     * <b>書き出しの側でも分類を見たくなったら、先に解く形にすること。</b>
+     * <p><b>★ 包みを解いてから見る。</b>書き出しの経路は控えの在り処を載せて包むことがある
+     * （{@code OutputWorkspace#failing}。#124）。<b>解かないと、そこから来た失敗だけが
+     * 黙って {@code null} になる</b>——いま呼んでいるのは「開く」の 2 か所だけで届かないが、
+     * <b>書き出しの側で分類を見たくなった日に、分岐が 1 つも当たらない形で壊れる。</b>
+     * <b>注意書きで残さず、ここで解く。</b>
      */
     private static ErrorCode errorCodeOf(Throwable failure) {
+        if (failure instanceof ReplacedFileKeptException kept) {
+            return errorCodeOf(kept.getCause());
+        }
         return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode() : null;
     }
 
