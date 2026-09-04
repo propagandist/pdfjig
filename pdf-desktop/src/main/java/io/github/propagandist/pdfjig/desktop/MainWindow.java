@@ -36,6 +36,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 
 /**
  * 主画面。サムネイル一覧と、そこに対する操作を持つ。
@@ -173,9 +174,10 @@ public final class MainWindow {
         this.legend = new SourceLegend(editingBlocked);
         // ★★ 窓の × も「終了」と同じ道を通す（#134）。必ず断ってから自分で閉じる形にする——
         //   OS に閉じさせる道を残すと、そちらだけが門を通らない（#114 と同じ形の漏れ）。
-        //   ★ 組み立てではなく、ここで決める。build を 2 度呼べる形にすると、
-        //     門が上書きされうる（上の★★と同じ理由）。
-        stage.setOnCloseRequest(event -> {
+        //   ★ 組み立てではなく、ここで決める。build を 2 度呼べる形にすると門が二重になる。
+        //   ★★ setOnCloseRequest ではなく addEventHandler を使う。あちらは値が 1 つの property で、
+        //     誰かが後から差すと黙って置き換わる——門が消えたことに誰も気づかない。
+        stage.addEventHandler(WindowEvent.WINDOW_CLOSE_REQUEST, event -> {
             event.consume();
             requestQuit();
         });
@@ -292,10 +294,17 @@ public final class MainWindow {
         });
     }
 
-    /** 主画面のほかに出ている窓。無ければ {@code null}。 */
+    /**
+     * 主画面のほかに出ている窓。無ければ {@code null}。
+     *
+     * <p><b>★ 見るのは {@link Stage} だけである。</b>ツールチップやポップアップも
+     * {@link Window} だが、<b>あれは利用者が読んで閉じるものではなく、放っておけば消える</b>
+     * ——数えると、<b>ボタンの上にカーソルが載っているだけで終了が遅れる。</b>
+     * <b>ダイアログはどれも {@code Stage} である</b>（{@code Alert} も {@code Dialog} も）。
+     */
     private Window otherShowingWindow() {
         for (Window window : Window.getWindows()) {
-            if (window != stage && window.isShowing()) {
+            if (window != stage && window instanceof Stage && window.isShowing()) {
                 return window;
             }
         }
