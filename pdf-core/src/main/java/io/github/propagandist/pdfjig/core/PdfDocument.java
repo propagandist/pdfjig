@@ -31,7 +31,8 @@ public final class PdfDocument implements AutoCloseable {
      * @param path 入力ファイル
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。暗号化されている場合は
-     *                         {@link ErrorCode#PASSWORD_REQUIRED}
+     *                         {@link ErrorCode#PASSWORD_REQUIRED}、
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}
      */
     public static PdfDocument open(Path path) {
         requireReadable(path);
@@ -63,20 +64,32 @@ public final class PdfDocument implements AutoCloseable {
      *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}
      */
     public static PdfDocument open(Path path, char[] password) {
-        // ★ char[] を受け取った時点から try に入る。読めるかを見る関門をここより外へ出すと、
-        //   そこで投げたときに finally を通らず、平文が残る（INV-5。#135）。
-        //   requireReadable が投げるのは PdfjigException であり、下の catch はどちらも当たらない。
+        // ★★ この殻には finally しか無い。中身を 1 本の呼び出しに寄せてあるのは、
+        //   「try の外に何かを足す」場所を作らないためである（INV-5。#135）。
+        //   読めるかを見る関門をここへ出していた形が、まさにゼロ埋めを飛ばしていた。
         try {
-            requireReadable(path);
-            // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
-            String boundaryPassword = new String(password);
+            return openReadable(path, password);
+        } finally {
+            Arrays.fill(password, '\0');
+        }
+    }
+
+    /**
+     * 読めることを確かめてから開く。
+     *
+     * <p><b>ゼロ埋めはここではしない。</b>{@code password} の始末は呼び出し元の殻が持つ。
+     * <b>ここへ何を足しても、あの {@code finally} の中に入る</b>——それがこの分け方の目的である。
+     */
+    private static PdfDocument openReadable(Path path, char[] password) {
+        requireReadable(path);
+        // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
+        String boundaryPassword = new String(password);
+        try {
             return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        } finally {
-            Arrays.fill(password, '\0');
         }
     }
 

@@ -83,10 +83,9 @@ class PasswordLeakTest {
         Path missing = tempDir.resolve("does-not-exist.pdf");
         char[] password = CORRECT.toCharArray();
 
-        assertEquals(
-                ErrorCode.FILE_NOT_FOUND,
-                assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, password))
-                        .errorCode());
+        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, password));
+
+        assertEquals(ErrorCode.FILE_NOT_FOUND, thrown.errorCode());
 
         assertArrayEquals(new char[password.length], password, "開けなかった経路でもゼロ埋めすること");
     }
