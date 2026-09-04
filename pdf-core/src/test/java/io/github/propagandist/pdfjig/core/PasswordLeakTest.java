@@ -77,6 +77,20 @@ class PasswordLeakTest {
         assertArrayEquals(new char[password.length], password, "成功時もゼロ埋めすること");
     }
 
+    @Test
+    @DisplayName("読めないファイルに渡した char[] もゼロ埋めされる")
+    void passwordArrayIsZeroedWhenFileCannotBeRead() {
+        Path missing = tempDir.resolve("does-not-exist.pdf");
+        char[] password = CORRECT.toCharArray();
+
+        assertEquals(
+                ErrorCode.FILE_NOT_FOUND,
+                assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, password))
+                        .errorCode());
+
+        assertArrayEquals(new char[password.length], password, "開けなかった経路でもゼロ埋めすること");
+    }
+
     /** メッセージ・toString・スタックトレースをすべて連結した文字列。 */
     private static String renderFully(Throwable throwable) {
         StringWriter buffer = new StringWriter();
