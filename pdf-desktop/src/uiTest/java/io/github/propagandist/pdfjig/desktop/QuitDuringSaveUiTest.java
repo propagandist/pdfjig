@@ -37,12 +37,9 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
 
     private final HeldTasks held = new HeldTasks();
 
-    /** 差し込んだ実行の手。<b>片づけのときに「走り終わったか」を訊くために持っておく。</b> */
-    private final BackgroundTasks tasks = new BackgroundTasks(held);
-
     @Override
     BackgroundTasks tasks() {
-        return tasks;
+        return new BackgroundTasks(held);
     }
 
     @Start
@@ -61,11 +58,12 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
      * 各テストの中で放しており、ここは網だった）。
      */
     @Stop
-    void stop() throws Exception {
+    void stop() {
+        // ★★ ここで待ってはならない。@Stop は FX スレッドの上で呼ばれるので、
+        //   待つと runLater が回らなくなり、放した仕事は永久に終わらない
+        //   （2026-09-04 に CI で実測。20 秒の上限まで待って落ちた）。
+        //   ★ だから各テストが自分で放し、自分で待つ（finishAndLetItQuit）。ここは網である。
         held.release();
-        // 走り終わるまで待つ。頼まれていた終了もここで効くので、それも収まりきってから片づける。
-        waitFor(() -> !tasks.busy().get());
-        WaitForAsyncUtils.waitForFxEvents();
         tearDown();
     }
 
@@ -84,6 +82,7 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
         quitFromMenu(robot);
 
         assertStillShowing(robot);
+        finishAndLetItQuit();
     }
 
     /**
@@ -100,6 +99,7 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
         quitFromWindowButton();
 
         assertStillShowing(robot);
+        finishAndLetItQuit();
     }
 
     /**
@@ -205,6 +205,20 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
     private void quitFromWindowButton() {
         Platform.runLater(() -> stage.fireEvent(new WindowEvent(stage, WindowEvent.WINDOW_CLOSE_REQUEST)));
         WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /**
+     * 止めてある書き出しを放し、頼まれていた終了が効いて窓が閉じるまで待つ。
+     *
+     * <p><b>★★ 各テストが自分で片づける。</b>{@code @Stop} は FX スレッドの上で呼ばれるので、
+     * <b>あそこで待つと runLater が回らず、放した仕事は永久に終わらない。</b>
+     *
+     * <p><b>★ ついでに「あとで閉じる」も見ている。</b>ここまで来て閉じないなら、
+     * <b>覚えて待つ形が壊れている。</b>
+     */
+    private void finishAndLetItQuit() throws Exception {
+        held.release();
+        waitFor(() -> !stage.isShowing());
     }
 
     /** 閉じないはずの窓が、猶予を置いても閉じていないこと。 */
