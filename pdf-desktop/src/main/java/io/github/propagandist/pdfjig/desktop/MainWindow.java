@@ -25,6 +25,7 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
@@ -141,6 +142,17 @@ public final class MainWindow {
      */
     private boolean quitWhenIdle;
 
+    /**
+     * 窓の × を受ける口。<b>外せるように持っておく</b>（{@link #dispose}）。
+     *
+     * <p><b>必ず断ってから自分で閉じる。</b>OS に閉じさせる道を残すと、
+     * <b>そちらだけが門を通らない</b>（#114 と同じ形の漏れ）。
+     */
+    private final EventHandler<WindowEvent> closeRequested = event -> {
+        event.consume();
+        requestQuit();
+    };
+
     private DocumentSession session;
 
     public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
@@ -177,10 +189,10 @@ public final class MainWindow {
         //   ★ 組み立てではなく、ここで決める。build を 2 度呼べる形にすると門が二重になる。
         //   ★★ setOnCloseRequest ではなく addEventHandler を使う。あちらは値が 1 つの property で、
         //     誰かが後から差すと黙って置き換わる——門が消えたことに誰も気づかない。
-        stage.addEventHandler(WindowEvent.WINDOW_CLOSE_REQUEST, event -> {
-            event.consume();
-            requestQuit();
-        });
+        //   ★★ そのぶん、手放すときに外すこと（dispose）。足すだけにすると同じ窓へ溜まり、
+        //     破棄済みの MainWindow の受け口まで発火する——あちらは走っていないので、窓を閉じる。
+        //     2026-09-04 に CI で実際に起きた（uiTest は 1 つの主ステージを使い回す）。
+        stage.addEventHandler(WindowEvent.WINDOW_CLOSE_REQUEST, closeRequested);
     }
 
     /**
@@ -221,8 +233,14 @@ public final class MainWindow {
         return folders;
     }
 
-    /** ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。 */
+    /**
+     * ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。
+     *
+     * <p><b>★ 窓に差した受け口も外す</b>（#134）。窓はこちらのものではないので、
+     * <b>手放したあとも自分の受け口を残すと、破棄済みのこちらが呼ばれ続ける。</b>
+     */
     public void dispose() {
+        stage.removeEventHandler(WindowEvent.WINDOW_CLOSE_REQUEST, closeRequested);
         closeSession();
     }
 

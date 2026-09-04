@@ -108,36 +108,25 @@ class BackgroundTasksUiTest {
      * そこで動くと<b>後始末がまだ走っていない。</b>ここでは受け手の中で見て、
      * <b>まだ行われていないこと</b>を確かめる。
      *
-     * <p><b>★ 受け手が投げても行う。</b>投げたぶんを取りこぼすと、
-     * <b>頼まれていたことは次に何かを走らせるまで宙に浮く</b>——次が無ければ永久に浮く。
+     * <p><b>★★ 「受け手が投げても行う」ほうは縛っていない。</b>受け手に投げさせると、
+     * <b>その例外を TestFX が拾い、次に待つテストで投げ直す</b>——2026-09-04 に CI で
+     * <b>無関係のテストが 2 度落ちた。</b>拾われるのは非同期なので、
+     * <b>こちらから消しにいっても間に合わない。</b>
+     * <b>守っているのは {@code BackgroundTasks#finish} の {@code finally} 1 行だけである。</b>
      */
     @Test
     void 頼まれていたことは受け手が戻ってから行う() throws Exception {
         BackgroundTasks tasks = new BackgroundTasks();
-        CountDownLatch done = new CountDownLatch(1);
+        AtomicInteger done = new AtomicInteger();
         AtomicInteger doneWhileInsideReceiver = new AtomicInteger();
 
-        try {
-            onFx(() -> {
-                tasks.run(
-                        () -> "1 本目",
-                        value -> {
-                            doneWhileInsideReceiver.set((int) (1 - done.getCount()));
-                            throw new IllegalStateException("受け手が投げた");
-                        },
-                        Throwable::printStackTrace);
-                tasks.whenIdle(done::countDown);
-            });
+        onFx(() -> {
+            tasks.run(() -> "1 本目", value -> doneWhileInsideReceiver.set(done.get()), Throwable::printStackTrace);
+            tasks.whenIdle(done::incrementAndGet);
+        });
 
-            // ★★ WaitForAsyncUtils では待たない。あれは待つ前に「拾ってある例外」を投げ直すので、
-            //   わざと投げさせているこのテストが、自分か次のテストを落とす（下の finally も同じ理由）。
-            assertTrue(done.await(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS), "受け手が投げたら、頼まれていたことが宙に浮いた");
-            assertEquals(0, doneWhileInsideReceiver.get(), "受け手が戻る前に行っている。中で窓が出ていればその最中に動く（#134）");
-        } finally {
-            // ★★ 拾われた例外を捨てる。残すと TestFX が次のテストの待ちで投げ直し、
-            //   関係のないテストが落ちる——2026-09-04 に CI で実際に起きた。
-            WaitForAsyncUtils.clearExceptions();
-        }
+        WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> done.get() == 1);
+        assertEquals(0, doneWhileInsideReceiver.get(), "受け手が戻る前に行っている。中で窓が出ていればその最中に動く（#134）");
     }
 
     /**
