@@ -101,6 +101,78 @@ class BackgroundTasksUiTest {
         WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> finished.get() == 2);
     }
 
+    /**
+     * 頼まれていたことは、受け手が戻ってから行う。
+     *
+     * <p><b>★★ 印が下りた瞬間ではない</b>（#134）。{@code busy} は受け手より先に下りるので、
+     * そこで動くと<b>後始末がまだ走っていない。</b>ここでは受け手の中で見て、
+     * <b>まだ行われていないこと</b>を確かめる。
+     *
+     * <p><b>★★ 「受け手が投げても行う」ほうは縛っていない。</b>受け手に投げさせると、
+     * <b>その例外を TestFX が拾い、次に待つテストで投げ直す</b>——2026-09-04 に CI で
+     * <b>無関係のテストが 2 度落ちた。</b>拾われるのは非同期なので、
+     * <b>こちらから消しにいっても間に合わない。</b>
+     * <b>守っているのは {@code BackgroundTasks#finish} の {@code finally} 1 行だけである。</b>
+     */
+    @Test
+    void 頼まれていたことは受け手が戻ってから行う() throws Exception {
+        BackgroundTasks tasks = new BackgroundTasks();
+        AtomicInteger done = new AtomicInteger();
+        AtomicInteger doneWhileInsideReceiver = new AtomicInteger();
+
+        onFx(() -> {
+            tasks.run(() -> "1 本目", value -> doneWhileInsideReceiver.set(done.get()), Throwable::printStackTrace);
+            tasks.whenIdle(done::incrementAndGet);
+        });
+
+        WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> done.get() == 1);
+        assertEquals(0, doneWhileInsideReceiver.get(), "受け手が戻る前に行っている。中で窓が出ていればその最中に動く（#134）");
+    }
+
+    /**
+     * 後始末が次の仕事を始めていたら、まだ行わない。
+     *
+     * <p><b>★★ 上書き保存のあとの寄せ直しがこの形である</b>（#118）。
+     * <b>そこで行うと、守りたかった区間の 2 本目に入る。</b>
+     */
+    @Test
+    void 後始末が次の仕事を始めていたらまだ行わない() throws Exception {
+        BackgroundTasks tasks = new BackgroundTasks();
+        CountDownLatch secondRunning = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        AtomicInteger done = new AtomicInteger();
+
+        onFx(() -> {
+            tasks.run(
+                    () -> "1 本目",
+                    value -> tasks.run(
+                            () -> held(secondRunning, releaseSecond), second -> {}, Throwable::printStackTrace),
+                    Throwable::printStackTrace);
+            tasks.whenIdle(done::incrementAndGet);
+        });
+
+        assertTrue(secondRunning.await(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS), "2 本目が走り出さない");
+        WaitForAsyncUtils.waitForFxEvents();
+        assertEquals(0, done.get(), "2 本目が走っているのに行っている（#134）");
+
+        releaseSecond.countDown();
+        WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> done.get() == 1);
+    }
+
+    /** 走っていなければ、頼んだその場で行う。 */
+    @Test
+    void 走っていなければ頼んだその場で行う() throws Exception {
+        BackgroundTasks tasks = new BackgroundTasks();
+        AtomicInteger done = new AtomicInteger();
+
+        WaitForAsyncUtils.waitForAsyncFx(TIMEOUT_MILLIS, () -> {
+            tasks.whenIdle(done::incrementAndGet);
+            return null;
+        });
+
+        assertEquals(1, done.get(), "走っていないのに待っている");
+    }
+
     /** 仕事を走らせる。{@code BackgroundTasks} の既定と同じ形である。 */
     private static void start(Runnable work) {
         Thread worker = new Thread(work, "counted-operation");

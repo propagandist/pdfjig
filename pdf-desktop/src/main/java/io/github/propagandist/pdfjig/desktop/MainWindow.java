@@ -15,14 +15,17 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
+import javafx.application.Platform;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
@@ -33,6 +36,8 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 
 /**
  * 主画面。サムネイル一覧と、そこに対する操作を持つ。
@@ -129,6 +134,25 @@ public final class MainWindow {
     /** ページ並びが変わるたびに表示を更新する。 */
     private final ListChangeListener<PageEntry> orderListener = change -> onOrderChanged();
 
+    /**
+     * 終了を頼まれたが、走っている仕事があるので待っている。
+     *
+     * <p><b>一度立ったら下ろさない</b>（#134）。取り消す手を用意しない——
+     * <b>押した意思を打ち消す操作は、押した本人にしか意味が無く、それを表す入口が無い。</b>
+     */
+    private boolean quitWhenIdle;
+
+    /**
+     * 窓の × を受ける口。<b>外せるように持っておく</b>（{@link #dispose}）。
+     *
+     * <p><b>必ず断ってから自分で閉じる。</b>OS に閉じさせる道を残すと、
+     * <b>そちらだけが門を通らない</b>（#114 と同じ形の漏れ）。
+     */
+    private final EventHandler<WindowEvent> closeRequested = event -> {
+        event.consume();
+        requestQuit();
+    };
+
     private DocumentSession session;
 
     public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
@@ -160,6 +184,15 @@ public final class MainWindow {
         //   通らない入口を持っており、後から差す形にすると「差し忘れると通る」を作る。
         this.thumbnails = new ThumbnailGrid(editingBlocked);
         this.legend = new SourceLegend(editingBlocked);
+        // ★★ 窓の × も「終了」と同じ道を通す（#134）。必ず断ってから自分で閉じる形にする——
+        //   OS に閉じさせる道を残すと、そちらだけが門を通らない（#114 と同じ形の漏れ）。
+        //   ★ 組み立てではなく、ここで決める。build を 2 度呼べる形にすると門が二重になる。
+        //   ★★ setOnCloseRequest ではなく addEventHandler を使う。あちらは値が 1 つの property で、
+        //     誰かが後から差すと黙って置き換わる——門が消えたことに誰も気づかない。
+        //   ★★ そのぶん、手放すときに外すこと（dispose）。足すだけにすると同じ窓へ溜まり、
+        //     破棄済みの MainWindow の受け口まで発火する——あちらは走っていないので、窓を閉じる。
+        //     2026-09-04 に CI で実際に起きた（uiTest は 1 つの主ステージを使い回す）。
+        stage.addEventHandler(WindowEvent.WINDOW_CLOSE_REQUEST, closeRequested);
     }
 
     /**
@@ -200,9 +233,100 @@ public final class MainWindow {
         return folders;
     }
 
-    /** ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。 */
+    /**
+     * ウィンドウを閉じるときに呼ぶ。開いている文書を解放する。
+     *
+     * <p><b>★ 窓に差した受け口も外す</b>（#134）。窓はこちらのものではないので、
+     * <b>手放したあとも自分の受け口を残すと、破棄済みのこちらが呼ばれ続ける。</b>
+     */
     public void dispose() {
+        stage.removeEventHandler(WindowEvent.WINDOW_CLOSE_REQUEST, closeRequested);
         closeSession();
+    }
+
+    /**
+     * 終了の要求を受ける。<b>メニューの「終了」も窓の × もここを通る</b>（#134）。
+     *
+     * <p><b>★★ 走っている間は閉じない。</b>置き換えは<b>「元をどけてから入れる」2 本の改名</b>
+     * であり（#119）、<b>その 2 本の間で JVM が死ぬと、出力先には何も無く、
+     * 元は作業場所の中にしか残らない</b>——書き出しは daemon スレッドで走るので、
+     * <b>止められずに消える。</b>
+     *
+     * <p><b>★ 断るのではなく、覚えて待つ。</b>断ると<b>利用者は押し直さなければならない</b>——
+     * 押した意思は消えていない。<b>「閉じられない」と「あとで閉じる」は違う。</b>
+     *
+     * <p><b>★★ 待たせる上限は置かない。</b>置いて切ると、<b>切った先はまさにこの不具合である</b>
+     * ——守るために作った仕組みが、上限のところで守らなくなる。<b>待っている間、窓は固まらない</b>
+     * （仕事は背景スレッドで走る）ので、<b>状態行に理由を出せば、なぜ閉じないかは伝わる</b>
+     * （{@code CLAUDE.md} 優先順位 2）。それでも待てないなら OS から終わらせる手が残っており、
+     * <b>それは今日と同じで、悪くならない。</b>
+     *
+     * <p><b>★ 走っている仕事の種類で分けない。</b>{@code busy} が立つのは書き出しだけではないが、
+     * <b>分けるとその判断が 2 か所になる</b>し、書き出し以外は 1 秒前後で終わる。
+     */
+    private void requestQuit() {
+        if (tasks.busy().get()) {
+            quitWhenIdle = true;
+            // ★★ 待ち方は BackgroundTasks が持つ（whenIdle）。busy を自分で見張る形にすると、
+            //   印が下りた瞬間——後始末より前——に閉じることになり、
+            //   しかも runLater でずらしても窓が出ている最中に動く。
+            tasks.whenIdle(this::closeWhenNoOtherWindowIsUp);
+            updateStatus();
+            return;
+        }
+        stage.close();
+    }
+
+    /**
+     * 出ている窓が無くなってから閉じる。
+     *
+     * <p><b>★★ 「仕事が終わった」だけでは足りない。</b>後始末が<b>次の仕事を始めてから</b>
+     * 窓を出すことがあり（上書き保存の寄せ直し。#118）、<b>その 2 本目が終わるのは
+     * 窓の入れ子のイベントループの中である</b>——そこで閉じると、
+     * <b>利用者が読んでいる窓の親が消える。</b>いちばん困るのは
+     * 「保存に失敗しました。元のファイルはここに残っています」である（#124）。
+     *
+     * <p><b>★ 仕事とは無関係に出ている窓もある。</b>「バージョン情報」は走っていても開ける
+     * （{@link #buildActions}）ので、<b>それが出ている間に仕事が終わることがある。</b>
+     * <b>だから見るのは「窓が出ているか」であって、「この後始末が窓を出したか」ではない。</b>
+     *
+     * <p><b>閉じたらまた見にくる。</b>窓が閉じたときにもう一度ここへ来る——
+     * <b>そのとき別の窓が出ていれば、また待つ。</b>
+     */
+    private void closeWhenNoOtherWindowIsUp() {
+        Window blocking = otherShowingWindow();
+        if (blocking == null) {
+            stage.close();
+            return;
+        }
+        blocking.showingProperty().addListener(new ChangeListener<Boolean>() {
+            @Override
+            public void changed(ObservableValue<? extends Boolean> observable, Boolean was, Boolean showing) {
+                if (!showing) {
+                    observable.removeListener(this);
+                    // ★ その場では閉じない。窓は閉じる途中であり、入れ子のイベントループも
+                    //   まだ抜けていない。1 拍ずらしてから、もう一度どの窓が出ているかを見る。
+                    Platform.runLater(MainWindow.this::closeWhenNoOtherWindowIsUp);
+                }
+            }
+        });
+    }
+
+    /**
+     * 主画面のほかに出ている窓。無ければ {@code null}。
+     *
+     * <p><b>★ 見るのは {@link Stage} だけである。</b>ツールチップやポップアップも
+     * {@link Window} だが、<b>あれは利用者が読んで閉じるものではなく、放っておけば消える</b>
+     * ——数えると、<b>ボタンの上にカーソルが載っているだけで終了が遅れる。</b>
+     * <b>ダイアログはどれも {@code Stage} である</b>（{@code Alert} も {@code Dialog} も）。
+     */
+    private Window otherShowingWindow() {
+        for (Window window : Window.getWindows()) {
+            if (window != stage && window instanceof Stage && window.isShowing()) {
+                return window;
+            }
+        }
+        return null;
     }
 
     /**
@@ -244,7 +368,7 @@ public final class MainWindow {
                         this::saveAs,
                         editingBlocked),
                 new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
-                new Action("quit", "終了", null, null, null, stage::close, null),
+                new Action("quit", "終了", null, null, null, this::requestQuit, null),
                 new Action(
                         "delete",
                         "選択したページを削除",
@@ -923,6 +1047,12 @@ public final class MainWindow {
                 // 編集を始める前に知らせる。保存後の警告では遅い。
                 text.append("（電子署名があります）");
             }
+        }
+        if (quitWhenIdle) {
+            // ★★ なぜ閉じないのかを出す（#134）。何も言わずに閉じないと、利用者は
+            //   固まったと読んで、より乱暴な終わらせ方をする——それがまさに守りたい場面である。
+            //   ★ 文書が開かれていなくても出す。走っているのは書き出しだけではない。
+            text.append("　処理が終わったら終了します。");
         }
         // AI の有無はここには出さない。この行は開いている文書の状態を出す場所であり、
         // 版の性格を混ぜると読み分けられない。出す先はバージョン情報（AppInfo#aiStatus）。

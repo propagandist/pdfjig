@@ -7,10 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.scene.Node;
@@ -64,16 +62,6 @@ class EditingGateUiTest extends DesktopUiTest {
     /** 2 ファイルを開いた直後の中身。書き出しを伴う筋は、ここまで確かめる。 */
     private static final List<String> TWO_FILE_PAGES = List.of("A1", "A2", "B1");
 
-    /**
-     * 出ないはずの窓が本当に出ないことを見るための猶予。
-     *
-     * <p><b>「待てば直る」種類の待ちではない。</b>直っていれば窓は<b>いつまで待っても出ない</b>ので、
-     * 長く取っても偽の緑にならない。短すぎると、窓が立ち上がりきっていないだけの状態を
-     * 「出ていない」と読みうるので、そちら側に倒してある
-     * （{@link ThumbnailSourceUiTest} の猶予と同じ考え方である）。
-     */
-    private static final int GRACE_SECONDS = 2;
-
     /** 放すまで仕事を持ったままにできる実行係。 */
     private final HeldTasks held = new HeldTasks();
 
@@ -106,7 +94,7 @@ class EditingGateUiTest extends DesktopUiTest {
     void 保存が走っている間はファイル一覧から外せない(@TempDir Path dir, FxRobot robot) throws Exception {
         Path output = dir.resolve("out.pdf");
         openTwo(robot, dir);
-        startHeldSave(robot, output);
+        startHeldSave(robot, held, output);
 
         assertTrue(button(robot, "#source-remove-0").isDisabled(), "保存が走っている間に「×」が押せる");
 
@@ -129,7 +117,7 @@ class EditingGateUiTest extends DesktopUiTest {
     void 保存が走っている間はDELETEキーでページが消えない(@TempDir Path dir, FxRobot robot) throws Exception {
         Path output = dir.resolve("out.pdf");
         openTwo(robot, dir);
-        startHeldSave(robot, output);
+        startHeldSave(robot, held, output);
 
         robot.clickOn("#thumbnail-tile-0");
         robot.type(KeyCode.DELETE);
@@ -162,7 +150,7 @@ class EditingGateUiTest extends DesktopUiTest {
     void 保存の最中に外しても保存済みの印が正しく付く(@TempDir Path dir, FxRobot robot) throws Exception {
         Path output = dir.resolve("out.pdf");
         openTwo(robot, dir);
-        startHeldSave(robot, output);
+        startHeldSave(robot, held, output);
 
         robot.clickOn("#source-remove-0");
         // 門が漏れていれば確認が出る。出たら承認まで進む——直っていれば、そもそも出ない。
@@ -230,7 +218,7 @@ class EditingGateUiTest extends DesktopUiTest {
     void 保存が済めば入口は元どおり効く(@TempDir Path dir, FxRobot robot) throws Exception {
         Path output = dir.resolve("out.pdf");
         openTwo(robot, dir);
-        startHeldSave(robot, output);
+        startHeldSave(robot, held, output);
         finishHeldSave(robot, output);
         assertEquals(TWO_FILE_PAGES, pageTexts(output));
 
@@ -269,19 +257,6 @@ class EditingGateUiTest extends DesktopUiTest {
     }
 
     /**
-     * 書き出しを始めて、始まったところで止める。
-     *
-     * <p><b>止まったことをツールバーで確かめてから戻る。</b>{@code busy} が立っていなければ、
-     * この後の「効かない」は門ではなく別の理由になる。
-     */
-    private void startHeldSave(FxRobot robot, Path output) throws Exception {
-        held.hold();
-        dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
-        waitFor(() -> button(robot, "#tool-save").isDisabled());
-    }
-
-    /**
      * 止めてある書き出しを放し、書き終わって窓が戻るまで待つ。
      *
      * <p><b>★★ 警告を閉じるところまでやる。</b>2 ファイルから書き出すと文書情報の警告が
@@ -293,46 +268,5 @@ class EditingGateUiTest extends DesktopUiTest {
         waitFor(() -> Files.exists(output) && Files.size(output) > 0);
         clickWhenReady(robot, "#message-ok");
         waitFor(() -> !button(robot, "#tool-save").isDisabled());
-    }
-
-    /**
-     * 放すまで仕事を持ったままにできる {@link Executor}。
-     *
-     * <p><b>止めるのは頼まれた時点で決まる。</b>{@link #hold()} を呼んでから頼んだものだけを
-     * 抱え、それ以外は既定どおりすぐ走らせる——<b>「開く」「追加」まで止めると、
-     * そもそも文書を用意できない。</b>
-     */
-    private static final class HeldTasks implements Executor {
-
-        private final List<Runnable> waiting = new ArrayList<>();
-
-        private boolean holding;
-
-        /** これ以降に頼まれた仕事を抱える。 */
-        synchronized void hold() {
-            holding = true;
-        }
-
-        /** 抱えている仕事を放し、以降は抱えない。何も抱えていなければ何もしない。 */
-        synchronized void release() {
-            holding = false;
-            waiting.forEach(HeldTasks::start);
-            waiting.clear();
-        }
-
-        @Override
-        public synchronized void execute(Runnable work) {
-            if (holding) {
-                waiting.add(work);
-            } else {
-                start(work);
-            }
-        }
-
-        private static void start(Runnable work) {
-            Thread worker = new Thread(work, "held-operation");
-            worker.setDaemon(true);
-            worker.start();
-        }
     }
 }
