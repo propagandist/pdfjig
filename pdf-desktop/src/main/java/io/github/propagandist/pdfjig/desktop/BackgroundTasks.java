@@ -148,23 +148,11 @@ final class BackgroundTasks {
                 return work.get();
             }
         };
-        task.setOnSucceeded(event -> {
-            busy.set(false);
-            onSucceeded.accept(task.getValue());
-            // ★★ 受け手が戻ってから見る。中で窓が出ていれば、閉じるところまで済んでいる（whenIdle）。
-            drainIdle();
-        });
-        task.setOnFailed(event -> {
-            busy.set(false);
-            onFailed.accept(task.getException());
-            drainIdle();
-        });
+        task.setOnSucceeded(event -> finish(() -> onSucceeded.accept(task.getValue())));
+        task.setOnFailed(event -> finish(() -> onFailed.accept(task.getException())));
         // ★ 取り消しでも下ろす。いまは誰も取り消さないが、下ろす経路が 2 つしか無い形にしておくと、
         //   取り消しを足した日に「進行中のまま二度と戻らない」を作る（#114）。
-        task.setOnCancelled(event -> {
-            busy.set(false);
-            drainIdle();
-        });
+        task.setOnCancelled(event -> finish(() -> {}));
 
         busy.set(true);
         try {
@@ -172,13 +160,33 @@ final class BackgroundTasks {
         } catch (RuntimeException | Error e) {
             // ★★ 始められなかった。ここで下ろさないと、この門は二度と開かない——
             //   走っている印が立ったまま、以降の頼みはすべて上で断られる（#114）。
+            //   ★ ここでは頼まれていたことを見ない。走り出していないので busy を立てる前と
+            //     同じ状態であり、そのとき抱えているものは無い（whenIdle が即座に済ませている）。
+            //     見にいくと、失敗を投げ直す前に窓を閉じることになる。
             busy.set(false);
-            // ★ 始められなかったぶんも見る。ここで見ないと、頼まれていたことが
-            //   「次に何かを走らせるまで」宙に浮く——次が無ければ永久に浮く。
-            drainIdle();
             throw e;
         }
         return true;
+    }
+
+    /**
+     * 仕事が 1 本終わったときの後始末。
+     *
+     * <p><b>★★ 下ろすことと、頼まれていたことを見ることを、1 か所にする。</b>
+     * 終わり方ごとに 2 行ずつ書くと、<b>次の終わり方が足された日に片方だけが書かれる</b>
+     * ——落ちるのは「利用者が終了を押したのに、いつまでも閉じない」という形である。
+     *
+     * <p><b>★★ {@code finally} で見る。</b>受け手が投げると、<b>印は下りているのに
+     * 頼まれていたことが宙に浮く</b>——それを拾う次の機会は、次に何かを走らせるまで来ない。
+     */
+    private void finish(Runnable notify) {
+        busy.set(false);
+        try {
+            notify.run();
+        } finally {
+            // ★★ 受け手が戻ってから見る。中で窓が出ていれば、閉じるところまで済んでいる（whenIdle）。
+            drainIdle();
+        }
     }
 
     /** 既定の始め方。常駐させない——仕事は利用者の操作ごとに 1 つで、使い回す相手がいない。 */

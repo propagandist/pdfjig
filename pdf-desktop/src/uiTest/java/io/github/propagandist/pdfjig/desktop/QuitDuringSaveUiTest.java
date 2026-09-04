@@ -1,10 +1,11 @@
 package io.github.propagandist.pdfjig.desktop;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.stage.Stage;
@@ -36,9 +37,12 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
 
     private final HeldTasks held = new HeldTasks();
 
+    /** 差し込んだ実行の手。<b>片づけのときに「走り終わったか」を訊くために持っておく。</b> */
+    private final BackgroundTasks tasks = new BackgroundTasks(held);
+
     @Override
     BackgroundTasks tasks() {
-        return new BackgroundTasks(held);
+        return tasks;
     }
 
     @Start
@@ -46,9 +50,22 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
         setUp(stage);
     }
 
+    /**
+     * 抱えたまま終わらない。
+     *
+     * <p><b>★★ 放すだけでは足りない。</b>{@code release} は仕事を<b>始める</b>だけで、
+     * 終わるのを待たない——そのまま {@code tearDown} すると、
+     * <b>書いている最中の文書を閉じ、書いている最中のフォルダを JUnit が消す。</b>
+     * ★ <b>このクラスでは 2 本が「抱えたまま終わる」筋である</b>ので、
+     * <b>ここが受け皿ではなく通り道になっている</b>（{@code EditingGateUiTest} は
+     * 各テストの中で放しており、ここは網だった）。
+     */
     @Stop
-    void stop() {
+    void stop() throws Exception {
         held.release();
+        // 走り終わるまで待つ。頼まれていた終了もここで効くので、それも収まりきってから片づける。
+        waitFor(() -> !tasks.busy().get());
+        WaitForAsyncUtils.waitForFxEvents();
         tearDown();
     }
 
@@ -93,13 +110,18 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
      */
     @Test
     void 書き終わったら頼まれていた終了が効く(@TempDir Path dir, FxRobot robot) throws Exception {
-        openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
-        startHeldSave(robot, held, dir.resolve("out.pdf"));
+        Path output = dir.resolve("out.pdf");
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2", "P3"));
+        startHeldSave(robot, held, output);
         quitFromMenu(robot);
+        assertTrue(stage.isShowing(), "放す前に閉じている。覚えて待つ形になっていない（#134）");
 
         held.release();
 
         waitFor(() -> !stage.isShowing());
+        // ★ 画面が閉じたことだけを見ても、ファイルが正しい保証にはならない（CLAUDE.md「画面のテスト」）。
+        //   守っているのはこの中身である——2 本の改名の途中で終わっていれば、ここが違う。
+        assertEquals(List.of("P1", "P2", "P3"), pageTexts(output), "書き終わる前に終了している（#134）");
     }
 
     /**
@@ -117,7 +139,10 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
     @Test
     void 窓が出ている最中には閉じない(@TempDir Path dir, FxRobot robot) throws Exception {
         openTwoFiles(robot, dir);
-        startHeldSave(robot, held, dir.resolve("out.pdf"));
+        // ★★ 出どころの 1 つへ上書きする。そうすると後始末が寄せ直しの 2 本目を始めてから
+        //   警告を出すので（#118）、2 本目の完了が窓の入れ子のイベントループの中で起きる。
+        //   別の名前へ書くと 2 本目が無く、この筋は作れない。
+        startHeldSave(robot, held, dir.resolve("a.pdf"));
         quitFromMenu(robot);
 
         held.release();
@@ -128,15 +153,31 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
         waitFor(() -> !stage.isShowing());
     }
 
-    /** 走っていなければ、終了の要求はそのまま通る。 */
+    /** 走っていなければ、メニューの終了はそのまま通る。 */
     @Test
-    void 走っていなければ終了の要求はそのまま通る(@TempDir Path dir, FxRobot robot) throws Exception {
+    void 走っていなければメニューの終了はそのまま通る(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
 
         quitFromMenu(robot);
 
         waitFor(() -> !stage.isShowing());
-        assertFalse(stage.isShowing());
+    }
+
+    /**
+     * 走っていなければ、窓の × もそのまま通る。
+     *
+     * <p><b>★★ ここを見ないと、× が二度と効かなくなっても全部緑になる。</b>
+     * 受け口は事象を<b>必ず断ってから自分で閉じる</b>形なので（{@code MainWindow} の構築時）、
+     * <b>閉じるほうを書き忘れると、押しても何も起きない窓ができる。</b>
+     * <b>メニューの筋はこの受け口を通らない</b>ので、そちらでは気づけない。
+     */
+    @Test
+    void 走っていなければ窓の閉じるボタンもそのまま通る(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
+
+        quitFromWindowButton();
+
+        waitFor(() -> !stage.isShowing());
     }
 
     /**

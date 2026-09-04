@@ -15,12 +15,14 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
+import javafx.application.Platform;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.geometry.Insets;
@@ -33,6 +35,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 
 /**
  * 主画面。サムネイル一覧と、そこに対する操作を持つ。
@@ -247,11 +250,56 @@ public final class MainWindow {
             // ★★ 待ち方は BackgroundTasks が持つ（whenIdle）。busy を自分で見張る形にすると、
             //   印が下りた瞬間——後始末より前——に閉じることになり、
             //   しかも runLater でずらしても窓が出ている最中に動く。
-            tasks.whenIdle(stage::close);
+            tasks.whenIdle(this::closeWhenNoOtherWindowIsUp);
             updateStatus();
             return;
         }
         stage.close();
+    }
+
+    /**
+     * 出ている窓が無くなってから閉じる。
+     *
+     * <p><b>★★ 「仕事が終わった」だけでは足りない。</b>後始末が<b>次の仕事を始めてから</b>
+     * 窓を出すことがあり（上書き保存の寄せ直し。#118）、<b>その 2 本目が終わるのは
+     * 窓の入れ子のイベントループの中である</b>——そこで閉じると、
+     * <b>利用者が読んでいる窓の親が消える。</b>いちばん困るのは
+     * 「保存に失敗しました。元のファイルはここに残っています」である（#124）。
+     *
+     * <p><b>★ 仕事とは無関係に出ている窓もある。</b>「バージョン情報」は走っていても開ける
+     * （{@link #buildActions}）ので、<b>それが出ている間に仕事が終わることがある。</b>
+     * <b>だから見るのは「窓が出ているか」であって、「この後始末が窓を出したか」ではない。</b>
+     *
+     * <p><b>閉じたらまた見にくる。</b>窓が閉じたときにもう一度ここへ来る——
+     * <b>そのとき別の窓が出ていれば、また待つ。</b>
+     */
+    private void closeWhenNoOtherWindowIsUp() {
+        Window blocking = otherShowingWindow();
+        if (blocking == null) {
+            stage.close();
+            return;
+        }
+        blocking.showingProperty().addListener(new ChangeListener<Boolean>() {
+            @Override
+            public void changed(ObservableValue<? extends Boolean> observable, Boolean was, Boolean showing) {
+                if (!showing) {
+                    observable.removeListener(this);
+                    // ★ その場では閉じない。窓は閉じる途中であり、入れ子のイベントループも
+                    //   まだ抜けていない。1 拍ずらしてから、もう一度どの窓が出ているかを見る。
+                    Platform.runLater(MainWindow.this::closeWhenNoOtherWindowIsUp);
+                }
+            }
+        });
+    }
+
+    /** 主画面のほかに出ている窓。無ければ {@code null}。 */
+    private Window otherShowingWindow() {
+        for (Window window : Window.getWindows()) {
+            if (window != stage && window.isShowing()) {
+                return window;
+            }
+        }
+        return null;
     }
 
     /**
