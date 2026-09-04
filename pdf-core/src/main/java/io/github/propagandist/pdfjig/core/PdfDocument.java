@@ -59,13 +59,17 @@ public final class PdfDocument implements AutoCloseable {
      * @param password パスワード。呼び出し後にゼロ埋めされる
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。パスワード誤りは
-     *                         {@link ErrorCode#INVALID_PASSWORD}
+     *                         {@link ErrorCode#INVALID_PASSWORD}、
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}
      */
     public static PdfDocument open(Path path, char[] password) {
-        requireReadable(path);
-        // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
-        String boundaryPassword = new String(password);
+        // ★ char[] を受け取った時点から try に入る。読めるかを見る関門をここより外へ出すと、
+        //   そこで投げたときに finally を通らず、平文が残る（INV-5。#135）。
+        //   requireReadable が投げるのは PdfjigException であり、下の catch はどちらも当たらない。
         try {
+            requireReadable(path);
+            // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
+            String boundaryPassword = new String(password);
             return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
