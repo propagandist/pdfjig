@@ -114,22 +114,30 @@ class BackgroundTasksUiTest {
     @Test
     void 頼まれていたことは受け手が戻ってから行う() throws Exception {
         BackgroundTasks tasks = new BackgroundTasks();
-        AtomicInteger done = new AtomicInteger();
+        CountDownLatch done = new CountDownLatch(1);
         AtomicInteger doneWhileInsideReceiver = new AtomicInteger();
 
-        onFx(() -> {
-            tasks.run(
-                    () -> "1 本目",
-                    value -> {
-                        doneWhileInsideReceiver.set(done.get());
-                        throw new IllegalStateException("受け手が投げた");
-                    },
-                    Throwable::printStackTrace);
-            tasks.whenIdle(done::incrementAndGet);
-        });
+        try {
+            onFx(() -> {
+                tasks.run(
+                        () -> "1 本目",
+                        value -> {
+                            doneWhileInsideReceiver.set((int) (1 - done.getCount()));
+                            throw new IllegalStateException("受け手が投げた");
+                        },
+                        Throwable::printStackTrace);
+                tasks.whenIdle(done::countDown);
+            });
 
-        WaitForAsyncUtils.waitFor(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, () -> done.get() == 1);
-        assertEquals(0, doneWhileInsideReceiver.get(), "受け手が戻る前に行っている。中で窓が出ていればその最中に動く（#134）");
+            // ★★ WaitForAsyncUtils では待たない。あれは待つ前に「拾ってある例外」を投げ直すので、
+            //   わざと投げさせているこのテストが、自分か次のテストを落とす（下の finally も同じ理由）。
+            assertTrue(done.await(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS), "受け手が投げたら、頼まれていたことが宙に浮いた");
+            assertEquals(0, doneWhileInsideReceiver.get(), "受け手が戻る前に行っている。中で窓が出ていればその最中に動く（#134）");
+        } finally {
+            // ★★ 拾われた例外を捨てる。残すと TestFX が次のテストの待ちで投げ直し、
+            //   関係のないテストが落ちる——2026-09-04 に CI で実際に起きた。
+            WaitForAsyncUtils.clearExceptions();
+        }
     }
 
     /**
