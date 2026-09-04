@@ -32,7 +32,8 @@ public final class PdfDocument implements AutoCloseable {
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。暗号化されている場合は
      *                         {@link ErrorCode#PASSWORD_REQUIRED}、
-     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public static PdfDocument open(Path path) {
         requireReadable(path);
@@ -61,35 +62,30 @@ public final class PdfDocument implements AutoCloseable {
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。パスワード誤りは
      *                         {@link ErrorCode#INVALID_PASSWORD}、
-     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public static PdfDocument open(Path path, char[] password) {
-        // ★★ この殻には finally しか無い。中身を 1 本の呼び出しに寄せてあるのは、
-        //   「try の外に何かを足す」場所を作らないためである（INV-5。#135）。
-        //   読めるかを見る関門をここへ出していた形が、まさにゼロ埋めを飛ばしていた。
+        // ★ char[] を持つ側は、読めるかを見る関門も try の中に置く。ここより外で投げると
+        //   finally を通らず、平文が残る（INV-5。#135）。requireReadable が投げる
+        //   PdfjigException は下の catch のどちらにも当たらないので、そのまま抜ける。
+        //   パスワードを取らない open(Path) には掛からない——消すものが無い。
         try {
-            return openReadable(path, password);
-        } finally {
-            Arrays.fill(password, '\0');
-        }
-    }
-
-    /**
-     * 読めることを確かめてから開く。
-     *
-     * <p><b>ゼロ埋めはここではしない。</b>{@code password} の始末は呼び出し元の殻が持つ。
-     * <b>ここへ何を足しても、あの {@code finally} の中に入る</b>——それがこの分け方の目的である。
-     */
-    private static PdfDocument openReadable(Path path, char[] password) {
-        requireReadable(path);
-        // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
-        String boundaryPassword = new String(password);
-        try {
+            requireReadable(path);
+            // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
+            String boundaryPassword = new String(password);
             return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        } finally {
+            // ★★ 片づけからは投げない。null を渡されると Arrays.fill は NPE を投げ、
+            //   finally から投げた例外は本当の失敗を「置き換える」——ErrorCode ごと消える。
+            //   消すものが無いときは、何も言わずに何もしないのが正しい。
+            if (password != null) {
+                Arrays.fill(password, '\0');
+            }
         }
     }
 
