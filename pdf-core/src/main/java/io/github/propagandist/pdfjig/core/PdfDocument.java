@@ -43,6 +43,12 @@ public final class PdfDocument implements AutoCloseable {
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        } catch (RuntimeException e) {
+            // ★ PDFBox は IOException ではない例外も投げる（#144）。ここでは秘密を持たないので
+            //   INV-5 には当たらないが、包まないと Messages が文言を組み立てられず、
+            //   利用者には何も出ないまま標準エラーへ落ちる。
+            //   パスワードが無いので、原因は文書しかありえない。
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
     }
 
@@ -63,12 +69,12 @@ public final class PdfDocument implements AutoCloseable {
      * @throws PdfjigException 開けない場合。パスワード誤りは
      *                         {@link ErrorCode#INVALID_PASSWORD}、
      *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
-     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
+     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}、
+     *                         原因を絞れない場合は {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
      */
     public static PdfDocument open(Path path, char[] password) {
         // ★ char[] を持つ側は、読めるかを見る関門も try の中に置く。ここより外で投げると
-        //   finally を通らず、平文が残る（INV-5。#135）。requireReadable が投げる
-        //   PdfjigException は下の catch のどちらにも当たらないので、そのまま抜ける。
+        //   finally を通らず、平文が残る（INV-5。#135）。
         //   パスワードを取らない open(Path) には掛からない——消すものが無い。
         try {
             requireReadable(path);
@@ -79,6 +85,18 @@ public final class PdfDocument implements AutoCloseable {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        } catch (PdfjigException e) {
+            // ★★ 下の catch より先に置く。これが無いと requireReadable の FILE_NOT_FOUND が
+            //   「原因を絞れない失敗」に化ける——自分で分類したものを、自分で捨てることになる。
+            throw e;
+        } catch (RuntimeException e) {
+            // ★★ INV-5。PDFBox は AES-256 のとき、照合する前に SASLprep を通す。禁止文字に
+            //   当たると、本物のパスワードの文字と位置をメッセージに載せた
+            //   IllegalArgumentException を投げる——IOException ではないので、上の 2 つに
+            //   当たらない。wrapping は型名しか残さないので、ここで包めば漏れない（#144）。
+            //   ★ どちらが原因かは、呼んだ側からは区別が付かない。文書かもしれず、
+            //   パスワードかもしれない。分からないことを分からないまま伝える。
+            throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
         } finally {
             // ★★ 片づけからは投げない。null を渡されると Arrays.fill は NPE を投げ、
             //   finally から投げた例外は本当の失敗を「置き換える」——ErrorCode ごと消える。
