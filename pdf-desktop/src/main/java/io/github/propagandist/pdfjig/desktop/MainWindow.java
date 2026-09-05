@@ -468,7 +468,6 @@ public final class MainWindow {
         if (entered.isEmpty()) {
             return;
         }
-        // この配列は DocumentSession.open の中でゼロ埋めされる。
         char[] password = entered.get();
         boolean started = false;
         try {
@@ -604,30 +603,37 @@ public final class MainWindow {
             markStale();
             return;
         }
-        boolean started = tasks.run(
-                () -> DocumentSession.open(output),
-                opened -> {
-                    if (session != saving) {
-                        // 開いている間に別の文書を開かれた／窓が閉じられた。
-                        // ここで入れ替えると、そちらを黙って捨てることになる。
-                        opened.close();
-                        return;
-                    }
-                    adopt(opened);
-                    opened.order().applyBreaks(breaks);
-                    // 先頭へ戻されているので、控えておいた位置へ返す。
-                    thumbnails.selectAndReveal(selected);
-                },
-                failure -> {
-                    // 開き直せなかった。書き出しは成功しておりファイルはできているが、
-                    // セッションは古いままである。押せなくして止める。
-                    markStale();
-                    messages.failure(failure);
-                });
-        if (!started) {
-            // ★★ 断られた。寄せ直していないのだから古いままである——
-            //   黙って戻ると「寄せ直せた」と同じ見た目になり、次の保存で変換が二重に掛かる（#118）。
-            markStale();
+        boolean started = false;
+        try {
+            started = tasks.run(
+                    () -> DocumentSession.open(output),
+                    opened -> {
+                        if (session != saving) {
+                            // 開いている間に別の文書を開かれた／窓が閉じられた。
+                            // ここで入れ替えると、そちらを黙って捨てることになる。
+                            opened.close();
+                            return;
+                        }
+                        adopt(opened);
+                        opened.order().applyBreaks(breaks);
+                        // 先頭へ戻されているので、控えておいた位置へ返す。
+                        thumbnails.selectAndReveal(selected);
+                    },
+                    failure -> {
+                        // 開き直せなかった。書き出しは成功しておりファイルはできているが、
+                        // セッションは古いままである。押せなくして止める。
+                        markStale();
+                        messages.failure(failure);
+                    });
+        } finally {
+            if (!started) {
+                // ★★ 走り出さなかった。寄せ直していないのだから古いままである——
+                //   黙って戻ると「寄せ直せた」と同じ見た目になり、次の保存で変換が二重に掛かる（#118）。
+                //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
+                //   ——代入が済まないので、if だけでは素通りする（#145 と同じ形）。
+                //   ★ ここは markSaved が済んだ後である。印を立て損ねると、押せてしまう。
+                markStale();
+            }
         }
     }
 

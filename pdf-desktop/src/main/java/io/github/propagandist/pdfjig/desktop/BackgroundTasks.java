@@ -135,6 +135,10 @@ final class BackgroundTasks {
      * @param onFailed    失敗したときに JavaFX スレッドで呼ばれる
      * @param <T>         仕事の結果
      * @return 走り出したなら {@code true}。断ったなら {@code false} で、どちらの受け手も呼ばれない
+     * @throws RuntimeException 始め方が投げたとき、そのまま投げ直す。
+     *                          <b>★★ このときも {@code work} は 1 度も呼ばれていない</b>ので、
+     *                          <b>呼ぶ側の片づけは {@code if (!started)} ではなく
+     *                          {@code finally} に置くこと</b>——戻り値が返らない（#145）
      */
     <T> boolean run(Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
         if (busy.get()) {
