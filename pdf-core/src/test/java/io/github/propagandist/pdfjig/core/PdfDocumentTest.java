@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -65,6 +69,27 @@ class PdfDocumentTest {
                 ErrorCode.FILE_NOT_FOUND,
                 assertThrows(PdfjigException.class, () -> PdfDocument.open(missing))
                         .errorCode());
+    }
+
+    @Test
+    @DisplayName("RuntimeException で失敗しても、pdf-core の外へ出るのは PdfjigException だけ")
+    void wrapsUncheckedFailures() throws Exception {
+        // zip の中の Path は読めるが、toFile() を持たない。★ 投げるのは PDFBox ではなく
+        // pdfjig 自身の path.toFile() であり、Loader へは入らない——ここで縛れるのは
+        // 「RuntimeException を包む」ことだけで、PDFBox 由来の筋は縛れていない。
+        // ★ Error は包んでいないので、この名前は RuntimeException に限った意味である。
+        Path zip = tempDir.resolve("archive.zip");
+        try (FileSystem archive = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
+            Path inside = archive.getPath("inside.pdf");
+            Files.writeString(inside, "not a pdf");
+            assertTrue(Files.isReadable(inside), "関門を通ることが前提の筋である");
+
+            PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(inside));
+
+            assertEquals(ErrorCode.NOT_A_PDF, thrown.errorCode());
+            // 包んだ相手を見ておく。仕掛けが変わって別の理由で落ちても、空振りに気づける。
+            assertEquals("java.lang.UnsupportedOperationException", thrown.causeType());
+        }
     }
 
     @Test
