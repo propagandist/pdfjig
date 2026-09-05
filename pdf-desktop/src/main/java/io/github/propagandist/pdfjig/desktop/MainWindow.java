@@ -484,8 +484,11 @@ public final class MainWindow {
                 //   起きないので、ここで消す（INV-5）。入力欄から出た平文を置き去りにしない。
                 //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
                 //   ——代入が済まないので、if だけでは素通りする（#145）。
-                //   ★ 投げた時点で仕事は 1 度も呼ばれていないので、この配列は誰も読んでいない。
-                //   その前提は BackgroundTasksUiTest が縛る。
+                //   ★★ ここで消してよい根拠は、投げた時点で誰もこの配列を読んでいないことである。
+                //   拠っているのは BackgroundTasks ではなく、既定の始め方（startWorker）である
+                //   ——Thread#start が投げたなら本体は 1 行も走っていない。
+                //   ★ 差し替えた実行係が「渡してから投げる」なら、この前提は成り立たない。
+                //   run の @throws にその条件を書いてある。
                 Arrays.fill(password, '\0');
             }
         }
@@ -540,10 +543,16 @@ public final class MainWindow {
                     //   利用者が閉じるまで寄せ直しが始まらない。
                     //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
                     //   これは例外的な経路ではない。
-                    if (outcome.replacedASource()) {
-                        reopenAt(saving, sources, output, breaks, selected);
+                    try {
+                        if (outcome.replacedASource()) {
+                            reopenAt(saving, sources, output, breaks, selected);
+                        }
+                    } finally {
+                        // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
+                        //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
+                        //   必ず出る警告であり、例外的な経路ではない。
+                        messages.warnings(outcome.warnings());
                     }
-                    messages.warnings(outcome.warnings());
                 });
         // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
         // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。
@@ -632,6 +641,8 @@ public final class MainWindow {
                 //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
                 //   ——代入が済まないので、if だけでは素通りする（#145 と同じ形）。
                 //   ★ ここは markSaved が済んだ後である。印を立て損ねると、押せてしまう。
+                //   ★ Arrays.fill と違い、これは投げうる（束縛が連なり、状態行を組み直す）。
+                //   投げれば飛んでいる失敗を置き換えるが、倒れる先は押せなくなる側なので受ける。
                 markStale();
             }
         }
@@ -781,6 +792,8 @@ public final class MainWindow {
             // ★★ 中まで届かずに投げることがある（session は null になりうるし、窓を挟んだ後の
             //   検め直しを足せば早く戻る経路も増える）。そこを通ってもゼロ埋めされるように、
             //   持ち主をここに置く（INV-5。#145）。★ 二重に消しても害は無い。
+            //   ★ askPasswordAndOpen が条件付きで消すのは、あちらが持ち主を背景スレッドへ渡すからである
+            //   ——ここは同じスレッドの中で終わるので、無条件でよい。
             Arrays.fill(password, '\0');
         }
     }

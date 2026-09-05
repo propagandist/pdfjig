@@ -135,10 +135,15 @@ final class BackgroundTasks {
      * @param onFailed    失敗したときに JavaFX スレッドで呼ばれる
      * @param <T>         仕事の結果
      * @return 走り出したなら {@code true}。断ったなら {@code false} で、どちらの受け手も呼ばれない
-     * @throws RuntimeException 始め方が投げたとき、そのまま投げ直す。
+     * @throws RuntimeException 始め方が投げたとき、そのまま投げ直す。<b>★ {@code Error} も同じく
+     *                          投げ直す</b>——既定の始め方で現に起きるのは
+     *                          {@code OutOfMemoryError}（スレッドを作れない）のほうである。
      *                          <b>★★ このときも {@code work} は 1 度も呼ばれていない</b>ので、
      *                          <b>呼ぶ側の片づけは {@code if (!started)} ではなく
-     *                          {@code finally} に置くこと</b>——戻り値が返らない（#145）
+     *                          {@code finally} に置くこと</b>——戻り値が返らない（#145）。
+     *                          <b>★★ 差し替える始め方は、渡した後に投げてはならない</b>
+     *                          ——渡した後に投げると、呼ぶ側の片づけが、走り出した仕事と同じものを
+     *                          同時に触ることになる
      */
     <T> boolean run(Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
         if (busy.get()) {
