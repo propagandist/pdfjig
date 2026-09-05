@@ -32,8 +32,9 @@ public final class PdfDocument implements AutoCloseable {
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。暗号化されている場合は
      *                         {@link ErrorCode#PASSWORD_REQUIRED}、
-     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
-     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}。
+     *                         それ以外はすべて {@link ErrorCode#NOT_A_PDF} になる——
+     *                         <b>PDF でないこととは限らない。</b>原因を絞る材料が無い
      */
     public static PdfDocument open(Path path) {
         requireReadable(path);
@@ -41,6 +42,11 @@ public final class PdfDocument implements AutoCloseable {
             return new PdfDocument(Loader.loadPDF(path.toFile()));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
+        } catch (PdfjigException e) {
+            // ★★ 合併した catch より先に置く。PdfjigException も RuntimeException なので、
+            //   これが無いと、この try の中で分類した失敗が黙って NOT_A_PDF に塗り替わる。
+            //   いまは requireReadable が try の外に在って届かないが、中へ入れた日に効く。
+            throw e;
         } catch (IOException | RuntimeException e) {
             // ★ PDFBox は IOException ではない例外も投げる（#144）。ここでは秘密を持たないので
             //   INV-5 には当たらないが、包むのは「外へ出るのは PdfjigException だけ」という

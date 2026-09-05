@@ -72,20 +72,23 @@ class PdfDocumentTest {
     }
 
     @Test
-    @DisplayName("未検査例外で失敗しても、pdf-core の外へ出るのは PdfjigException だけ")
+    @DisplayName("RuntimeException で失敗しても、pdf-core の外へ出るのは PdfjigException だけ")
     void wrapsUncheckedFailures() throws Exception {
-        // zip の中の Path は読めるが、toFile() を持たない（UnsupportedOperationException）。
-        // 未検査例外を確実に起こせる唯一の筋であり、細工 PDF の代わりに使う。
+        // zip の中の Path は読めるが、toFile() を持たない。★ 投げるのは PDFBox ではなく
+        // pdfjig 自身の path.toFile() であり、Loader へは入らない——ここで縛れるのは
+        // 「RuntimeException を包む」ことだけで、PDFBox 由来の筋は縛れていない。
+        // ★ Error は包んでいないので、この名前は RuntimeException に限った意味である。
         Path zip = tempDir.resolve("archive.zip");
         try (FileSystem archive = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
             Path inside = archive.getPath("inside.pdf");
             Files.writeString(inside, "not a pdf");
             assertTrue(Files.isReadable(inside), "関門を通ることが前提の筋である");
 
-            assertEquals(
-                    ErrorCode.NOT_A_PDF,
-                    assertThrows(PdfjigException.class, () -> PdfDocument.open(inside))
-                            .errorCode());
+            PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(inside));
+
+            assertEquals(ErrorCode.NOT_A_PDF, thrown.errorCode());
+            // 包んだ相手を見ておく。仕掛けが変わって別の理由で落ちても、空振りに気づける。
+            assertEquals("java.lang.UnsupportedOperationException", thrown.causeType());
         }
     }
 
