@@ -468,19 +468,29 @@ public final class MainWindow {
         if (entered.isEmpty()) {
             return;
         }
-        // この配列は DocumentSession.open の中でゼロ埋めされる。
         char[] password = entered.get();
-        boolean started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
-            if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
-                askPasswordAndOpen(path, true);
-            } else {
-                messages.failure(failure);
+        boolean started = false;
+        try {
+            started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
+                if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
+                    askPasswordAndOpen(path, true);
+                } else {
+                    messages.failure(failure);
+                }
+            });
+        } finally {
+            if (!started) {
+                // ★★ 走り出さなかったときは仕事そのものが呼ばれない。ゼロ埋めはその中でしか
+                //   起きないので、ここで消す（INV-5）。入力欄から出た平文を置き去りにしない。
+                //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
+                //   ——代入が済まないので、if だけでは素通りする（#145）。
+                //   ★★ ここで消してよい根拠は、投げた時点で誰もこの配列を読んでいないことである。
+                //   拠っているのは BackgroundTasks ではなく、既定の始め方（startWorker）である
+                //   ——Thread#start が投げたなら本体は 1 行も走っていない。
+                //   ★ 差し替えた実行係が「渡してから投げる」なら、この前提は成り立たない。
+                //   run の @throws にその条件を書いてある。
+                Arrays.fill(password, '\0');
             }
-        });
-        if (!started) {
-            // ★★ 断られると仕事そのものが呼ばれない。ゼロ埋めはその中でしか起きないので、
-            //   ここで消す（INV-5）。入力欄から出た平文を、そのまま置き去りにしない。
-            Arrays.fill(password, '\0');
         }
     }
 
@@ -533,10 +543,16 @@ public final class MainWindow {
                     //   利用者が閉じるまで寄せ直しが始まらない。
                     //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
                     //   これは例外的な経路ではない。
-                    if (outcome.replacedASource()) {
-                        reopenAt(saving, sources, output, breaks, selected);
+                    try {
+                        if (outcome.replacedASource()) {
+                            reopenAt(saving, sources, output, breaks, selected);
+                        }
+                    } finally {
+                        // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
+                        //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
+                        //   必ず出る警告であり、例外的な経路ではない。
+                        messages.warnings(outcome.warnings());
                     }
-                    messages.warnings(outcome.warnings());
                 });
         // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
         // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。
@@ -596,30 +612,39 @@ public final class MainWindow {
             markStale();
             return;
         }
-        boolean started = tasks.run(
-                () -> DocumentSession.open(output),
-                opened -> {
-                    if (session != saving) {
-                        // 開いている間に別の文書を開かれた／窓が閉じられた。
-                        // ここで入れ替えると、そちらを黙って捨てることになる。
-                        opened.close();
-                        return;
-                    }
-                    adopt(opened);
-                    opened.order().applyBreaks(breaks);
-                    // 先頭へ戻されているので、控えておいた位置へ返す。
-                    thumbnails.selectAndReveal(selected);
-                },
-                failure -> {
-                    // 開き直せなかった。書き出しは成功しておりファイルはできているが、
-                    // セッションは古いままである。押せなくして止める。
-                    markStale();
-                    messages.failure(failure);
-                });
-        if (!started) {
-            // ★★ 断られた。寄せ直していないのだから古いままである——
-            //   黙って戻ると「寄せ直せた」と同じ見た目になり、次の保存で変換が二重に掛かる（#118）。
-            markStale();
+        boolean started = false;
+        try {
+            started = tasks.run(
+                    () -> DocumentSession.open(output),
+                    opened -> {
+                        if (session != saving) {
+                            // 開いている間に別の文書を開かれた／窓が閉じられた。
+                            // ここで入れ替えると、そちらを黙って捨てることになる。
+                            opened.close();
+                            return;
+                        }
+                        adopt(opened);
+                        opened.order().applyBreaks(breaks);
+                        // 先頭へ戻されているので、控えておいた位置へ返す。
+                        thumbnails.selectAndReveal(selected);
+                    },
+                    failure -> {
+                        // 開き直せなかった。書き出しは成功しておりファイルはできているが、
+                        // セッションは古いままである。押せなくして止める。
+                        markStale();
+                        messages.failure(failure);
+                    });
+        } finally {
+            if (!started) {
+                // ★★ 走り出さなかった。寄せ直していないのだから古いままである——
+                //   黙って戻ると「寄せ直せた」と同じ見た目になり、次の保存で変換が二重に掛かる（#118）。
+                //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
+                //   ——代入が済まないので、if だけでは素通りする（#145 と同じ形）。
+                //   ★ ここは markSaved が済んだ後である。印を立て損ねると、押せてしまう。
+                //   ★ Arrays.fill と違い、これは投げうる（束縛が連なり、状態行を組み直す）。
+                //   投げれば飛んでいる失敗を置き換えるが、倒れる先は押せなくなる側なので受ける。
+                markStale();
+            }
         }
     }
 
@@ -753,15 +778,23 @@ public final class MainWindow {
         if (entered.isEmpty()) {
             return;
         }
+        char[] password = entered.get();
         try {
             // この配列は DocumentSession.add の中でゼロ埋めされる。
-            session.add(path, entered.get());
+            session.add(path, password);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
                 addWithPassword(path, true);
             } else {
                 messages.failure(e);
             }
+        } finally {
+            // ★★ 中まで届かずに投げることがある（session は null になりうるし、窓を挟んだ後の
+            //   検め直しを足せば早く戻る経路も増える）。そこを通ってもゼロ埋めされるように、
+            //   持ち主をここに置く（INV-5。#145）。★ 二重に消しても害は無い。
+            //   ★ askPasswordAndOpen が条件付きで消すのは、あちらが持ち主を背景スレッドへ渡すからである
+            //   ——ここは同じスレッドの中で終わるので、無条件でよい。
+            Arrays.fill(password, '\0');
         }
     }
 

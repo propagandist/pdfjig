@@ -2,13 +2,18 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testfx.api.FxToolkit;
 import org.testfx.util.WaitForAsyncUtils;
 
@@ -171,6 +176,46 @@ class BackgroundTasksUiTest {
         });
 
         assertEquals(1, done.get(), "走っていないのに待っている");
+    }
+
+    /**
+     * 始め方が投げたら、そのまま投げ直し、印は下ろす。
+     *
+     * <p><b>★ 縛っているのは 2 つだけである</b>——投げられたものを飲み込まないことと、
+     * <b>印を下ろすこと</b>。<b>後者が崩れると窓が二度と閉じない</b>——印が立ったままだと
+     * {@code requestQuit} は待つ側へ回り、{@code drainIdle} はその印を見て何もしない。
+     *
+     * <p><b>★★ 「仕事が呼ばれない」ことはここでは縛れていない。</b>差し替えた始め方が
+     * {@code work} に触っていないだけであり、{@code BackgroundTasks} の性質ではない。
+     * <b>呼ぶ側の片づけ</b>（{@code MainWindow} のパスワードのゼロ埋め。INV-5・#145）
+     * <b>が拠っているのは、既定の始め方が {@code Thread#start} であること</b>——
+     * あれが投げたなら本体は 1 行も走っていない。<b>それは JDK の性質なので、ここでは縛れない。</b>
+     *
+     * <p><b>★ {@code Error} の側も見る。</b>既定の始め方で現に起きるのは
+     * {@code OutOfMemoryError}（スレッドを作れない）のほうであり、
+     * <b>{@code catch} を {@code RuntimeException} だけに縮めると、そちらが素通りして印が立ったまま残る。</b>
+     */
+    @ParameterizedTest
+    @MethodSource("throwsFromStarter")
+    void 始め方が投げたら投げ直して印を下ろす(Throwable thrown) throws Exception {
+        BackgroundTasks tasks = new BackgroundTasks(work -> {
+            if (thrown instanceof Error error) {
+                throw error;
+            }
+            throw (RuntimeException) thrown;
+        });
+
+        onFx(() -> {
+            Throwable caught =
+                    assertThrows(Throwable.class, () -> tasks.run(() -> "走ってしまった", value -> {}, failure -> {}));
+            assertSame(thrown, caught, "投げられたものをそのまま返すこと");
+        });
+
+        onFx(() -> assertFalse(tasks.busy().get(), "印が立ったままだと、以降の頼みがすべて断られる"));
+    }
+
+    static Stream<Throwable> throwsFromStarter() {
+        return Stream.of(new IllegalStateException("始められない"), new OutOfMemoryError("スレッドを作れない"));
     }
 
     /** 仕事を走らせる。{@code BackgroundTasks} の既定と同じ形である。 */
