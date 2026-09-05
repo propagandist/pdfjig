@@ -31,7 +31,9 @@ public final class PdfDocument implements AutoCloseable {
      * @param path 入力ファイル
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。暗号化されている場合は
-     *                         {@link ErrorCode#PASSWORD_REQUIRED}
+     *                         {@link ErrorCode#PASSWORD_REQUIRED}、
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public static PdfDocument open(Path path) {
         requireReadable(path);
@@ -59,20 +61,31 @@ public final class PdfDocument implements AutoCloseable {
      * @param password パスワード。呼び出し後にゼロ埋めされる
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。パスワード誤りは
-     *                         {@link ErrorCode#INVALID_PASSWORD}
+     *                         {@link ErrorCode#INVALID_PASSWORD}、
+     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public static PdfDocument open(Path path, char[] password) {
-        requireReadable(path);
-        // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
-        String boundaryPassword = new String(password);
+        // ★ char[] を持つ側は、読めるかを見る関門も try の中に置く。ここより外で投げると
+        //   finally を通らず、平文が残る（INV-5。#135）。requireReadable が投げる
+        //   PdfjigException は下の catch のどちらにも当たらないので、そのまま抜ける。
+        //   パスワードを取らない open(Path) には掛からない——消すものが無い。
         try {
+            requireReadable(path);
+            // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
+            String boundaryPassword = new String(password);
             return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         } finally {
-            Arrays.fill(password, '\0');
+            // ★★ 片づけからは投げない。null を渡されると Arrays.fill は NPE を投げ、
+            //   finally から投げた例外は本当の失敗を「置き換える」——ErrorCode ごと消える。
+            //   消すものが無いときは、何も言わずに何もしないのが正しい。
+            if (password != null) {
+                Arrays.fill(password, '\0');
+            }
         }
     }
 
