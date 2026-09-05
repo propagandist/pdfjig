@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.core;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.PrintWriter;
@@ -120,11 +121,14 @@ class PasswordLeakTest {
         assertEquals(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, thrown.errorCode());
         assertEquals("java.lang.IllegalArgumentException", thrown.causeType(), "包んだ相手の型だけは残す");
 
-        // PDFBox は禁止文字の Unicode 名と、その位置をメッセージに載せる。
-        // 文言そのものに縛られないよう、包めていれば通る形で見る。
-        String rendered = renderFully(thrown);
-        assertFalse(rendered.contains("LEFT-TO-RIGHT MARK"), "パスワードの文字が例外に露出している");
-        assertFalse(rendered.contains("Prohibited"), "PDFBox のメッセージがそのまま出ている");
+        // ★★ 下の 2 つが本体である。PDFBox の文言に依らず、載りうるものが載っていないことを見る
+        //   ——「特定の語が出ていない」で見ると、向こうが言い換えた日に漏れたまま緑になる。
+        assertEquals(
+                ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE.defaultMessage(), thrown.getMessage(), "文言は ErrorCode の定数だけである");
+        assertNull(thrown.getCause(), "連結すると printStackTrace から PDFBox のメッセージが出る");
+
+        // 実際に漏れていた形そのものへの当て止め。上の 2 つが効いていれば、これは必ず通る。
+        assertFalse(renderFully(thrown).contains("LEFT-TO-RIGHT MARK"), "パスワードの文字が露出している");
 
         assertArrayEquals(new char[password.length], password, "包む経路でもゼロ埋めすること");
     }

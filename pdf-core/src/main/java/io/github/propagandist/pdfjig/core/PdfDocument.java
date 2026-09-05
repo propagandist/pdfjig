@@ -41,13 +41,11 @@ public final class PdfDocument implements AutoCloseable {
             return new PdfDocument(Loader.loadPDF(path.toFile()));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        } catch (RuntimeException e) {
+        } catch (IOException | RuntimeException e) {
             // ★ PDFBox は IOException ではない例外も投げる（#144）。ここでは秘密を持たないので
-            //   INV-5 には当たらないが、包まないと Messages が文言を組み立てられず、
-            //   利用者には何も出ないまま標準エラーへ落ちる。
-            //   パスワードが無いので、原因は文書しかありえない。
+            //   INV-5 には当たらないが、包むのは「外へ出るのは PdfjigException だけ」という
+            //   契約のためである——包まないと、呼ぶ側の分岐がどれも当たらない。
+            //   ★ 分類を細かくする材料がここには無い。開こうとして駄目だった、しか分からない。
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
     }
@@ -86,8 +84,8 @@ public final class PdfDocument implements AutoCloseable {
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         } catch (PdfjigException e) {
-            // ★★ 下の catch より先に置く。これが無いと requireReadable の FILE_NOT_FOUND が
-            //   「原因を絞れない失敗」に化ける——自分で分類したものを、自分で捨てることになる。
+            // ★★ 無いと requireReadable の FILE_NOT_FOUND が「原因を絞れない失敗」に化ける
+            //   ——自分で分類したものを、自分で捨てることになる。外すと #135 の 2 本が赤くなる。
             throw e;
         } catch (RuntimeException e) {
             // ★★ INV-5。PDFBox は AES-256 のとき、照合する前に SASLprep を通す。禁止文字に

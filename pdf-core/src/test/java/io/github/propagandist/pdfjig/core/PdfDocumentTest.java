@@ -77,12 +77,9 @@ class PdfDocumentTest {
         // zip の中の Path は読めるが、toFile() を持たない（UnsupportedOperationException）。
         // 未検査例外を確実に起こせる唯一の筋であり、細工 PDF の代わりに使う。
         Path zip = tempDir.resolve("archive.zip");
-        try (FileSystem creating = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
-            Files.writeString(creating.getPath("inside.pdf"), "not a pdf");
-        }
-
-        try (FileSystem archive = FileSystems.newFileSystem(zip)) {
+        try (FileSystem archive = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
             Path inside = archive.getPath("inside.pdf");
+            Files.writeString(inside, "not a pdf");
             assertTrue(Files.isReadable(inside), "関門を通ることが前提の筋である");
 
             assertEquals(
