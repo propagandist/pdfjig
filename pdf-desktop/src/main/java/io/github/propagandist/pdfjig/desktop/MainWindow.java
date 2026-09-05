@@ -470,17 +470,25 @@ public final class MainWindow {
         }
         // この配列は DocumentSession.open の中でゼロ埋めされる。
         char[] password = entered.get();
-        boolean started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
-            if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
-                askPasswordAndOpen(path, true);
-            } else {
-                messages.failure(failure);
+        boolean started = false;
+        try {
+            started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
+                if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
+                    askPasswordAndOpen(path, true);
+                } else {
+                    messages.failure(failure);
+                }
+            });
+        } finally {
+            if (!started) {
+                // ★★ 走り出さなかったときは仕事そのものが呼ばれない。ゼロ埋めはその中でしか
+                //   起きないので、ここで消す（INV-5）。入力欄から出た平文を置き去りにしない。
+                //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
+                //   ——代入が済まないので、if だけでは素通りする（#145）。
+                //   ★ 投げた時点で仕事は 1 度も呼ばれていないので、この配列は誰も読んでいない。
+                //   その前提は BackgroundTasksUiTest が縛る。
+                Arrays.fill(password, '\0');
             }
-        });
-        if (!started) {
-            // ★★ 断られると仕事そのものが呼ばれない。ゼロ埋めはその中でしか起きないので、
-            //   ここで消す（INV-5）。入力欄から出た平文を、そのまま置き去りにしない。
-            Arrays.fill(password, '\0');
         }
     }
 
@@ -753,15 +761,21 @@ public final class MainWindow {
         if (entered.isEmpty()) {
             return;
         }
+        char[] password = entered.get();
         try {
             // この配列は DocumentSession.add の中でゼロ埋めされる。
-            session.add(path, entered.get());
+            session.add(path, password);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
                 addWithPassword(path, true);
             } else {
                 messages.failure(e);
             }
+        } finally {
+            // ★★ 中まで届かずに投げることがある（session は null になりうるし、窓を挟んだ後の
+            //   検め直しを足せば早く戻る経路も増える）。そこを通ってもゼロ埋めされるように、
+            //   持ち主をここに置く（INV-5。#145）。★ 二重に消しても害は無い。
+            Arrays.fill(password, '\0');
         }
     }
 

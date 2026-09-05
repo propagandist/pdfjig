@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.CountDownLatch;
@@ -171,6 +172,38 @@ class BackgroundTasksUiTest {
         });
 
         assertEquals(1, done.get(), "走っていないのに待っている");
+    }
+
+    /**
+     * 始め方が投げたとき、仕事は 1 度も呼ばれず、印も下りている。
+     *
+     * <p><b>★★ これは呼ぶ側の片づけが拠って立つ前提である</b>（{@code MainWindow} の
+     * パスワードのゼロ埋め。INV-5・#145）。<b>投げた時点で仕事が 1 度でも呼ばれていたなら、
+     * 呼ぶ側がそこで配列を消すのは、走っている相手が読んでいる最中に消すことになる。</b>
+     * <b>この前提が崩れたら、あちらの片づけは安全でなくなる</b>——ここで縛っておく。
+     */
+    @Test
+    void 始め方が投げたときは仕事が呼ばれず印も下りている() throws Exception {
+        AtomicInteger called = new AtomicInteger();
+        BackgroundTasks tasks = new BackgroundTasks(work -> {
+            throw new IllegalStateException("始められない");
+        });
+
+        onFx(() -> {
+            IllegalStateException thrown = assertThrows(
+                    IllegalStateException.class,
+                    () -> tasks.run(
+                            () -> {
+                                called.incrementAndGet();
+                                return "走ってしまった";
+                            },
+                            value -> {},
+                            failure -> {}));
+            assertEquals("始められない", thrown.getMessage(), "投げられたものをそのまま返すこと");
+        });
+
+        assertEquals(0, called.get(), "始められなかったのに仕事が呼ばれている");
+        onFx(() -> assertFalse(tasks.busy().get(), "印が立ったままだと、以降の頼みがすべて断られる"));
     }
 
     /** 仕事を走らせる。{@code BackgroundTasks} の既定と同じ形である。 */
