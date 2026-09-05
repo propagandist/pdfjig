@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -65,6 +69,27 @@ class PdfDocumentTest {
                 ErrorCode.FILE_NOT_FOUND,
                 assertThrows(PdfjigException.class, () -> PdfDocument.open(missing))
                         .errorCode());
+    }
+
+    @Test
+    @DisplayName("未検査例外で失敗しても、pdf-core の外へ出るのは PdfjigException だけ")
+    void wrapsUncheckedFailures() throws Exception {
+        // zip の中の Path は読めるが、toFile() を持たない（UnsupportedOperationException）。
+        // 未検査例外を確実に起こせる唯一の筋であり、細工 PDF の代わりに使う。
+        Path zip = tempDir.resolve("archive.zip");
+        try (FileSystem creating = FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
+            Files.writeString(creating.getPath("inside.pdf"), "not a pdf");
+        }
+
+        try (FileSystem archive = FileSystems.newFileSystem(zip)) {
+            Path inside = archive.getPath("inside.pdf");
+            assertTrue(Files.isReadable(inside), "関門を通ることが前提の筋である");
+
+            assertEquals(
+                    ErrorCode.NOT_A_PDF,
+                    assertThrows(PdfjigException.class, () -> PdfDocument.open(inside))
+                            .errorCode());
+        }
     }
 
     @Test
