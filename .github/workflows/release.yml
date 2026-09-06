@@ -166,14 +166,25 @@ jobs:
       #   新品で、run が終われば破棄される。
       - name: MSI / EXE を入れて消す
         shell: powershell
+        # ★ 上限を置く。2026-09-06 実測で 19 秒である。msiexec が黙って待つ形（サイレントの
+        #   指定が効かず窓が出る、など）になると Start-Process -Wait は永久に戻らないので、
+        #   ジョブの 20 分を使い切ってから落ちることになる。
+        timeout-minutes: 5
         run: |
           & "tools/smoke/InstallCheck.ps1" `
             -DistDir "dist" `
             -OutDir "$env:RUNNER_TEMP/install-check"
 
       # msiexec の失敗は終了コードだけでは読めない。/l*v のログが要る。
+      #
+      # ★★ cancelled() も見る。上の timeout に掛かったときは failure ではなく cancelled になり、
+      #   failure() だけだと**いちばん理由が読めないときに証拠が 1 つも残らない**（#44 の門で出た）。
+      #
+      # ★ 公開リポジトリなので、上げたものは誰でも取れる。いま入るのは msiexec のログ
+      #   （MSI の Property 表と、ランナーの固定値）と画面の絵だけで、秘密は無い。
+      #   **署名を入れる日にここを読み直すこと**——/l*v は署名の材料も含めて表を全部出す。
       - name: インストール確認の証拠を上げる
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: install-check-evidence

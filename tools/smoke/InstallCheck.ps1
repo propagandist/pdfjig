@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    MSI / EXE を入れて、確かめて、消す。置き場を選ばない。
+    MSI / EXE を入れて、確かめて、消す。使い捨ての機械の上で走らせる。
 
 .DESCRIPTION
     docs/HANDOVER.md 4-4「人が見るもの」の 2〜5 番にあたる。
@@ -32,7 +32,10 @@ param(
     [string] $OutDir,
 
     # EXE をサイレントで入れるときの引数。
-    [string] $ExeSilentArgs = '/qn',
+    # ★ /norestart を落とさないこと。msiexec の 4 か所は必ず渡しており、ここだけ外すと
+    #   「再起動を要求しない」の検めが EXE についてだけ別の意味になる（#44 の門で出た）。
+    #   包まれた MSI が使用中のファイルに当たったとき、断らなければ本当に再起動しうる。
+    [string] $ExeSilentArgs = '/qn /norestart',
 
     # 期待する UpgradeCode。値は pdf-desktop/build.gradle.kts の upgradeUuid と同じである。
     #
@@ -44,7 +47,11 @@ param(
     #
     # ★ わざと違う値を渡して「落ちること」を確かめられるようにしてある。
     #   通ることだけを見ても、検知できる保証にはならない。
-    [string] $ExpectedUpgradeCode = '{3210BCE4-3635-4EFC-8EC1-DC77881091BB}'
+    [string] $ExpectedUpgradeCode = '{3210BCE4-3635-4EFC-8EC1-DC77881091BB}',
+
+    # ★★ 使い捨てでない機械で走らせるときの明示の同意。
+    #   既定では断る（下の Assert-DisposableHost）。
+    [switch] $AllowNonDisposableHost
 )
 
 Set-StrictMode -Version Latest
@@ -55,6 +62,28 @@ $Out = $OutDir
 $Log = Join-Path $OutDir 'run.log'
 
 . (Join-Path $PSScriptRoot 'AppLaunch.ps1')
+
+<#
+    使い捨ての機械かどうかを検める。
+
+    ★★ このスクリプトは入れるだけでなく消す。**同じ製品が既に入っている機械で走らせると、
+      利用者の入れたものを黙って消す**——ProductCode が同じなら、こちらが入れたものと
+      区別が付かない。**Sandbox の中に閉じていた頃は構造がそれを防いでいた**
+      （C:\dist / C:\out が固定で、最後に shutdown していた）。
+      **置き場を選べるようにした以上、断るのはここの仕事である**（#44 の門で出た）。
+
+    通すのは 2 つだけである——GitHub Actions のランナーと、Windows Sandbox の既定ユーザー。
+    どちらも走り終われば消える。それ以外は -AllowNonDisposableHost を求める。
+#>
+function Assert-DisposableHost([bool] $Allowed) {
+    if ($Allowed) { return }
+    if ($env:GITHUB_ACTIONS -eq 'true') { return }
+    if ($env:USERNAME -eq 'WDAGUtilityAccount') { return }
+    throw ('使い捨てでない機械のようだ（ユーザー {0}）。' -f $env:USERNAME +
+        'ここは入れて消すので、同じ製品が既に入っていると、それを消してしまう。' +
+        '手元で試すなら tools/sandbox/Invoke-InstallCheckInSandbox.ps1 を通すこと。' +
+        'それでもここで走らせるなら -AllowNonDisposableHost を渡す。')
+}
 
 function Write-Log([string] $Message) {
     $line = '[{0:HH:mm:ss}] {1}' -f (Get-Date), $Message
@@ -171,13 +200,22 @@ function Assert-Installed([string] $ExpectedRoot, [string] $ProductCode, [string
     return $exe
 }
 
-<# 消えた状態を検める。Sandbox には他に何も入っていないので、残骸の判定が正確になる。 #>
-function Assert-Removed([string] $ExpectedRoot, [string] $ProductCode, [string] $What) {
+<#
+    消えた状態を検める。
+
+    ★ 残骸の判定が正確なのは、使い捨ての機械で走らせているからである（Assert-DisposableHost）。
+      他のソフトが入っている機械では、何が誰の残骸か区別が付かない。
+#>
+function Assert-Removed([string[]] $Roots, [string] $ProductCode, [string] $What) {
     $leftovers = @()
-    if (Test-Path $ExpectedRoot) {
-        $files = @(Get-ChildItem -Path $ExpectedRoot -Recurse -File -ErrorAction SilentlyContinue)
-        if ($files.Count -gt 0) {
-            $leftovers += ('ファイルが {0} 個残っている: {1}' -f $files.Count, $ExpectedRoot)
+    # ★ 入れた側の置き場だけを見ない。マシン単位で入れたものがユーザー単位に何かを置くことも、
+    #   その逆もありうる——片方しか見ないと、残ったものがちょうど見えない側に落ちる（#44 の門）。
+    foreach ($root in $Roots) {
+        if (Test-Path $root) {
+            $files = @(Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue)
+            if ($files.Count -gt 0) {
+                $leftovers += ('ファイルが {0} 個残っている: {1}' -f $files.Count, $root)
+            }
         }
     }
     $shortcuts = @(Get-StartMenuShortcuts)
@@ -193,6 +231,8 @@ function Assert-Removed([string] $ExpectedRoot, [string] $ProductCode, [string] 
     }
     Write-Log '  残骸なし'
 }
+
+Assert-DisposableHost $AllowNonDisposableHost.IsPresent
 
 Write-Log '== インストーラを検める =='
 
@@ -249,7 +289,7 @@ $c = Invoke-Installer 'msiexec.exe' @(
     '/x', $productCode, '/qn', '/norestart',
     '/l*v', (Join-Path $Out 'msi-uninstall.log')) 'MSI を消す'
 Assert-InstallerSucceeded $c 'MSI のアンインストール'
-Assert-Removed $machineRoot $productCode 'MSI'
+Assert-Removed @($machineRoot, $userRoot) $productCode 'MSI'
 
 # ── EXE をユーザー単位で入れる ──────────────────────────────────────────
 # MSI と EXE は同時に入らない（ProductCode が同じ）。間にアンインストールを挟んである。
@@ -267,6 +307,6 @@ $c = Invoke-Installer 'msiexec.exe' @(
     '/x', $productCode, '/qn', '/norestart',
     '/l*v', (Join-Path $Out 'exe-uninstall.log')) 'EXE を消す'
 Assert-InstallerSucceeded $c 'EXE のアンインストール'
-Assert-Removed $userRoot $productCode 'EXE'
+Assert-Removed @($machineRoot, $userRoot) $productCode 'EXE'
 
 Write-Log '== すべて通った =='
