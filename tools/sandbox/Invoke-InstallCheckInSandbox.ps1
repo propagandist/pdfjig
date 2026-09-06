@@ -25,12 +25,14 @@ param(
     # 検めるインストーラの置き場。既定はリポジトリの dist/。
     [string] $DistDir,
 
-    # EXE をサイレントで入れるときの引数。2026-08-23 実測で /qn が効く。
-    [string] $ExeSilentArgs = '/qn',
+    # EXE をサイレントで入れるときの引数。★ 既定は置かない——正本は
+    # tools/smoke/InstallCheck.ps1 である（2026-08-23 実測で /qn が効く、と書いてある）。
+    [string] $ExeSilentArgs,
 
-    # 期待する UpgradeCode。既定は pdf-desktop/build.gradle.kts の upgradeUuid。
+    # 期待する UpgradeCode。★ 既定は置かない——正本は tools/smoke/InstallCheck.ps1 である。
+    # ここにも書くと、build.gradle.kts の upgradeUuid を写した場所が 3 つになる。
     # ★ わざと違う値を渡すと落ちる。検知が空振りしていないことを、そうやって確かめる。
-    [string] $ExpectedUpgradeCode = '{3210BCE4-3635-4EFC-8EC1-DC77881091BB}',
+    [string] $ExpectedUpgradeCode,
 
     # Sandbox に渡すメモリ。ホストのコミットにそのまま乗る（SandboxHost.ps1 の
     # Assert-HostHasHeadroom）。
@@ -86,8 +88,13 @@ if (-not (Test-Path $outputDir)) {
 }
 
 $logon = New-GuestLogonCommand 'C:\src\tools\sandbox\guest\Verify-Installers.ps1'
-$logon += (' -ExeSilentArgs "' + $ExeSilentArgs + '"')
-$logon += (' -ExpectedUpgradeCode "' + $ExpectedUpgradeCode + '"')
+# 渡されたときだけ通す。渡さなければ InstallCheck.ps1 の既定が効く。
+if ($ExeSilentArgs) {
+    $logon += (' -ExeSilentArgs "' + $ExeSilentArgs + '"')
+}
+if ($ExpectedUpgradeCode) {
+    $logon += (' -ExpectedUpgradeCode "' + $ExpectedUpgradeCode + '"')
+}
 
 $null = New-SandboxConfigFile `
     -Path $configPath `

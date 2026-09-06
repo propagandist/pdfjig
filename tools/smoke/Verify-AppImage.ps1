@@ -8,7 +8,7 @@
     機能は pdf-desktop の uiTest が見ている。ここで深追いしないのには理由がある。
 
     起動して画面が組み上がるところまでの確かめ方は AppLaunch.ps1 が持つ。
-    インストーラを検める側（tools/sandbox/guest/Verify-Installers.ps1）と共有しており、
+    インストーラを検める側（InstallCheck.ps1）と共有しており、
     ここが持つのは「ZIP を展開して PDFjig.exe を見つける」ところまでである。
 
 .NOTES

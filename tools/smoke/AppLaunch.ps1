@@ -13,7 +13,7 @@
     ここは壊れる。深い操作を書けば書くほど、文言を触れなくなる。
 
     ★ 呼ぶ側が 2 つある——ZIP を検める Verify-AppImage.ps1 と、インストーラを検める
-      tools/sandbox/guest/Verify-Installers.ps1。**書き写して 2 か所に置いてはならない。**
+      InstallCheck.ps1（どちらも同じ tools/smoke/ にある）。**書き写して 2 か所に置いてはならない。**
       分かれた瞬間から、片方だけ直した壊れた確認が通るようになる。
 
 .NOTES
@@ -202,9 +202,21 @@ function Stop-App([string] $Name, [int[]] $KnownIds) {
     foreach ($target in @(Get-StartedProcesses $Name $KnownIds)) {
         try {
             $target.Kill()
+            # ★★ 落としてから、消えるところまで待つ。Kill は要求であって完了ではない。
+            #   呼ぶ側の次の 1 手がアンインストールなので（InstallCheck.ps1）、
+            #   まだ掴んでいるファイルがあると Windows Installer は再起動を予約して 3010 を返し、
+            #   「配布物が再起動を要求した」という別の失敗に化ける（#44 の門で出た）。
+            [void] $target.WaitForExit(5000)
         } catch {
             Write-Warning "落とせなかった: $($target.Id)"
         }
+    }
+
+    $remaining = @(Get-StartedProcesses $Name $KnownIds)
+    if ($remaining.Count -gt 0) {
+        # ★ 諦める上限を置く。ここで黙って戻ると、次の操作が理由の読めない形で落ちる。
+        throw ('落としたのに {0} 個残っている: {1}' -f
+            $remaining.Count, (($remaining | ForEach-Object { $_.Id }) -join ' / '))
     }
 }
 <#

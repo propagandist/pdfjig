@@ -26,7 +26,8 @@ jobs:
     # WiX 自体もイメージのプリインストールに頼らず、下で明示的に用意する。
     runs-on: windows-2022
     # ハングしたジョブを 6 時間放置しないための上限。
-    # 2026-08-22 実測（起動スモークを含む）で 3 分 26 秒。
+    # 2026-09-06 実測（起動スモークとインストール確認を含む）で 3 分 28 秒。
+    # インストール確認を足す前は 3 分 26 秒（2026-08-22）で、ほぼ変わっていない。
     # build より緩くしてあるのは、WiX の取得という外への往復を含むため。
     timeout-minutes: 20
 
@@ -126,9 +127,6 @@ jobs:
           }
 
       # 中身が揃っていることと、それが実際に立ち上がることは別である。
-      # 確かめるのは ZIP だけにしてある。MSI / EXE を入れると、消すところまで含めないと
-      # 片手落ちになり、失敗したときにランナーの状態が壊れる。
-      # インストーラの挙動は引き続き人が見る（docs/HANDOVER.md 4-4）。
       #
       # ★ shell は powershell（Windows PowerShell 5.1）でなければならない。
       #   このワークフローの既定は pwsh だが、UI Automation のアセンブリは
@@ -149,6 +147,50 @@ jobs:
           path: ${{ runner.temp }}/smoke
           if-no-files-found: ignore
 
+      # ★★ MSI / EXE は v0.1.1 まで一度も入れられたことがなかった（#44）。
+      #   作って、チェックサムを取って、draft に添えるだけだった。
+      #   upgradeUuid を取り違えても気づく手段が無く、次版のインストールが
+      #   アップグレードではなく新規扱いになって旧版が残る——それが分かるのは配った後である。
+      #
+      # ★ 中身は tools/smoke/InstallCheck.ps1 が持つ。手元の Sandbox
+      #   （tools/sandbox/Invoke-InstallCheckInSandbox.ps1）と同じものを呼んでいる。
+      #   **2 つに分けないこと**——分かれた瞬間から、片方だけ直した形で緑が出るようになる。
+      #
+      # ★ 別ジョブにしていない。#44 の本文は artifact 経由の別ジョブを想定していたが、
+      #   入れて消すのが成功すれば残骸は無く（InstallCheck.ps1 が確かめる）、
+      #   失敗すればこのジョブごと落ちて draft も作られない。**後に続くのは
+      #   チェックサムと draft だけで、どちらもインストールの副作用を受けない。**
+      #   135MB の artifact を往復させる理由が無い。
+      #
+      # ★ ランナーが汚れることは気にしなくてよい。GitHub ホストランナーは run ごとに
+      #   新品で、run が終われば破棄される。
+      - name: MSI / EXE を入れて消す
+        shell: powershell
+        # ★ 上限を置く。2026-09-06 実測で 19 秒である。msiexec が黙って待つ形（サイレントの
+        #   指定が効かず窓が出る、など）になると Start-Process -Wait は永久に戻らないので、
+        #   ジョブの 20 分を使い切ってから落ちることになる。
+        timeout-minutes: 5
+        run: |
+          & "tools/smoke/InstallCheck.ps1" `
+            -DistDir "dist" `
+            -OutDir "$env:RUNNER_TEMP/install-check"
+
+      # msiexec の失敗は終了コードだけでは読めない。/l*v のログが要る。
+      #
+      # ★★ cancelled() も見る。上の timeout に掛かったときは failure ではなく cancelled になり、
+      #   failure() だけだと**いちばん理由が読めないときに証拠が 1 つも残らない**（#44 の門で出た）。
+      #
+      # ★ 公開リポジトリなので、上げたものは誰でも取れる。いま入るのは msiexec のログ
+      #   （MSI の Property 表と、ランナーの固定値）と画面の絵だけで、秘密は無い。
+      #   **署名を入れる日にここを読み直すこと**——/l*v は署名の材料も含めて表を全部出す。
+      - name: インストール確認の証拠を上げる
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: install-check-evidence
+          path: ${{ runner.temp }}/install-check
+          if-no-files-found: ignore
+
       - name: チェックサムを作る
         run: |
           Get-ChildItem dist -File |
@@ -159,6 +201,7 @@ jobs:
 
       # draft で作る。実機で MSI / EXE / ZIP を触ってから公開したい。
       # 壊れた成果物を公開すると、取り下げても既に取得された可能性が残る。
+      # ★ 上の確認より後に置いてある。入れて消すのが落ちたら draft は作られない。
       - name: ドラフトリリースを作る
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
