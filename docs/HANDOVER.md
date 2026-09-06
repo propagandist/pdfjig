@@ -1317,7 +1317,9 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
 
 どこにも書いていなかったので残す。
 
-- **`develop` が既定である。** GitHub の default branch も `develop`。開発はここに集まる
+- **`develop` が既定である。** GitHub の default branch も `develop`。開発はここに集まる。
+  ★ **保護は ruleset id 22361998**（`pull_request` ／ `code_scanning` ／ `non_fast_forward`。
+  **bypass 無し**）。**2026-09-06 に入れた**——理由と、何が止まらないかは下の記録にある（#106）
 - 作業は `feature/` `fix/` `chore/` `ci/` を切り、`--no-ff` で `develop` へマージする。
   マージ済みのブランチは残さない（`git branch --merged develop` が `develop` だけになる状態を保つ）
 - **リリースは `v*` タグで走る**（`.github/workflows/release.yml` の `on.push.tags`）。
@@ -1749,6 +1751,12 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
     ★ **`schedule` は `weekly` が入った**（PATCH の直後は `null` に見えるので、後から読み直すこと）
   - **出た alert は 5 件。全部 `java/path-injection` で、全部 `tools/`。**
     **`pdf-core` / `pdf-desktop` / `pdf-cli` は 0 件である。**
+    - ★★ **訂正（2026-08-30 中に偽になった。2026-09-06 追記）**——**同じ日の 12:06〜12:17 JST に、
+      `pdf-desktop` の `Settings.java` で `java/path-injection` が 5 件出ている**（#107 由来）。
+      **「配布する 4 モジュールは 0 件」は、書いたその日のうちに成り立たなくなった。**
+      あちらも却下してある（#109。汚染源は `System.getenv("LOCALAPPDATA")` であり、
+      **利用者が指す入力ではなくアプリが自分のデータを置く先である**）。
+      ★ **数が同じ 5 件なので、上の 5 件と混ぜないこと**——**別の 5 件である。**
     ★ **却下した**（`won't fix`）——**`tools/` は配布物に入らない**（#69 の軸）うえ、
     汚染源は**開発者自身が打つ `main` の `args[0]`** で、出力先を決めるのも同じ開発者である。
     `CLAUDE.md` セキュリティ節の §3.3 の読み替えがそのまま当たる。
@@ -2519,26 +2527,27 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
 - [x] ★★ **`develop` に ruleset を置いた**（#106、2026-09-06）。ruleset id **22361998**
       （`develop は検出が守る`）。**`non_fast_forward` ／ `pull_request`（承認 0 件）／
       `code_scanning`（`high_or_higher`）の 3 本で、bypass は 1 つも置いていない。**
-      **これで「検査が入っている」と「検査が守っている」の差が無くなった。**
+      ★ **これで「検査が入っている」と「検査が守っている」の差が無くなったのは `develop` である。
+      `main` は変えていない**——下の「まだ止まらないもの」を見ること。
   - **#23 で検出は入ったが、強制は 1 つも入っていなかった**——`rules/branches/develop` が
     `[]` で、**High の alert が出ても何も止まらなかった**（2026-08-30 実測）。
-    ★★ **その状態が起票の翌日に実際に起きている**（#106 のコメント）——`java/path-injection` の
-    high が 5 件、**赤にならないまま `develop` へ入った。** 却下できたのは中身がそうだったからで、
-    **見えるようになったのは別の PR で赤が出た偶然である。**
-  - ★ **`required_status_checks` は入れていない。#22 が挙げた理由（`**/*.md` の変更では
-    `build` が走らない）は、`build` については消えていない。** 消えたのは **CodeQL について**だけである
-    （default setup は `paths` で絞れないので、文書だけの PR でも走る）。
-    **required に何を選ぶかで結論が変わる**ので、**選ばないほうを採った**——
-    ★★ **#106 が塞ぎたかったのは「High の alert が出ても止まらない」ことであり、
-    それに直に効くのは `code_scanning` rule のほうである。** あちらは alert の深刻度で止める仕掛けで、
-    **check の成否で止める `required_status_checks` とは別物である**（#22 が名指ししたのはこちら）。
+    ★★ **その状態は、起票の 1 時間後に実際に起きている**——#106 の起票が 11:49 JST、
+    alert の作成が 12:06〜12:17 JST、#107 のマージが 12:50 JST である（すべて 2026-08-30）。
+    `java/path-injection` の high が 5 件、**赤にならないまま `develop` へ入った。**
+    却下できたのは中身がそうだったからで、**見えるようになったのは別の PR で赤が出た偶然である。**
+    ★ **#106 のコメントは「起票の翌日」と書いているが、誤りである**——同じ日の、1 時間後である。
+  - ★ **`required_status_checks` は入れていない。** #22 の記録が挙げた理由は
+    **`build` については消えていない**（消えたのは CodeQL についてだけである）。
+    ★★ **そもそも #106 が塞ぎたかったのは「High の alert が出ても止まらない」ことであり、
+    それに直に効くのは `code_scanning` rule のほうである**——**alert の深刻度**で止める仕掛けで、
+    **check の成否**で止める `required_status_checks` とは別物である。
   - ★★ **bypass を置かなかった。** 1 人開発で admin bypass を足すと、
     **「保護してあるが素通りできる」状態**になる（org `work-conventions.md` の
     「守れていないのに緑が出る」と同じ型）。**承認は 0 件なので 1 人でも回る。**
     **詰まったら ruleset を一時無効化する**——**その操作は記録に残り、bypass のように
     黙って通ることがない。**
   - ★ **`allowed_merge_methods` は `merge` だけにした。** このリポジトリは `--no-ff` で
-    マージすると決めてある（上の「作業の型」）ので、**設定と規約を揃えた。**
+    マージすると決めてある（`CLAUDE.md`「作業の型」）ので、**設定と規約を揃えた。**
   - **実測（2026-09-06、この記録を載せた PR #154 そのもの）**——
     **文書だけの PR でも CodeQL は走る**（`Analyze (java-kotlin)` **1 分 34 秒**、
     `Analyze (actions)` **33 秒**）。**`mergeStateStatus` は `CLEAN` で、詰まらなかった。**
@@ -2551,6 +2560,18 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
     返ってきたのは 2 行である——**`Changes must be made through a pull request.`** と
     **`Code scanning is waiting for results from CodeQL for the commit …`**。
     **後者が効くのが要点である**——#106 のコメントが挙げた
-    **`neutral / 1 configuration not found` のまま入る穴**（#107 で実際に通った形）は、
-    **「結果を待つ」側で止まる。** **`required_status_checks` では neutral が成功扱いになるので、
-    そちらを選んでいたら塞げていなかった。**
+    **`neutral / 1 configuration not found` のまま入る穴**は、**「結果を待つ」側で止まる。**
+    ★ **`required_status_checks` を選んでいたらどうなったかは、実測していない。**
+    GitHub の文書では neutral / skipped は成功として数えられるので**塞げなかったはず**だが、
+    **ここで確かめたのは `code_scanning` rule が待つことだけである。**
+    ★ **#107 が通ったのは rule が 1 本も無かったからであって、neutral のせいではない**
+    ——あの件はこの推測の根拠にならない。
+  - ★★ **まだ止まらないもの**（#106 の受け入れ基準「設定を見ずに言えること」）。
+    - **`build` が赤くてもマージできる。** `required_status_checks` を入れていないためである
+    - **`main` には `code_scanning` rule が無い**（ruleset 21228747 は `deletion` と
+      `non_fast_forward` のまま。**admin bypass も付いている**）。
+      ★★ **`develop` のほうが強い状態になった。** `main` はタグを打つときにしか進まず、
+      入るものは `develop` を通ってきたものだけなので**いまは実害が無い**が、
+      **「保護してある」と読める名前で弱いほうが残っている。**
+      **#22 のコメントが警告した誤読と同じ形なので、ここに書いておく**
+    - **medium 以下の alert は止めない**（`high_or_higher`）
