@@ -13,7 +13,7 @@
     ここは壊れる。深い操作を書けば書くほど、文言を触れなくなる。
 
     ★ 呼ぶ側が 2 つある——ZIP を検める Verify-AppImage.ps1 と、インストーラを検める
-      tools/sandbox/guest/Verify-Installers.ps1。**書き写して 2 か所に置いてはならない。**
+      InstallCheck.ps1（どちらも同じ tools/smoke/ にある）。**書き写して 2 か所に置いてはならない。**
       分かれた瞬間から、片方だけ直した壊れた確認が通るようになる。
 
 .NOTES

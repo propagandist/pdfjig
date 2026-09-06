@@ -966,6 +966,7 @@ POI のルールが空振りしていない              FAILED   ← ガード�
 |---|---|---|
 | `:pdf-desktop:uiTest`（TestFX） | 画面の操作が正しい結果を出すか | `build` の windows ジョブ |
 | `tools/smoke/Verify-AppImage.ps1` | 配った成果物がその環境で立ち上がるか／**同梱ランタイムに、外れても誰も赤くならないモジュールが入っているか** | `release` |
+| `tools/smoke/InstallCheck.ps1` | **MSI / EXE が入って、起動して、消えて残らないか**／`UpgradeCode` が変わっていないか | `release` と手元の Sandbox |
 
 - **ヘッドレスにしない。** `org.testfx:openjfx-monocle:21.0.2` は JavaFX 21 で
   `Window#_updateViewSize` を実装しておらず、表示時に `AbstractMethodError` になる
@@ -1157,9 +1158,12 @@ GitHub の windows ランナーは画面が見えないのに uiTest が通る�
 **★ 確かめられていないことがある。** Sandbox の既定ユーザー `WDAGUtilityAccount` は
 Administrators のメンバーなので、**「標準ユーザーの環境で入るか」は分からない**。
 4-4 の 2 番のうち、機械で見えているのは「非対話で入る」ところまでである。
+★★ **これは Sandbox に限った話ではない**——**GitHub ランナーのユーザーも管理者である**ので、
+CI へ載せても同じところが残る（#44、2026-09-06）。
 
-**★ CI へ足すかは決めていない。** Windows Sandbox は GitHub ホストランナーでは使えない
-（入れ子仮想化が無い）ので、載せるならランナーへ直に入れて直に消す形になる。Issues に起票してある。
+**★ CI に載せた**（#44、2026-09-06）。**ランナーへ直に入れて直に消す形である**
+（Windows Sandbox は入れ子仮想化が無いので GitHub ホストランナーでは使えない）。
+**中身はこれと同じ `tools/smoke/InstallCheck.ps1` を呼んでいる。** 経緯は下の記録にある。
 
 #### 構成の要点
 
@@ -2636,9 +2640,16 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
   - ★★ **中身は `tools/smoke/InstallCheck.ps1` へ切り出した。手元の Sandbox と CI が
     同じものを呼ぶ。** **2 つに分けないこと**——分かれた瞬間から、片方だけ直した形で緑が出る
     （`TestPdfs` と同じ軸）。Sandbox 側に残したのは**置き場のマップと後始末だけ**である。
-  - ★ **`upgradeUuid` を写した場所が 3 つになっていたので 2 つに減らした。**
-    ホスト側の `Invoke-InstallCheckInSandbox.ps1` が既定値を持っていた。
+  - ★ **ホスト側の `Invoke-InstallCheckInSandbox.ps1` が持っていた既定値を外した。**
     **渡されたときだけ通す形にした**——わざと違う値を渡して落ちることを確かめる道は残る。
+    `ExeSilentArgs` も同じ形に揃えた（**あちらはホストが無条件に渡すので、guest の既定は
+    そもそも届いていなかった**）。
+    ★★ **`InstallCheck.ps1` に残した値は写しではない。独立に置いた期待値である。**
+    **`build.gradle.kts` から読む形に「直す」と、値を自分自身と比べることになり、
+    どんな値でも通るようになる**——**#44 が入れたかった検知が、緑のまま消える。**
+    **そう書いてある**（同ファイルの `$ExpectedUpgradeCode`）。
+    ★ **リポジトリ全体では 3 か所にこの値がある**（`build.gradle.kts` ／ `InstallCheck.ps1` ／
+    この文書の「確定している判断」）。**減らす対象ではない。**
   - ★ **draft は確認より後に置いた。** 入れて消すのが落ちたら draft は作られない。
     **壊れた成果物の draft ができると、人が見て公開しないと判断することになる。**
   - ★ **別ジョブにしていない。** #44 の本文は artifact 経由の別ジョブを想定していたが、

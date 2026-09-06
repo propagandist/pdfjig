@@ -21,10 +21,10 @@
 #>
 [CmdletBinding()]
 param(
-    # EXE をサイレントで入れるときの引数。
-    [string] $ExeSilentArgs = '/qn',
+    # ★ どちらも既定を置かない。渡されたものだけ通す——既定は InstallCheck.ps1 が持つ。
+    #   ここにも既定を置くと、あちらを直しても Sandbox 経由では効かない形になる。
+    [string] $ExeSilentArgs,
 
-    # 期待する UpgradeCode。既定は InstallCheck.ps1 の既定に任せる。
     [string] $ExpectedUpgradeCode
 )
 
@@ -41,20 +41,24 @@ try {
     $arguments = @{
         DistDir = 'C:\dist'
         OutDir = $Out
-        ExeSilentArgs = $ExeSilentArgs
     }
-    # 渡されたときだけ上書きする。既定は InstallCheck.ps1 が持つ（正本を 2 つにしない）。
+    if ($ExeSilentArgs) { $arguments['ExeSilentArgs'] = $ExeSilentArgs }
     if ($ExpectedUpgradeCode) { $arguments['ExpectedUpgradeCode'] = $ExpectedUpgradeCode }
 
     & 'C:\src\tools\smoke\InstallCheck.ps1' @arguments
     $code = 0
 } catch {
-    $line = '[{0:HH:mm:ss}] 失敗: {1}' -f (Get-Date), $_.Exception.Message
-    Write-Host $line
-    Add-Content -Path (Join-Path $Out 'run.log') -Value $line -Encoding UTF8
-    Add-Content -Path (Join-Path $Out 'run.log') -Value $_.ScriptStackTrace -Encoding UTF8
+    # ★ 書式は InstallCheck.ps1 の Write-Log に合わせてある。同じ run.log へ足すので、
+    #   揃っていないと、失敗した 1 行だけが他と違う顔で並ぶ。
+    $lines = @(
+        ('[{0:HH:mm:ss}] 失敗: {1}' -f (Get-Date), $_.Exception.Message),
+        $_.ScriptStackTrace)
+    $lines | ForEach-Object { Write-Host $_ }
+    Add-Content -Path (Join-Path $Out 'run.log') -Value $lines -Encoding UTF8
     $code = 1
 } finally {
+    Add-Content -Path (Join-Path $Out 'run.log') `
+        -Value ('[{0:HH:mm:ss}] == 終わり（{1}）==' -f (Get-Date), $code) -Encoding UTF8
     # ★ 最後に書く。ここが「置き場へ全部出し終えた」印であり、ホストはこれを見て閉じにかかる。
     Set-Content -Path $ExitCodeFile -Value $code -Encoding Ascii
     Start-Sleep -Seconds 2

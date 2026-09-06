@@ -34,7 +34,14 @@ param(
     # EXE をサイレントで入れるときの引数。
     [string] $ExeSilentArgs = '/qn',
 
-    # 期待する UpgradeCode。既定は pdf-desktop/build.gradle.kts の upgradeUuid。
+    # 期待する UpgradeCode。値は pdf-desktop/build.gradle.kts の upgradeUuid と同じである。
+    #
+    # ★★ ここを build.gradle.kts から読む形に「直さない」こと。
+    #   このリポジトリは「同じ値を 2 か所に書かない」を規律にしているので、次に読む者は
+    #   そちらへ寄せたくなる。**寄せた瞬間に、この検査は値を自分自身と比べることになる。**
+    #   **どんな値に変えても通る**——#44 が入れたかった検知が、緑のまま消える。
+    #   **ここは写しではなく、独立に置いた期待値である。**
+    #
     # ★ わざと違う値を渡して「落ちること」を確かめられるようにしてある。
     #   通ることだけを見ても、検知できる保証にはならない。
     [string] $ExpectedUpgradeCode = '{3210BCE4-3635-4EFC-8EC1-DC77881091BB}'
@@ -43,9 +50,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $Out = $OutDir
-New-Item -ItemType Directory -Path $Out -Force | Out-Null
-$Log = Join-Path $Out 'run.log'
+$Log = Join-Path $OutDir 'run.log'
 
 . (Join-Path $PSScriptRoot 'AppLaunch.ps1')
 
