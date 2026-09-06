@@ -2539,3 +2539,18 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
     黙って通ることがない。**
   - ★ **`allowed_merge_methods` は `merge` だけにした。** このリポジトリは `--no-ff` で
     マージすると決めてある（上の「作業の型」）ので、**設定と規約を揃えた。**
+  - **実測（2026-09-06、この記録を載せた PR #154 そのもの）**——
+    **文書だけの PR でも CodeQL は走る**（`Analyze (java-kotlin)` **1 分 34 秒**、
+    `Analyze (actions)` **33 秒**）。**`mergeStateStatus` は `CLEAN` で、詰まらなかった。**
+    ★★ **その同じ PR で `build` の check run は 1 つも生まれていない**（`paths-ignore` に
+    `**/*.md` があるため）——**`required_status_checks` に `build` を入れていたら、
+    この PR はそこで詰まっていた。#22 の懸念はいまも生きている。**
+  - ★ **`require_extra_approval_for_unattributed_changes` は既定で `true` が入る。**
+    **`Co-Authored-By` の行では発火しなかった**（同 PR で実測）。
+  - ★★ **直接 push が実際に拒否されることを確かめた**（同日、`develop` へ空コミット）。
+    返ってきたのは 2 行である——**`Changes must be made through a pull request.`** と
+    **`Code scanning is waiting for results from CodeQL for the commit …`**。
+    **後者が効くのが要点である**——#106 のコメントが挙げた
+    **`neutral / 1 configuration not found` のまま入る穴**（#107 で実際に通った形）は、
+    **「結果を待つ」側で止まる。** **`required_status_checks` では neutral が成功扱いになるので、
+    そちらを選んでいたら塞げていなかった。**
