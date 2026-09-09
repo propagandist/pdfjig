@@ -2766,36 +2766,25 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
     ★★ **測り方を文章で説明しない。道具を置く**——**説明にすると、読んだ人ごとに数字が変わる。**
     **これで測った**（2026-09-09、木は `05fc758`。**`n=2950 median=31 p90=63 max=209 over80=106 (3.6%)`**）。
 
-```python
-# 6 ファイルを繋いで標準入力へ流し込む。
-# ★ フェンスの印は chr(96)*3 で書く——この道具自身がフェンスの中に居るためである。
-import re,sys
-L=[];buf='';fence=False
-for line in sys.stdin:
-    line=line.rstrip()
-    if line.lstrip().startswith(chr(96)*3): fence=not fence; buf=''; continue
-    if fence: continue
-    item=bool(re.match(r'^\s*([-*]|\d+\.)\s',line))
-    if not line.strip() or re.match(r'^\s*([|>#]|-{3,}|<!--)',line) or item:
-        if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]; buf=''
-        if not item: continue
-    buf+=re.sub(r'^[\s*\-]+','',re.sub(chr(96)+'[^'+chr(96)+']*'+chr(96),'',line).replace('**',''))
-if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]
-L.sort();n=len(L)
-print(f'n={n} median={L[n//2]} p90={L[int(n*.9)]} max={L[-1]} '
-      f'over80={sum(1 for x in L if x>80)} ({100*sum(1 for x in L if x>80)/n:.1f}%)')
-```'): fence=not fence; buf=''; continue
-    if fence: continue
-    item=bool(re.match(r'^\s*([-*]|\d+\.)\s',line))
-    if not line.strip() or re.match(r'^\s*([|>#]|-{3,}|<!--)',line) or item:
-        if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]; buf=''
-        if not item: continue
-    buf+=re.sub(r'^[\s*\-]+','',re.sub(r'`[^`]*`','',line).replace('**',''))
-if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]
-L.sort();n=len(L)
-print(f'n={n} median={L[n//2]} p90={L[int(n*.9)]} max={L[-1]} '
-      f'over80={sum(1 for x in L if x>80)} ({100*sum(1 for x in L if x>80)/n:.1f}%)')
-```
+    ```python
+    # 6 ファイルを繋いで標準入力へ流し込む。
+    # ★ フェンスの印は chr(96)*3 で書く——この道具自身がフェンスの中に居るためである。
+    import re,sys
+    L=[];buf='';fence=False
+    for line in sys.stdin:
+        line=line.rstrip()
+        if line.lstrip().startswith(chr(96)*3): fence=not fence; buf=''; continue
+        if fence: continue
+        item=bool(re.match(r'^\s*([-*]|\d+\.)\s',line))
+        if not line.strip() or re.match(r'^\s*([|>#]|-{3,}|<!--)',line) or item:
+            if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]; buf=''
+            if not item: continue
+        buf+=re.sub(r'^[\s*\-]+','',re.sub(chr(96)+'[^'+chr(96)+']*'+chr(96),'',line).replace('**',''))
+    if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]
+    L.sort();n=len(L)
+    print(f'n={n} median={L[n//2]} p90={L[int(n*.9)]} max={L[-1]} '
+          f'over80={sum(1 for x in L if x>80)} ({100*sum(1 for x in L if x>80)/n:.1f}%)')
+    ```
 
     ★★ **箇条書きを項目で区切らずに繋ぐと、同じ木で n=2502 ／ p90 74 ／ 80 字超 172 件 6.9% になる。**
     **80 字はどちらでも p90 の上にある。閾値は測り方に依らない。**
