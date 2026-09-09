@@ -329,7 +329,7 @@ gh api "repos/propagandist/pdfjig/code-scanning/alerts?ref=refs/heads/develop&st
 
 | いつ | 何を |
 |---|---|
-| `build`（push / PR、windows のみ） | 開く・回す・消す・並べ替える・区切って分割する・保存する。パスワード付きの文書を開く（`:pdf-desktop:uiTest`） |
+| `build`（push / PR、windows のみ） | 開く・回す・消す・区切って分割する・保存する。パスワード付きの文書を開く（`:pdf-desktop:uiTest`）。★ **並べ替えは入らない**——`ReorderUiTest` は CI から外してあり、ドラッグで並べ替える uiTest は他に無い（下の 9 番） |
 | `release`（タグ） | ZIP を展開して `PDFjig.exe` が起動し、ツールバーが組み上がるところまで |
 
 ★ **手元で uiTest を走らせるときは `tools/sandbox/Invoke-UiTestInSandbox.ps1` を使える。**
@@ -1440,7 +1440,8 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
       30 分の上限は、`uiTest` が 19 分かかっていた事実を隠していた
       ── ★ **2026-09-06 に測り直した。値は下の #43 の記録にある**——**本数が 29 から 66 へ
       増えている。** ★★ **尺度が違う**——**ここの 15 秒は Gradle タスクの時間、
-      あちらは `build` のステップの時間である**（Gradle の起動を含む）。**同じ量ではない。**
+      あちらは `build` ワークフローの
+      `UI test` ステップの時間である**（Gradle の起動を含む）。**同じ量ではない。**
 - [x] セキュリティ分類。**org 側に分類 P（利用者の手元で動くものを配る）が足された**ので、
       `CLAUDE.md` のセキュリティ節をそれへ揃えた（`propagandist/.github#22`、2026-08-22）。
       **「分類 D ＋ §5.3 も読む」という自前の運用は要らなくなった。**
