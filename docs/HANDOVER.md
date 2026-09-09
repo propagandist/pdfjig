@@ -2764,23 +2764,34 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
     実際には 9 文に 1 文が超えているのに緑が出る。**
     ★ **表の行も見ない**（`^\s*|` を落とすため）。**「文章の値」の表そのものは測られていない。**
     ★★ **測り方を文章で説明しない。道具を置く**——**説明にすると、読んだ人ごとに数字が変わる。**
-    **これで測った**（2026-09-09、木は `05fc758`。**`n=2950 median=31 p90=63 max=209 over80=106 (3.6%)`**）。
+    **これで測った**（2026-09-09、木は `05fc758`。**`n=2961 median=31 p90=62 max=209 over80=101 (3.4%)`**）。
+
+    ★★ **既知の入力を通してから使うこと**（org §8 が 2 度記録している。
+    **検査が別の単位を測っていることに気づく唯一の手段である**）。
+    **`printf 'あいうえおかきくけこ。さしすせそたちつてと。なにぬねのはひふへほ。\n'` を流して
+    `n=3 median=10 p90=10 max=10 over80=0` が出ること。**
 
     ```python
     # 6 ファイルを繋いで標準入力へ流し込む。
     # ★ フェンスの印は chr(96)*3 で書く——この道具自身がフェンスの中に居るためである。
     import re,sys
     L=[];buf='';fence=False
+    def flush():
+        global buf
+        if buf: L.extend(len(x) for x in buf.split('。') if len(x)>=8)
+        buf=''
     for line in sys.stdin:
         line=line.rstrip()
-        if line.lstrip().startswith(chr(96)*3): fence=not fence; buf=''; continue
+        if line.lstrip().startswith(chr(96)*3): flush(); fence=not fence; continue
         if fence: continue
         item=bool(re.match(r'^\s*([-*]|\d+\.)\s',line))
         if not line.strip() or re.match(r'^\s*([|>#]|-{3,}|<!--)',line) or item:
-            if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]; buf=''
+            flush()
             if not item: continue
-        buf+=re.sub(r'^[\s*\-]+','',re.sub(chr(96)+'[^'+chr(96)+']*'+chr(96),'',line).replace('**',''))
-    if buf: L+=[len(x) for x in buf.split('。') if len(x)>=8]
+        t=re.sub(chr(96)+'[^'+chr(96)+']*'+chr(96),'',line)
+        t=re.sub(r'\(https?://[^)]*\)','',t).replace('**','')   # ★ リンクの URL は字数に数えない
+        buf+=re.sub(r'^[\s*\-]+','',t)
+    flush()
     L.sort();n=len(L)
     print(f'n={n} median={L[n//2]} p90={L[int(n*.9)]} max={L[-1]} '
           f'over80={sum(1 for x in L if x>80)} ({100*sum(1 for x in L if x>80)/n:.1f}%)')
@@ -2824,5 +2835,5 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページで、**枚数はわ�
     「決着したら経緯をここへ移して issue を閉じる」と定めている。**
     ★ **#106 は「対象範囲」に記録先を書いてある。あれがこのリポジトリの型になる。**
   - ★★ **決めた値に照らして本文を推敲する作業は、#165 が持つ**（`v0.2.0`）。
-    **80 字超 106 件・同一文末 49 箇所・揺れている 3 語を持たせた。**
+    **80 字超 101 件・同一文末 49 箇所・揺れている 3 語を持たせた。**
     **基準が無いまま直した結果が次の基準になるので、#81 は決めるところで切ってある。**
