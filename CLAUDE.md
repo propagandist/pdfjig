@@ -27,16 +27,14 @@ flowchart LR
     cli --> core
     ai --> core
 ```
-- **INV-2: AI はファイルを変更しない。** `pdf-ai` の公開メソッドはすべて `Proposal<T>` を返す。
-  適用は「提案 → 差分表示 → ユーザー承認 → `pdf-core` による適用」の順を踏む
-- **INV-3: AI 不在で全機能が動く。** `NoOpProvider` が既定であり、
-  呼び出し箇所は必ず `provider.isAvailable()` で分岐する。**例外を投げてはならない**
+- **INV-2: AI はファイルを変更しない。** `pdf-ai` の公開メソッドはすべて `Proposal<T>` を返す
+- **INV-3: AI 不在で全機能が動く。** `NoOpProvider` が既定である。**例外を投げてはならない**
 - **INV-4: PDF 本文を書き換えない。** ★ **含意で押し通さないこと**——
   書き換えてよいものと、よく似ているが書き換えないものの表がルール側にある
 - **INV-5: パスワードは `char[]` で扱う。** `String` で受け取る・保持する・返すメソッドを
-  書いてはならない。ログ・例外メッセージ・設定ファイル・CLI 引数・URL へ出さない
-- **INV-6: 実業務の PDF をコミットしない。** public であり、一度コミットされた機密文書は
-  取り返しがつかない
+  書いてはならない。**ログ / 例外メッセージ / スタックトレース / 設定ファイル / CLI 引数 / URL**
+  のいずれへも出さない
+- **INV-6: 実業務の PDF をコミットしない**（理由と `.gitignore` の作法は `testing.md`）
 
 以下は Non-goals であり、要望されても実装しない:
 テキスト直接編集 / 電子署名 / フォーム作成 / PDF 生成・帳票出力 / 全文 RAG チャット
@@ -113,6 +111,11 @@ gh api repos/propagandist/.github/contents/docs/security-baseline.md --jq .conte
 確かめ方は同 `docs/security-verification.md`（手元 / 既存ジョブ / 週次の 3 層）。
 **付録 P がこのリポジトリの実測**なので、検査を足すときはそこを見る。
 
+**★ §3.3 はそのまま読まない。** 守る値「ファイルは ID で引いて、実体の場所はサーバが決める」は
+**サーバ前提**で、**利用者が自分の PC で自分のファイルを指定するのは正常な使い方**
+（`PdfjigCommand` の `@Parameters Path input`）。**残るのは zip slip / zip 爆弾と、
+アプリが自分で決める出力先だけ**（同 §3.3 の★★）。
+
 **★ Code scanning は default setup で入れてある**（2026-08-30。ワークフローは置いていない）。
 **`threat_model` は `remote_and_local` にしてある**——この道具の脅威は**手元で開く細工 PDF**であり、
 **既定の `remote` ではローカルのファイルが汚染源にならず、`SECURITY.md`「対象範囲」に
@@ -131,6 +134,13 @@ gh api repos/propagandist/.github/contents/docs/security-baseline.md --jq .conte
 **下の ③ の 3 条件はこれには当てない**——あちらが見るのは同梱物（配ったものと、いま作れるものの差）で、
 **こちらが見るのはコードである。** 週次で結果が変わるのは**クエリの側が更新される**ためであり、
 別の層である。
+
+**★ ③ 週次 cron を足すなら、org 基準 §0 の 3 条件を満たすこと**——public であること・
+見るのは同梱物に限ること・**CVE が出たときに何をするかまで決まっていること**。
+**P では気づいても再リリースしなければ直らない**ので、3 番目が抜けると「監視しているつもり」になる。
+
+**★ 分類が増えるのは、`pdf-core` をライブラリとして publish した日**（`SPEC.md` §9）。
+**P ＋ L** になり、§5.3.1（座標）が足される。
 
 **法務は区分 4**（預からない＝当社の設備が個人データを受け取らない）。
 **個人データの流れ・外部へ出る先・保存期間を変える前に** 同 `docs/legal-baseline.md`
@@ -256,13 +266,16 @@ gh api repos/propagandist/.github/contents/docs/writing-baseline.md --jq .conten
 - **INV に反する実装を求められたら、実装せずに矛盾を指摘する**（上の「不変条件」）
 - **Non-goals は、要望されても実装しない**（同上）
 - **★ 手元で通ったことは、CI で通る根拠にならない。** 逆も同じ。
-  別の環境なので、担保したい側で実際に走らせて確かめること
+  別の環境なので、担保したい側で実際に走らせて確かめること。
 - **手で整えない。** 整形は Spotless が正である（`./gradlew spotlessApply`）
+- **テストを CI から外すなら 3 点を揃える**——**理由と実測をテストの Javadoc へ／
+  人が見る手順（`docs/HANDOVER.md` 4-4）に CI で守られていないと明記／手元では走る状態を保つ。**
+  ★ **CI が赤いのを見て決めるので、テストを開く前に始まりうる**（詳細は `testing.md`）
 - **画面の id とアクセシブル名はテストとの契約である。** 変えるときは `pdf-desktop/src/uiTest` を見る
 - **1 コミット 1 関心事。** モジュールをまたぐ変更は分割する
 - **実装前に、その変更が INV-1 〜 INV-6 のいずれかに触れないか確認する**
 - **仕様に書かれていない判断が必要になったら、勝手に決めず issue を立てて確認を求める**
-  （`decision` ラベル。**マイルストーンを必ず付ける**——上の「作業の型」）。
+  （`decision` ラベルの issue に一覧がある。**マイルストーンを必ず付ける**——上の「作業の型」）。
   **`docs/HANDOVER.md` に書き足さないこと**——2026-08-23 に未決の管理を Issues へ移した。
   **両方に書くと必ず片方が腐る。** 決着したら、判断の経緯を
   `docs/HANDOVER.md`「決まったことの記録」へ移して issue を閉じる
@@ -274,16 +287,17 @@ gh api repos/propagandist/.github/contents/docs/writing-baseline.md --jq .conten
 **`.claude/rules/*.md` は `paths:` に一致するファイルを読んだときだけ載る。**
 **索引に載らないルールを作らないこと。**
 
-| ルール | 何を持つか | 載る作業 |
+| ルール | 何を持つか | 載る作業（`paths:` そのもの） |
 |---|---|---|
-| `modules-and-invariants.md` | 不変条件の理由・図・例／言語機能／リソース管理／識別子の命名／モジュールの責務 | 5 モジュールの `src` を開く実装 |
-| `desktop-ui.md` | 画面の id の表／JavaFX の規約 | `pdf-desktop` の画面と `tools/smoke/**` |
-| `ui-tests.md` | 画面のテストの書き方／不安定なテストの吸収の限界 | `pdf-desktop/src/uiTest` と `tools/sandbox/**` |
-| `testing.md` | 何をテストするか／フィクスチャ／CI から外すときの 3 点セット | 各 `src/test` と `.gitignore` |
-| `build-and-format.md` | 整形（Spotless・改行） | `*.gradle.kts` ／ `libs.versions.toml` ／ `.editorconfig` ／ `.gitattributes` |
-| `workflows-and-distribution.md` | 枠の前提／週次 cron の 3 条件／分類が増える日 | `.github/workflows/**` と publish の設定 |
+| `modules-and-invariants.md` | 不変条件の理由・図・例／言語機能／リソース管理／識別子の命名／モジュールの責務 | 5 モジュールの **`src/main/java`**（`pdf-archtest` だけ `src/test/java`）。★ **テストでは載らない** |
+| `desktop-ui.md` | 画面の id の表／JavaFX の規約 | `pdf-desktop/src/main` と **`src/uiTest/java`**、`tools/smoke/**` |
+| `ui-tests.md` | 画面のテストの書き方／不安定なテストの吸収の限界 | `pdf-desktop/src/uiTest/java` と `tools/sandbox/**` |
+| `testing.md` | 何をテストするか／フィクスチャ／CI から外すときの 3 点セット | 各 `src/test/java`、`pdf-core/src/testFixtures/java`、`pdf-desktop/src/uiTest/java`、`.gitignore` |
+| `build-and-format.md` | 整形（Spotless・改行） | 各 `*.gradle.kts` ／ `libs.versions.toml` ／ `.editorconfig` ／ `.gitattributes` ／ `.git-blame-ignore-revs` |
 
 - ★ **`/compact` の直後はルールが 1 本も載っていない。** 必要なら該当ファイルを開き直す
 - ★ **載っているかどうかは `/context` では確かめられない。** 数えるのは行数であって発火ではない
 - ★ **`paths:` の glob に `[` と brace 展開を使わない。** 版によっては、不正なパターン 1 つで
   ファイル読み取りが全滅する
+- ★★ **ワークフローと配布のルールは置いていない。** 枠・週次 cron・分類が増える日は、
+  **どれもファイルを開かずに始まる契機**なので、上の「CI / ワークフロー」と「セキュリティ」に残した

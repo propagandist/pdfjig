@@ -11,7 +11,6 @@ paths:
   - ".editorconfig"
   - ".gitattributes"
   - ".git-blame-ignore-revs"
----
 
 <!--
 維持: 整形の規約の正本。**経緯は docs/HANDOVER.md「整形を Spotless に寄せた」が持つ。**
