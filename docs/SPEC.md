@@ -226,7 +226,7 @@ interface Exporter {
 
 **分割は層を重ねず、`pdf-core` の約束のまま拒む**——複数のファイルを一度に作る操作であり、どれが置き換わるのかを 1 つずつ確認させる形にはしない。
 
-**確認を出すのは OS のダイアログであり、pdfjig ではない。** したがって**上書き確認が出ていることを自動テストで確かめる手段が無い**（`FileDialogs` の向こう側。`CLAUDE.md`「JavaFX」）。人が見る手順の側に置いてある（`docs/HANDOVER.md` 4-4）。
+**確認を出すのは OS のダイアログであり、pdfjig ではない。** したがって**上書き確認が出ていることを自動テストで確かめる手段が無い**（`FileDialogs` の向こう側。`.claude/rules/desktop-ui.md`）。人が見る手順の側に置いてある（`docs/HANDOVER.md` 4-4）。
 
 **検査と書き出しの間の競合（TOCTOU）は見ない。** 既存かどうかを確かめてから書き出すまでの間に他のプロセスが作ったファイルは、黙って潰れる。`StandardOpenOption.CREATE_NEW` で原子的に弾く形は採っていない。**利用者の手元で動くデスクトップアプリであり、出力先を選ぶのも同じ利用者である**ため、そこは守る対象に入れない。この前提が変わるのは、`pdf-core` をライブラリとして publish したとき（§9）である。
 
@@ -605,4 +605,4 @@ AI 機能が有効な場合、提案は必ず以下の順を踏む。
 
 **`java.net.URL` だけは型で縛れない**——JavaFX がスタイルシートを URL の文字列で受け取るためである。**入口の `URL#openStream` を名指しで塞いである**（`urlMustNotBeOpenedDirectly`）。
 
-**pdf-core は引き続き一切通信しない**（`CLAUDE.md`「モジュール別の責務」）。**この機能は pdf-desktop に閉じている。**
+**pdf-core は引き続き一切通信しない**（`.claude/rules/modules-and-invariants.md`）。**この機能は pdf-desktop に閉じている。**
