@@ -4,6 +4,7 @@ paths:
   - "pdf-desktop/src/main/resources/**"
   - "pdf-desktop/src/uiTest/java/**"
   - "tools/smoke/**"
+---
 
 <!--
 維持: 画面の id の付け方と JavaFX の規約の正本。**CLAUDE.md へ写さない**——あちらには

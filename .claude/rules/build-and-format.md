@@ -2,15 +2,12 @@
 paths:
   - "build.gradle.kts"
   - "settings.gradle.kts"
-  - "pdf-core/build.gradle.kts"
-  - "pdf-ai/build.gradle.kts"
-  - "pdf-cli/build.gradle.kts"
-  - "pdf-desktop/build.gradle.kts"
-  - "pdf-archtest/build.gradle.kts"
+  - "pdf-*/build.gradle.kts"
   - "gradle/libs.versions.toml"
   - ".editorconfig"
   - ".gitattributes"
   - ".git-blame-ignore-revs"
+---
 
 <!--
 維持: 整形の規約の正本。**経緯は docs/HANDOVER.md「整形を Spotless に寄せた」が持つ。**

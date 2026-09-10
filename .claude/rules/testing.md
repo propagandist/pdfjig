@@ -1,13 +1,10 @@
 ---
 paths:
-  - "pdf-core/src/test/java/**"
+  - "pdf-*/src/test/java/**"
   - "pdf-core/src/testFixtures/java/**"
-  - "pdf-ai/src/test/java/**"
-  - "pdf-cli/src/test/java/**"
-  - "pdf-desktop/src/test/java/**"
   - "pdf-desktop/src/uiTest/java/**"
-  - "pdf-archtest/src/test/java/**"
   - ".gitignore"
+---
 
 <!--
 維持: 何をテストするか・フィクスチャをどこから取るか・CI から外すときの 3 点セットの正本。

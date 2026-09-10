@@ -1,10 +1,8 @@
 ---
 paths:
-  - "pdf-core/src/main/java/**"
-  - "pdf-ai/src/main/java/**"
-  - "pdf-cli/src/main/java/**"
-  - "pdf-desktop/src/main/java/**"
+  - "pdf-*/src/main/java/**"
   - "pdf-archtest/src/test/java/**"
+---
 
 <!--
 維持: 不変条件の理由・図・NG/OK 例と、モジュールの責務・言語機能の正本。
