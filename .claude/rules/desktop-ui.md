@@ -53,4 +53,3 @@ paths の根拠: 画面を触る作業は pdf-desktop/src/main か uiTest を開
   読み上げからはどれを押しているのか分からない（#115）
   ── **ツールバーの文言は起動スモーク `tools/smoke/Verify-AppImage.ps1` との契約であり、
   変えるならあちらも変える。** **一覧の「×」の文言は `SourceLegendUiTest` との契約である**
-

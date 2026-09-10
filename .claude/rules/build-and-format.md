@@ -33,4 +33,3 @@ paths の根拠: 整形の設定を変える作業は build.gradle.kts か .edit
 改行は `.gitattributes` が正であり、LF に固定する（Windows のシェルが読む `*.bat` / `*.cmd` /
 `*.ps1` だけが CRLF）。**`.gitattributes` と `build.gradle.kts` の `lineEndings` は対になっている。
 片方だけ変えないこと。** 経緯は `HANDOVER.md`「整形を Spotless に寄せた」。
-
