@@ -70,7 +70,15 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             applyInformation(merged, information, inputs.size() > 1);
             save(merged, output);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // ★★ 未検査例外も捕まえる。appendDocument は入力のページツリーを辿るので、
+            //   そこは細工 PDF が決められるところである（#144 / #150）。
+            //   ★★ ここが IOException だけだった間も検査は緑だった——javac が
+            //   try-with-resources のために吐く catch (Throwable) を「包み」と読んでいた
+            //   （2026-09-12 実測。pdf-archtest の catchesUnchecked）。
+            //   ★★ 既知の限界: sources.open がこの中に在るので、呼ぶ側の WarningListener が
+            //   投げた失敗も IO_FAILURE に化ける。型では区別が付かず、直すには警告の通知を
+            //   包みの外へ出す必要がある（#178）。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
         return output;
@@ -108,6 +116,8 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
         } catch (RuntimeException e) {
             written.forEach(PdfBoxPageOperations::deleteQuietly);
+            // ★ 包まずに投げ直す。ここを通る失敗には、呼ぶ側の WarningListener が投げたものが
+            //   混じる——包むと、呼ぶ側の失敗が入力のせいに化ける（writeFromSingleSource。#178）。
             throw e;
         }
         return List.copyOf(outputs);
@@ -177,6 +187,8 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
         } catch (RuntimeException e) {
             written.forEach(PdfBoxPageOperations::deleteQuietly);
+            // ★ 包まずに投げ直す。ここを通る失敗には、呼ぶ側の WarningListener が投げたものが
+            //   混じる——包むと、呼ぶ側の失敗が入力のせいに化ける（writeFromSingleSource。#178）。
             throw e;
         }
         return List.copyOf(outputs);
@@ -198,16 +210,24 @@ public final class PdfBoxPageOperations implements PageOperations {
             // 回転はページ属性の変更だけで済む。ページの並びに手を触れないため、
             // ページツリーを均す必要もない。元の文書をそのまま保存する。
             PDDocument delegate = source.delegate();
-            rotations.forEach((pageNumber, rotation) -> {
-                PDPage page = delegate.getPage(pageNumber - 1);
-                page.setRotation(rotationOf(page).plus(rotation).degrees());
-            });
-
-            // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
-            // M0 が扱うのは EncryptionPropagation.NONE のみであり、
-            // 保護は落ちる（警告は open で発している）。
-            delegate.setAllSecurityToBeRemoved(true);
-            save(delegate, output);
+            // ★ forEach ではなく for で書く。ArchUnit はラムダの本体を、囲む try の中とは
+            //   見ない（pdf-archtest）——Map#forEach は即時に同じスレッドで走るので、
+            //   包み自体は forEach でも効く。ここは検査から見えるようにするための形である。
+            try {
+                for (Map.Entry<Integer, Rotation> entry : rotations.entrySet()) {
+                    PDPage page = delegate.getPage(entry.getKey() - 1);
+                    page.setRotation(rotationOf(page).plus(entry.getValue()).degrees());
+                }
+                // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
+                // M0 が扱うのは EncryptionPropagation.NONE のみであり、
+                // 保護は落ちる（警告は open で発している）。
+                delegate.setAllSecurityToBeRemoved(true);
+                save(delegate, output);
+            } catch (RuntimeException e) {
+                // ★★ ページツリーは細工 PDF が決められるところであり、PDFBox は IOException では
+                //   ない例外を投げる（#144 / #150）。包まないと素の未検査例外が外へ出る。
+                throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+            }
         }
         return output;
     }
@@ -315,7 +335,21 @@ public final class PdfBoxPageOperations implements PageOperations {
         return sourceIndex;
     }
 
-    /** 元の文書から要らないページを取り除いて並べ替え、その文書を保存する。 */
+    /**
+     * 元の文書から要らないページを取り除いて並べ替え、その文書を保存する。
+     *
+     * <p><b>★★ ここが 5 つの公開操作の書き出しの実体である</b>——{@code reorder} /
+     * {@code extractPages} / {@code deletePages} / {@code assemble} / {@code split} が通る。
+     * <b>入口が PDFBox を直に呼んでいないので、{@code pdf-archtest} の規則からは見えない</b>
+     * （#178）。<b>ここは包んでいない。</b>
+     *
+     * <p><b>★★ 包もうとして戻した</b>（2026-09-12）。この下は
+     * {@code PageReferences.removeDangling} から {@code WarningListener} を呼ぶ——
+     * <b>そこで走るのは呼ぶ側のコードである。</b>包むと<b>呼ぶ側が投げた失敗まで
+     * 「PDF として読み取れません」に塗り替わる</b>——{@code PdfBoxPageOperationsTest} の
+     * 「書き出しの途中で失敗したら、それまでに書いたものも残さない」が、まさにそれを縛っている。
+     * <b>型では区別が付かない</b>ので、包むより先に<b>警告の通知を包みの外へ出す</b>必要がある（#178）。
+     */
     private void writeFromSingleSource(PdfDocument source, List<PageSelection> pages, Path output) {
         PDDocument document = source.delegate();
 
@@ -395,7 +429,10 @@ public final class PdfBoxPageOperations implements PageOperations {
 
             target.setAllSecurityToBeRemoved(true);
             save(target, output);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // ★★ merge と同じ形にそろえる。ページツリーも属性も入力から来るので、
+            //   PDFBox は IOException ではない例外を投げる（#144 / #150）。
+            //   save が投げた IO_FAILURE は wrapping が素通しするので、符号は化けない。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
     }
@@ -537,14 +574,37 @@ public final class PdfBoxPageOperations implements PageOperations {
         return merger;
     }
 
-    /** 入力を開き、暗号化や電子署名があれば警告する。 */
+    /**
+     * 入力を開き、暗号化や電子署名があれば警告する。
+     *
+     * <p><b>★★ 検めるところで投げたら、開いたものを閉じてから投げ直す</b>（#150）。
+     * {@code signed()} はフォームと欄の木を辿るので、<b>壊れた {@code /AcroForm} で投げる</b>
+     * ——そのとき文書は {@code OpenDocuments} にも呼ぶ側の try-with-resources にも渡っておらず、
+     * <b>誰も閉じない。</b>Windows では<b>その PDF への手が握られたまま</b>になり、
+     * 後から同じ場所へ保存できない。
+     *
+     * <p><b>{@code pdf-desktop} の {@code DocumentSession#wrap} が同じ形を持っている。</b>
+     */
     private PdfDocument open(Path input) {
         PdfDocument document = PdfDocument.open(input);
-        if (document.encrypted()) {
-            warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
-        }
-        if (document.signed()) {
-            warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+        try {
+            if (document.encrypted()) {
+                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+            }
+            if (document.signed()) {
+                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+            }
+        } catch (RuntimeException e) {
+            // ★★ 閉じる側も投げうる（PdfDocument#close は未検査例外を IO_FAILURE で包む）。
+            //   そのまま書くと、開いた後に投げた本当の失敗がそこで消える。
+            //   ★ 伝えるのは元の失敗である。閉じられなかったことは抑制例外として付ける
+            //   （OpenDocuments と同じ作法）。
+            try {
+                document.close();
+            } catch (RuntimeException closing) {
+                e.addSuppressed(closing);
+            }
+            throw e;
         }
         return document;
     }
@@ -697,10 +757,20 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
     }
 
+    /**
+     * 書き出す。
+     *
+     * <p><b>★★ 失敗は必ず {@link ErrorCode#IO_FAILURE} である。</b>ここで包まないと、
+     * 呼ぶ側の {@code catch} が拾って<b>その場の符号に塗り替える</b>——
+     * {@code rotate} なら「PDF として読み取れません」になり、
+     * <b>出力が書けなかっただけなのに入力のせいにされる</b>（#150）。
+     * 包んであれば {@link PdfjigException#wrapping} が素通しするので、
+     * <b>どの呼ぶ側を通っても符号は変わらない。</b>
+     */
     private static void save(PDDocument document, Path output) {
         try {
             document.save(output.toFile());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
     }

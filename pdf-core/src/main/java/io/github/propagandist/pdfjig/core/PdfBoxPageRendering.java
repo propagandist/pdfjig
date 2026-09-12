@@ -27,13 +27,20 @@ public final class PdfBoxPageRendering implements PageRendering {
         }
         PageRange.singlePage(pageNumber).validateAgainst(document.pageCount());
 
-        PDRectangle box = document.delegate().getPage(pageNumber - 1).getCropBox();
-        // ページが回転していても長辺の長さは変わらないため、回転角は考慮しなくてよい。
-        float longEdge = Math.max(box.getWidth(), box.getHeight());
-        if (longEdge <= 0f) {
-            throw new PdfjigException(ErrorCode.RENDERING_FAILED);
+        // ★★ 寸法を読むところも包む。ページツリーも CropBox も細工 PDF が決められるところであり、
+        //   PDFBox はそこで IOException ではない例外を投げる（#144 / #150）。
+        try {
+            PDRectangle box = document.delegate().getPage(pageNumber - 1).getCropBox();
+            // ページが回転していても長辺の長さは変わらないため、回転角は考慮しなくてよい。
+            float longEdge = Math.max(box.getWidth(), box.getHeight());
+            if (longEdge <= 0f) {
+                throw new PdfjigException(ErrorCode.RENDERING_FAILED);
+            }
+            return renderScaled(document, pageNumber, maxEdgePixels / longEdge);
+        } catch (RuntimeException e) {
+            // ★ 自分で分類した失敗は塗り替えない。wrapping が通す（PdfjigException）。
+            throw PdfjigException.wrapping(ErrorCode.RENDERING_FAILED, e);
         }
-        return renderScaled(document, pageNumber, maxEdgePixels / longEdge);
     }
 
     @Override
@@ -49,7 +56,10 @@ public final class PdfBoxPageRendering implements PageRendering {
     private static BufferedImage renderScaled(PdfDocument document, int pageNumber, float scale) {
         try {
             return new PDFRenderer(document.delegate()).renderImage(pageNumber - 1, scale, IMAGE_TYPE);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // ★★ ここは細工 PDF の全ページを通る。サムネイル一覧は開いた文書のすべてのページに
+            //   ついてこれを呼ぶので、docs/SECURITY.md「対象範囲」が名指しする脅威が
+            //   いちばん多く通る経路である（#150）。
             throw PdfjigException.wrapping(ErrorCode.RENDERING_FAILED, e);
         }
     }

@@ -29,7 +29,10 @@ public final class PdfBoxTextExtraction implements TextExtraction {
         PDFTextStripper stripper = newStripper();
         try {
             return stripper.getText(document.delegate());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // ★★ PDFBox は IOException ではない例外も投げる（#144 / #150）。フォント・色空間・
+            //   内容ストリームはどれも細工 PDF が決められるところであり、包まないと素の
+            //   未検査例外が pdf-core の外へ出る——呼ぶ側の分岐はどれも当たらない。
             throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
         }
     }
@@ -38,32 +41,37 @@ public final class PdfBoxTextExtraction implements TextExtraction {
     public List<PageText> extractByPage(PdfDocument document) {
         int pageCount = document.pageCount();
         PDFTextStripper stripper = newStripper();
-        List<PageText> pages = new ArrayList<>(pageCount);
+        // ★★ 入れ物を作るところも try の中である。pageCount が返すのは PDFBox が読んだ /Count
+        //   そのものなので、細工 PDF では負にも巨大にもなる——外に置くと、そこで投げる
+        //   IllegalArgumentException が素のまま出る（#150）。
         try {
+            List<PageText> pages = new ArrayList<>(pageCount);
             for (int pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
                 stripper.setStartPage(pageNumber);
                 stripper.setEndPage(pageNumber);
                 pages.add(new PageText(pageNumber, stripper.getText(document.delegate())));
             }
-        } catch (IOException e) {
+            return List.copyOf(pages);
+        } catch (IOException | RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
         }
-        return List.copyOf(pages);
     }
 
     @Override
     public List<PositionedText> extractWithPositions(PdfDocument document, int pageNumber) {
         PageRange.singlePage(pageNumber).validateAgainst(document.pageCount());
 
-        PositionCollector collector = configure(new PositionCollector());
-        collector.setStartPage(pageNumber);
-        collector.setEndPage(pageNumber);
+        // ★ 組み立ても try の中に置く。PositionCollector は PDFTextStripper を継承しており、
+        //   作るところでも設定するところでも向こうのコードが走る。
         try {
+            PositionCollector collector = configure(new PositionCollector());
+            collector.setStartPage(pageNumber);
+            collector.setEndPage(pageNumber);
             collector.getText(document.delegate());
-        } catch (IOException e) {
+            return List.copyOf(collector.collected);
+        } catch (IOException | RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
         }
-        return List.copyOf(collector.collected);
     }
 
     private static PDFTextStripper newStripper() {

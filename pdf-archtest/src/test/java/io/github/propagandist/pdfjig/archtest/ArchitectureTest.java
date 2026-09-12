@@ -11,9 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaCall;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaModifier;
+import com.tngtech.archunit.core.domain.TryCatchBlock;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.nio.file.Files;
@@ -60,6 +63,9 @@ class ArchitectureTest {
 
     /** 控えの在り処を運ぶ型。作ってよいのは、抱えているかどうかを知っている作業場所だけである。 */
     private static final String KEPT_EXCEPTION = "io.github.propagandist.pdfjig.desktop.ReplacedFileKeptException";
+
+    /** PDFBox のパッケージ。この前置詞で始まる型を呼ぶことが、向こうのコードを走らせることである。 */
+    private static final String PDFBOX = "org.apache.pdfbox";
 
     /** パスワードの持ち主。素の {@code char[]} を持ってよい唯一の型である。 */
     private static final String PASSWORD = "io.github.propagandist.pdfjig.core.Password";
@@ -120,8 +126,7 @@ class ArchitectureTest {
     @Test
     @DisplayName("PDFBox のルールが空振りしていない")
     void pdfboxRuleHasSubject() {
-        assertTrue(
-                dependenciesOn("org.apache.pdfbox") > 0, "PDFBox への依存が 1 つも無い。pdfboxMustNotLeakOutOfCore は緑でも何も守っていない");
+        assertTrue(dependenciesOn(PDFBOX) > 0, "PDFBox への依存が 1 つも無い。pdfboxMustNotLeakOutOfCore は緑でも何も守っていない");
     }
 
     @Test
@@ -132,7 +137,7 @@ class ArchitectureTest {
                 .resideOutsideOfPackage("..pdfjig.core..")
                 .should()
                 .dependOnClassesThat()
-                .resideInAnyPackage("org.apache.pdfbox..")
+                .resideInAnyPackage(PDFBOX + "..")
                 .because("PDFBox への依存は pdf-core に閉じる（CLAUDE.md リソース管理）")
                 .check(classes);
     }
@@ -625,6 +630,115 @@ class ArchitectureTest {
                 Set.of(PASSWORD + ".close()"),
                 unitsZeroingCharArrays(),
                 "char[] のゼロ埋めが Password の外で起きている。持ち主の型を通らない片づけは、" + "作った場所からは見えないので、二重に消すか、一度も消さないかになる（#146）");
+    }
+
+    /**
+     * PDFBox を直に呼ぶ公開の入口は、未検査例外を捕まえる {@code try} の中に置く。
+     *
+     * <p><b>★★ pdf-core の外へ出るのは {@code PdfjigException} だけである</b>——
+     * それを機械で見る（#150）。<b>#144 で分かったのは「どの型が外へ出るか」を縛る仕組みが
+     * どこにも無いことだった</b>。{@code pdfboxMustNotLeakOutOfCore} は<b>型の見え方</b>を
+     * 見ており、軸が違う——<b>PDFBox の例外が {@code Throwable} として飛び抜けるのは止められない。</b>
+     *
+     * <p><b>★★ #150 の本文は「ArchUnit は呼び出しを見るが、例外表は見ない」と書いていたが、
+     * それは誤りである</b>（2026-09-12 実測）。{@code JavaCodeUnit#getTryCatchBlocks()} は
+     * <b>捕まえる型と、{@code try} の中に在るアクセスの両方を持つ。</b>
+     *
+     * <p><b>★ 縛るのは公開の入口が直に呼ぶところだけである。</b>内側まで 1 つずつ包むと、
+     * 実測 128 か所が {@code try} だらけになる。<b>入口で包めば、そこから先で投げても外へは出ない</b>
+     * ——ただし<b>入口の {@code catch} が未検査も捕まえていればである</b>。
+     * <b>そこは縛れていない</b>（内側の呼び出しは「PDFBox への直の呼び出し」ではないので、
+     * この規則からは見えない）。
+     *
+     * <p><b>★ 禁止の形では書かない。</b>集合そのものを突き合わせる——
+     * <b>PDFBox を呼ぶ公開の入口が 1 つも無くなれば、下の対の検査が落ちる。</b>
+     */
+    @Test
+    @DisplayName("PDFBox を直に呼ぶ公開の入口は、未検査例外を捕まえる try の中にある")
+    void publicEntryPointsWrapPdfBox() {
+        assertEquals(
+                Set.of(),
+                publicPdfBoxCalls()
+                        .filter(call -> !isGuarded(call))
+                        .map(ArchitectureTest::describe)
+                        .collect(Collectors.toSet()),
+                "公開の入口が PDFBox を裸で呼んでいる。細工 PDF は IOException ではない例外を投げるので、"
+                        + "そこから素の未検査例外が pdf-core の外へ出る——呼ぶ側の分岐はどれも当たらない"
+                        + "（#144 / #150）");
+    }
+
+    @Test
+    @DisplayName("包みの規則が空振りしていない（公開の入口が実際に PDFBox を呼んでいる）")
+    void wrappingRuleHasSubject() {
+        assertTrue(
+                publicPdfBoxCalls().findAny().isPresent(),
+                "公開の入口から PDFBox への呼び出しが 1 つも無い。publicEntryPointsWrapPdfBox は" + "緑でも何も守っていない");
+    }
+
+    /**
+     * 公開クラスの公開メソッドとコンストラクタから、PDFBox を走らせる呼び出し。
+     *
+     * <p><b>★ フィールドの読み書きは数えない。</b>{@code PositionCollector} のような
+     * 継承した型では<b>自前のフィールドまで拾ってしまい</b>、あれは向こうのコードを走らせない
+     * ——{@code getCallsFromSelf} はメソッドとコンストラクタの呼び出しだけを返す。
+     */
+    private static Stream<JavaCall<?>> publicPdfBoxCalls() {
+        return classes.stream()
+                .filter(javaClass -> javaClass.getModifiers().contains(JavaModifier.PUBLIC))
+                .flatMap(javaClass -> javaClass.getCodeUnits().stream())
+                .filter(unit -> unit.getModifiers().contains(JavaModifier.PUBLIC))
+                .flatMap(unit -> unit.getCallsFromSelf().stream())
+                .filter(call -> isPdfBoxOwned(call.getTargetOwner()));
+    }
+
+    /** その呼び出しが、未検査例外を捕まえる {@code try} の中に在るか。 */
+    private static boolean isGuarded(JavaCall<?> call) {
+        return call.getOrigin().getTryCatchBlocks().stream()
+                .anyMatch(block -> catchesUnchecked(block)
+                        && block.getAccessesContainedInTryBlock().contains(call));
+    }
+
+    /** 表記は {@code 型.名前() -> PDFBox の型.名前}。 */
+    private static String describe(JavaCall<?> call) {
+        return call.getOriginOwner().getName() + "." + call.getOrigin().getName() + "() -> "
+                + call.getTargetOwner().getSimpleName() + "." + call.getName();
+    }
+
+    /**
+     * その型を呼ぶことが、PDFBox を呼ぶことになるか。
+     *
+     * <p><b>★ 継承した側も数える。</b>{@code PdfBoxTextExtraction} の
+     * {@code PositionCollector} は {@code PDFTextStripper} を継承しており、
+     * <b>そこへの呼び出しは静的型が pdfjig 側なので、パッケージだけで見ると素通りする</b>
+     * ——<b>走るのは向こうのコードである。</b>
+     */
+    private static boolean isPdfBoxOwned(JavaClass type) {
+        return isPdfBoxPackage(type)
+                || type.getAllRawSuperclasses().stream().anyMatch(ArchitectureTest::isPdfBoxPackage);
+    }
+
+    private static boolean isPdfBoxPackage(JavaClass type) {
+        return type.getPackageName().startsWith(PDFBOX);
+    }
+
+    /**
+     * その {@code catch} が未検査例外まで捕まえるか。
+     *
+     * <p><b>{@code IOException} だけでは足りない</b>——PDFBox は細工 PDF に対して
+     * {@code IllegalArgumentException} / {@code NegativeArraySizeException} /
+     * {@code ArrayIndexOutOfBoundsException} を投げる（#144 / #150）。
+     *
+     * <p><b>★★ {@code Throwable} を認めない。</b>認めると<b>人が 1 行も書いていない包みで
+     * 緑になる</b>——<b>javac は try-with-resources のために {@code catch java/lang/Throwable} を
+     * 自分で吐く</b>ので、資源を開ける公開メソッドはそれだけで通ってしまう
+     * （<b>2026-09-12 実測</b>。{@code PdfBoxPageOperations#merge} は人の手では
+     * {@code IOException} しか捕まえていないのに、合成された表で緑になっていた）。
+     * <b>見たいのは「書いた包み」であって「例外表の形」ではない。</b>
+     *
+     * <p><b>★ {@code Error} は見ない。</b>あちらを包むかは別の判断であり、#151 が持つ。
+     */
+    private static boolean catchesUnchecked(TryCatchBlock block) {
+        return block.getCaughtThrowables().stream().anyMatch(caught -> caught.isEquivalentTo(RuntimeException.class));
     }
 
     /**
