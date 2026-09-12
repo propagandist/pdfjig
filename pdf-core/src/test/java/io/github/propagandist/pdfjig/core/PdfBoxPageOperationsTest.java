@@ -197,6 +197,25 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("★★ 警告の受け手が投げた失敗を、包みが飲まない")
+        void callerFailureIsNotWrapped() throws Exception {
+            // ★ オーナーパスワードだけの文書を使う。パスワードなしで開けて、かつ暗号化されて
+            //   いるので ENCRYPTION_NOT_PROPAGATED が出る——ユーザーパスワードの要る文書は
+            //   開く前に PASSWORD_REQUIRED で落ちて、警告に届かない。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
+            Path output = tempDir.resolve("merged.pdf");
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                throw new IllegalStateException("受け手が投げる");
+            });
+
+            // ★★ 包みの中で受け手を動かしていた間は、これが「ファイルの読み書きに失敗しました」
+            //   に化けていた——呼ぶ側の失敗が入力のせいにされる（#178）。
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> failing.merge(List.of(encrypted), output, MergeOptions.defaults()));
+        }
+
+        @Test
         @DisplayName("出力名が 1 つでも既存なら、何も書かずに失敗する")
         void writesNothingWhenAnyOutputExists() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 3);

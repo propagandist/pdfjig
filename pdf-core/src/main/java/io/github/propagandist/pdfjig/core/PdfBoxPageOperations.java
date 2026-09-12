@@ -55,6 +55,9 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireSupported(options.encryptionPropagation());
         requireAbsent(output);
 
+        // ★★ 包みの中では溜めるだけにする。ここで WarningListener を動かすと、呼ぶ側が
+        //   投げた失敗を下の catch が飲む（#178）。流すのは try を抜けてからである。
+        List<Warning> collected = new ArrayList<>();
         try (OpenDocuments sources = new OpenDocuments();
                 PDDocument merged = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
@@ -62,13 +65,13 @@ public final class PdfBoxPageOperations implements PageOperations {
             for (Path input : inputs) {
                 // appendDocument は入力のページを参照でつなぐ。保存が終わるまで
                 // 入力を閉じられないため、まとめて開いたまま保持する。
-                PdfDocument source = sources.open(input);
+                PdfDocument source = sources.open(input, collected);
                 if (information == null) {
                     information = detachedInformationOf(source);
                 }
                 merger.appendDocument(merged, source.delegate());
             }
-            applyInformation(merged, information, inputs.size() > 1);
+            applyInformation(merged, information, inputs.size() > 1, collected);
             save(merged, output);
         } catch (IOException | RuntimeException e) {
             // ★★ 未検査例外も捕まえる。appendDocument は入力のページツリーを辿るので、
@@ -81,6 +84,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             //   包みの外へ出す必要がある（#178）。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
+        report(collected);
         return output;
     }
 
@@ -92,7 +96,8 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
 
         List<PageRange> ranges;
-        try (PdfDocument source = open(input)) {
+        List<Warning> collected = new ArrayList<>();
+        try (PdfDocument source = open(input, collected)) {
             ranges = resolveRanges(strategy, source.pageCount());
         }
         List<Path> outputs = splitOutputPaths(input, outputDir, ranges.size());
@@ -120,16 +125,19 @@ public final class PdfBoxPageOperations implements PageOperations {
             //   混じる——包むと、呼ぶ側の失敗が入力のせいに化ける（writeFromSingleSource。#178）。
             throw e;
         }
+        report(collected);
         return List.copyOf(outputs);
     }
 
     @Override
     public Path reorder(Path input, List<Integer> newOrder, Path output) {
         requireAbsent(output);
-        try (PdfDocument source = open(input)) {
+        List<Warning> collected = new ArrayList<>();
+        try (PdfDocument source = open(input, collected)) {
             requirePermutation(newOrder, source.pageCount());
             writeFromSingleSource(source, selectionsOf(newOrder), output);
         }
+        report(collected);
         return output;
     }
 
@@ -145,6 +153,8 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
         requireAbsent(output);
 
+        // ★★ 包みの中では溜めるだけにする（merge と同じ理由。#178）。
+        List<Warning> collected = new ArrayList<>();
         // 結合では保存が終わるまで入力を閉じられない。まとめて開いたまま保持する。
         try (OpenDocuments sources = new OpenDocuments()) {
             List<PdfDocument> documents = new ArrayList<>(inputs.size());
@@ -152,9 +162,10 @@ public final class PdfBoxPageOperations implements PageOperations {
                 documents.add(sources.openQuietly(input));
             }
             requireSelectable(pages, documents);
-            warnAboutContributing(documents, pages);
-            write(inputs, documents, pages, output);
+            warnAboutContributing(documents, pages, collected);
+            write(inputs, documents, pages, output, collected);
         }
+        report(collected);
         return output;
     }
 
@@ -201,7 +212,8 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
         requireAbsent(output);
 
-        try (PdfDocument source = open(input)) {
+        List<Warning> collected = new ArrayList<>();
+        try (PdfDocument source = open(input, collected)) {
             int pageCount = source.pageCount();
             rotations
                     .keySet()
@@ -229,23 +241,27 @@ public final class PdfBoxPageOperations implements PageOperations {
                 throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
             }
         }
+        report(collected);
         return output;
     }
 
     @Override
     public Path extractPages(Path input, PageRange range, Path output) {
         requireAbsent(output);
-        try (PdfDocument source = open(input)) {
+        List<Warning> collected = new ArrayList<>();
+        try (PdfDocument source = open(input, collected)) {
             range.validateAgainst(source.pageCount());
             writeRange(source, range, output);
         }
+        report(collected);
         return output;
     }
 
     @Override
     public Path deletePages(Path input, PageRange range, Path output) {
         requireAbsent(output);
-        try (PdfDocument source = open(input)) {
+        List<Warning> collected = new ArrayList<>();
+        try (PdfDocument source = open(input, collected)) {
             int pageCount = source.pageCount();
             range.validateAgainst(pageCount);
 
@@ -258,6 +274,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             writeFromSingleSource(source, selectionsOf(remaining), output);
         }
+        report(collected);
         return output;
     }
 
@@ -280,12 +297,17 @@ public final class PdfBoxPageOperations implements PageOperations {
      * {@link PageReferences} で取り除いてから保存する。これを怠ると、
      * 取り除いたはずのページが参照から辿れて出力に残る。
      */
-    private void write(List<Path> inputs, List<PdfDocument> sources, List<PageSelection> pages, Path output) {
+    private void write(
+            List<Path> inputs,
+            List<PdfDocument> sources,
+            List<PageSelection> pages,
+            Path output,
+            List<Warning> collected) {
         int single = singleSourceIndexOf(pages);
         if (single >= 0) {
             writeFromSingleSource(sources.get(single), pages, output);
         } else {
-            writeByMerging(inputs, pages, output);
+            writeByMerging(inputs, pages, output, collected);
         }
     }
 
@@ -308,7 +330,8 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <p>寄与する入力が複数あれば<b>その数だけ伝える</b>。1 つにまとめない——
      * どれが暗号化されていたのかは、数が合っていないと利用者から辿れない。
      */
-    private void warnAboutContributing(List<PdfDocument> documents, List<PageSelection> pages) {
+    private static void warnAboutContributing(
+            List<PdfDocument> documents, List<PageSelection> pages, List<Warning> collected) {
         Set<Integer> contributing = new TreeSet<>();
         for (PageSelection selection : pages) {
             contributing.add(selection.sourceIndex());
@@ -316,10 +339,10 @@ public final class PdfBoxPageOperations implements PageOperations {
         for (int index : contributing) {
             PdfDocument document = documents.get(index);
             if (document.encrypted()) {
-                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+                collected.add(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {
-                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+                collected.add(Warning.SIGNATURE_INVALIDATED);
             }
         }
     }
@@ -385,7 +408,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * <p>同じページを複数回出す場合は、その入力を回数ぶん別々に切り詰めて足す。
      */
-    private void writeByMerging(List<Path> inputs, List<PageSelection> pages, Path output) {
+    private void writeByMerging(List<Path> inputs, List<PageSelection> pages, Path output, List<Warning> collected) {
         try (OpenDocuments copies = new OpenDocuments();
                 PDDocument target = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
@@ -403,7 +426,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                     if (information == null) {
                         information = detachedInformationOf(copy);
                     }
-                    trimTo(copy, wanted);
+                    trimTo(copy, wanted, collected);
                     merger.appendDocument(target, copy.delegate());
 
                     for (int i = 0; i < wanted.size(); i++) {
@@ -425,7 +448,8 @@ public final class PdfBoxPageOperations implements PageOperations {
                                     .mapToInt(PageSelection::sourceIndex)
                                     .distinct()
                                     .count()
-                            > 1);
+                            > 1,
+                    collected);
 
             target.setAllSecurityToBeRemoved(true);
             save(target, output);
@@ -466,7 +490,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     /** 文書を、指定のページだけに切り詰める。宛先を失った参照もここで落とす。 */
-    private void trimTo(PdfDocument document, List<Integer> wanted) {
+    private static void trimTo(PdfDocument document, List<Integer> wanted, List<Warning> collected) {
         PDDocument delegate = document.delegate();
         PageReferences.fixInherited(delegate.getPages());
 
@@ -480,7 +504,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         replacePages(delegate, kept);
 
         if (PageReferences.removeDangling(delegate)) {
-            warnings.onWarning(Warning.DANGLING_REFERENCES_REMOVED);
+            collected.add(Warning.DANGLING_REFERENCES_REMOVED);
         }
         PageReferences.discard(all, kept);
     }
@@ -545,10 +569,11 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * @param mixed 出どころが 2 つ以上あるか。あるなら黙っておかない
      */
-    private void applyInformation(PDDocument merged, PDDocumentInformation information, boolean mixed) {
+    private static void applyInformation(
+            PDDocument merged, PDDocumentInformation information, boolean mixed, List<Warning> collected) {
         merged.setDocumentInformation(information == null ? new PDDocumentInformation() : information);
         if (mixed) {
-            warnings.onWarning(Warning.METADATA_FROM_FIRST_INPUT);
+            collected.add(Warning.METADATA_FROM_FIRST_INPUT);
         }
     }
 
@@ -585,14 +610,29 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * <p><b>{@code pdf-desktop} の {@code DocumentSession#wrap} が同じ形を持っている。</b>
      */
-    private PdfDocument open(Path input) {
+    /**
+     * 溜めたものを利用者へ伝える。
+     *
+     * <p><b>★★ 包みの外で呼ぶ。</b>{@code WarningListener} を動かすのは<b>呼ぶ側のコードであり</b>、
+     * <b>包みの中で走らせると、そこで投げた失敗を包みが飲む</b>——
+     * 「ファイルの読み書きに失敗しました」に化け、<b>呼ぶ側の失敗が入力のせいにされる</b>
+     * （#178。優先順位 2）。<b>型では区別が付かないので、走らせる場所で分ける。</b>
+     *
+     * <p><b>★ 失敗したときは流れない。</b>例外が先に外へ出るので、ここへ来ない
+     * ——<b>いまも同じである</b>（画面は例外を優先して出す）。
+     */
+    private void report(List<Warning> collected) {
+        collected.forEach(warnings::onWarning);
+    }
+
+    private PdfDocument open(Path input, List<Warning> collected) {
         PdfDocument document = PdfDocument.open(input);
         try {
             if (document.encrypted()) {
-                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+                collected.add(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {
-                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+                collected.add(Warning.SIGNATURE_INVALIDATED);
             }
         } catch (RuntimeException e) {
             // ★★ 閉じる側も投げうる（PdfDocument#close は未検査例外を IO_FAILURE で包む）。
@@ -785,8 +825,8 @@ public final class PdfBoxPageOperations implements PageOperations {
 
         private final List<PdfDocument> documents = new ArrayList<>();
 
-        PdfDocument open(Path path) {
-            return keep(PdfBoxPageOperations.this.open(path));
+        PdfDocument open(Path path, List<Warning> collected) {
+            return keep(PdfBoxPageOperations.this.open(path, collected));
         }
 
         PdfDocument openQuietly(Path path) {
