@@ -137,6 +137,63 @@ class PdfBoxPageOperationsTest {
                                     () -> operations.merge(List.of(input), tempDir.resolve("merged.pdf"), options))
                             .errorCode());
         }
+
+        @Test
+        @DisplayName("★★ 警告の受け手が投げた失敗を、包みが飲まない")
+        void callerFailureIsNotWrapped() throws Exception {
+            // ★ オーナーパスワードだけの文書を使う。パスワードなしで開けて、かつ暗号化されて
+            //   いるので ENCRYPTION_NOT_PROPAGATED が出る——ユーザーパスワードの要る文書は
+            //   開く前に PASSWORD_REQUIRED で落ちて、警告に届かない。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
+            Path output = tempDir.resolve("merged.pdf");
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                throw new IllegalStateException("受け手が投げる");
+            });
+
+            // ★★ 包みの中で受け手を動かしていた間は、これが「ファイルの読み書きに失敗しました」
+            //   に化けていた——呼ぶ側の失敗が入力のせいにされる（#178）。
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> failing.merge(List.of(encrypted), output, MergeOptions.defaults()));
+        }
+
+        @Test
+        @DisplayName("★★ 通知で失敗しても、書けた出力は消さない")
+        void outputSurvivesAFailingListener() throws Exception {
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
+            Path output = tempDir.resolve("merged.pdf");
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                throw new IllegalStateException("受け手が投げる");
+            });
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> failing.merge(List.of(encrypted), output, MergeOptions.defaults()));
+
+            // ★★ 通知に失敗したことは、書き出しに失敗したことではない（優先順位 1）。
+            //   呼ぶ側には自分が投げた失敗がそのまま届くので、出力が在ることは分かる。
+            assertTrue(Files.exists(output), "書けた出力を消している");
+        }
+
+        @Test
+        @DisplayName("★★ 複数の入力を組み立てる経路でも、包みが飲まない")
+        void callerFailureIsNotWrappedWhenMerging() throws Exception {
+            // ★★ 平文の入力を 2 つ使う。暗号化されていると warnAboutContributing（包みの外）が
+            //   先に投げてしまい、writeByMerging の中まで届かない——それでは merge 側と同じ
+            //   ものしか縛れず、writeByMerging の report を包みの中へ戻しても緑になる。
+            //   平文なら METADATA_FROM_FIRST_INPUT が applyInformation（包みの中）から出る。
+            Path first = TestPdfs.plain(tempDir.resolve("a.pdf"), 1);
+            Path second = TestPdfs.plain(tempDir.resolve("b.pdf"), 1);
+            Path output = tempDir.resolve("assembled.pdf");
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                throw new IllegalStateException("受け手が投げる");
+            });
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> failing.assemble(
+                            List.of(first, second), List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)), output));
+        }
     }
 
     @Nested
