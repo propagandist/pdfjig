@@ -70,6 +70,9 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             applyInformation(merged, information, inputs.size() > 1);
             save(merged, output);
+        } catch (CallerFailure e) {
+            // ★★ 呼ぶ側が投げたものは包まない。剥がしてそのまま投げ直す（#178）。
+            throw e.carried();
         } catch (IOException | RuntimeException e) {
             // ★★ 未検査例外も捕まえる。appendDocument は入力のページツリーを辿るので、
             //   そこは細工 PDF が決められるところである（#144 / #150）。
@@ -316,10 +319,10 @@ public final class PdfBoxPageOperations implements PageOperations {
         for (int index : contributing) {
             PdfDocument document = documents.get(index);
             if (document.encrypted()) {
-                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+                warn(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {
-                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+                warn(Warning.SIGNATURE_INVALIDATED);
             }
         }
     }
@@ -367,7 +370,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         applyRotations(ordered, pages);
 
         if (PageReferences.removeDangling(document)) {
-            warnings.onWarning(Warning.DANGLING_REFERENCES_REMOVED);
+            warn(Warning.DANGLING_REFERENCES_REMOVED);
         }
         // 参照を畳んだ後に、出力に含めないページの中身を捨てる。
         // これは利用者に伝えることではない——警告は「しおりやリンクを落とした」ことを指す。
@@ -429,6 +432,9 @@ public final class PdfBoxPageOperations implements PageOperations {
 
             target.setAllSecurityToBeRemoved(true);
             save(target, output);
+        } catch (CallerFailure e) {
+            // ★★ 呼ぶ側が投げたものは包まない。剥がしてそのまま投げ直す（#178）。
+            throw e.carried();
         } catch (IOException | RuntimeException e) {
             // ★★ merge と同じ形にそろえる。ページツリーも属性も入力から来るので、
             //   PDFBox は IOException ではない例外を投げる（#144 / #150）。
@@ -480,7 +486,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         replacePages(delegate, kept);
 
         if (PageReferences.removeDangling(delegate)) {
-            warnings.onWarning(Warning.DANGLING_REFERENCES_REMOVED);
+            warn(Warning.DANGLING_REFERENCES_REMOVED);
         }
         PageReferences.discard(all, kept);
     }
@@ -548,7 +554,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     private void applyInformation(PDDocument merged, PDDocumentInformation information, boolean mixed) {
         merged.setDocumentInformation(information == null ? new PDDocumentInformation() : information);
         if (mixed) {
-            warnings.onWarning(Warning.METADATA_FROM_FIRST_INPUT);
+            warn(Warning.METADATA_FROM_FIRST_INPUT);
         }
     }
 
@@ -575,6 +581,22 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     /**
+     * 利用者へ伝える。
+     *
+     * <p><b>★★ 呼ぶ側が投げたら印を付けて投げ直す。</b>ここで走るのは呼ぶ側のコードであり、
+     * <b>包みの中で素のまま投げると「ファイルの読み書きに失敗しました」に化ける</b>
+     * ——<b>呼ぶ側の失敗が入力のせいにされる</b>（#178。優先順位 2）。
+     * <b>型では区別が付かないので、分かる側が印を付ける。</b>
+     */
+    private void warn(Warning warning) {
+        try {
+            warnings.onWarning(warning);
+        } catch (RuntimeException e) {
+            throw new CallerFailure(e);
+        }
+    }
+
+    /**
      * 入力を開き、暗号化や電子署名があれば警告する。
      *
      * <p><b>★★ 検めるところで投げたら、開いたものを閉じてから投げ直す</b>（#150）。
@@ -589,10 +611,10 @@ public final class PdfBoxPageOperations implements PageOperations {
         PdfDocument document = PdfDocument.open(input);
         try {
             if (document.encrypted()) {
-                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+                warn(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {
-                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+                warn(Warning.SIGNATURE_INVALIDATED);
             }
         } catch (RuntimeException e) {
             // ★★ 閉じる側も投げうる（PdfDocument#close は未検査例外を IO_FAILURE で包む）。

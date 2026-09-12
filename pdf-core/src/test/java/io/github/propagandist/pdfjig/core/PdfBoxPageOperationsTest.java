@@ -202,7 +202,10 @@ class PdfBoxPageOperationsTest {
             // ★★ merge の包みの中で onWarning を呼んでいる（sources.open 経由）。
             //   そこで走るのは呼ぶ側のコードであり、包むと「ファイルの読み書きに失敗しました」に
             //   化ける——呼ぶ側の失敗が入力のせいにされる（#178）。
-            Path encrypted = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "pw");
+            // ★ オーナーパスワードだけの文書を使う。パスワードなしで開けて、かつ暗号化されて
+            //   いるので ENCRYPTION_NOT_PROPAGATED が出る——ユーザーパスワードの要る文書は
+            //   開く前に PASSWORD_REQUIRED で落ちて、警告に届かない。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
             Path output = tempDir.resolve("merged.pdf");
             PageOperations failing = new PdfBoxPageOperations(warning -> {
                 throw new IllegalStateException("受け手が投げる");
