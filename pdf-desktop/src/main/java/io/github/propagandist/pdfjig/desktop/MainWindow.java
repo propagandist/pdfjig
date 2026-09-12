@@ -3,12 +3,12 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageSelection;
+import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -464,34 +464,20 @@ public final class MainWindow {
      * 起きるものであり、開き直しからやらせる理由がない。取り消せば終わる。
      */
     private void askPasswordAndOpen(Path path, boolean retry) {
-        Optional<char[]> entered = PasswordPrompt.ask(stage, path, retry);
+        Optional<Password> entered = PasswordPrompt.ask(stage, path, retry);
         if (entered.isEmpty()) {
             return;
         }
-        char[] password = entered.get();
-        boolean started = false;
-        try {
-            started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
-                if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
-                    askPasswordAndOpen(path, true);
-                } else {
-                    messages.failure(failure);
-                }
-            });
-        } finally {
-            if (!started) {
-                // ★★ 走り出さなかったときは仕事そのものが呼ばれない。ゼロ埋めはその中でしか
-                //   起きないので、ここで消す（INV-5）。入力欄から出た平文を置き去りにしない。
-                //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
-                //   ——代入が済まないので、if だけでは素通りする（#145）。
-                //   ★★ ここで消してよい根拠は、投げた時点で誰もこの配列を読んでいないことである。
-                //   拠っているのは BackgroundTasks ではなく、既定の始め方（startWorker）である
-                //   ——Thread#start が投げたなら本体は 1 行も走っていない。
-                //   ★ 差し替えた実行係が「渡してから投げる」なら、この前提は成り立たない。
-                //   run の @throws にその条件を書いてある。
-                Arrays.fill(password, '\0');
+        // ★★ 持ち主ごと渡す。走り出したら仕事の枠が閉じ、走り出さなかったら向こうが閉じる
+        //   ——ここには片づけを書く場所が無い（BackgroundTasks#run。#146）。
+        Password password = entered.get();
+        tasks.run(password, () -> DocumentSession.open(path, password), this::adopt, failure -> {
+            if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
+                askPasswordAndOpen(path, true);
+            } else {
+                messages.failure(failure);
             }
-        }
+        });
     }
 
     /**
@@ -641,7 +627,7 @@ public final class MainWindow {
                 //   ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
                 //   ——代入が済まないので、if だけでは素通りする（#145 と同じ形）。
                 //   ★ ここは markSaved が済んだ後である。印を立て損ねると、押せてしまう。
-                //   ★ Arrays.fill と違い、これは投げうる（束縛が連なり、状態行を組み直す）。
+                //   ★ Password#close と違い、これは投げうる（束縛が連なり、状態行を組み直す）。
                 //   投げれば飛んでいる失敗を置き換えるが、倒れる先は押せなくなる側なので受ける。
                 markStale();
             }
@@ -774,13 +760,14 @@ public final class MainWindow {
 
     /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
     private void addWithPassword(Path path, boolean retry) {
-        Optional<char[]> entered = PasswordPrompt.ask(stage, path, retry);
+        Optional<Password> entered = PasswordPrompt.ask(stage, path, retry);
         if (entered.isEmpty()) {
             return;
         }
-        char[] password = entered.get();
-        try {
-            // この配列は DocumentSession.add の中でゼロ埋めされる。
+        // ★★ ここは同じスレッドの中で終わるので、持ち主のまま閉じる。中まで届かずに投げることが
+        //   あり（session は null になりうるし、窓を挟んだ後の検め直しを足せば早く戻る経路も
+        //   増える）、そこを通ってもこの close が消す（INV-5。#145）。
+        try (Password password = entered.get()) {
             session.add(path, password);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
@@ -788,13 +775,6 @@ public final class MainWindow {
             } else {
                 messages.failure(e);
             }
-        } finally {
-            // ★★ 中まで届かずに投げることがある（session は null になりうるし、窓を挟んだ後の
-            //   検め直しを足せば早く戻る経路も増える）。そこを通ってもゼロ埋めされるように、
-            //   持ち主をここに置く（INV-5。#145）。★ 二重に消しても害は無い。
-            //   ★ askPasswordAndOpen が条件付きで消すのは、あちらが持ち主を背景スレッドへ渡すからである
-            //   ——ここは同じスレッドの中で終わるので、無条件でよい。
-            Arrays.fill(password, '\0');
         }
     }
 

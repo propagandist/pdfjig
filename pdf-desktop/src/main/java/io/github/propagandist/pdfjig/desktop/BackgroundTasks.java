@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.Password;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -23,10 +24,14 @@ import javafx.concurrent.Task;
  * <b>断ったことは画面に出さず、記録にだけ残す</b>（{@link LogEvent#OPERATION_REFUSED}）——
  * <b>利用者に打つ手は無い。</b>
  *
- * <p><b>★★ 断ったことは呼ぶ側へ返す</b>（{@link #run} の戻り値）。
+ * <p><b>★★ 断ったことは呼ぶ側へ返す</b>（{@link #run(Supplier, Consumer, Consumer)} の戻り値）。
  * <b>void にすると、頼んだ側は「始まった」と「捨てられた」を区別できない</b>——
- * <b>始まる前に済ませた後始末</b>（パスワードのゼロ埋め、覚えたフォルダ）<b>が宙に浮き、
+ * <b>始まる前に済ませた後始末</b>（覚えたフォルダ）<b>が宙に浮き、
  * 走った前提で進む経路</b>（{@code MainWindow#reopenAt}）<b>が黙って壊れる。</b>
+ *
+ * <p><b>★★ 片づけるものは、戻り値ではなく口で受ける</b>（{@link #run(Password, Supplier,
+ * Consumer, Consumer)}。#146）——<b>「走り出したか」を見て消す形は、呼ぶ側に書き忘れる場所を
+ * 残す。</b>3 度破れたのはそこである（#135 / #144 / #145）。
  *
  * <p><b>★ 書き込みできる口を外へ出さない。</b>{@link #busy()} が返すのは読み取り専用であり、
  * <b>立てるのも下ろすのもここだけ</b>である。誰かが外から下ろせると、
@@ -53,7 +58,8 @@ final class BackgroundTasks {
      *
      * <p><b>数えていない。真偽 1 つでは 2 つ以上を表せない</b>——重なれば<b>先に終わったほうが
      * 下ろす</b>ので、まだ書いている最中に操作が通る。<b>数える形にはしない。</b>
-     * この道具に 2 本同時に走らせたい仕事は 1 つも無く、{@link #run} が 2 本目を断るので、
+     * この道具に 2 本同時に走らせたい仕事は 1 つも無く、
+     * {@link #run(Supplier, Consumer, Consumer)} が 2 本目を断るので、
      * <b>表す必要のある状態が 2 つしかない</b>（#114）。
      */
     private final ReadOnlyBooleanWrapper busy = new ReadOnlyBooleanWrapper(false);
@@ -127,8 +133,11 @@ final class BackgroundTasks {
      *
      * <p><b>★ 既に走っていれば、何もせずに戻る</b>（#114）。受けたふりをして待たせる形は採らない
      * ——<b>待たせると、頼んだときの前提（並び・出どころ）が変わった後に走り出す。</b>
-     * <b>断ったときは {@code work} を 1 度も呼ばない</b>ので、
-     * <b>仕事の中で片づける約束のもの（パスワードのゼロ埋め）は呼ぶ側が片づけること。</b>
+     * <b>断ったときは {@code work} を 1 度も呼ばない。</b>
+     *
+     * <p><b>★★ 片づけるものを抱えた仕事は、こちらではなく {@link #run(Password, Supplier,
+     * Consumer, Consumer)} へ渡すこと</b>——<b>走り出したかどうかで持ち主が変わり、
+     * それを知っているのはここだけである。</b>
      *
      * @param work        バックグラウンドで行う仕事
      * @param onSucceeded 成功したときに JavaFX スレッドで呼ばれる
@@ -138,11 +147,9 @@ final class BackgroundTasks {
      * @throws RuntimeException 始め方が投げたとき、そのまま投げ直す。<b>★ {@code Error} も同じく
      *                          投げ直す</b>——既定の始め方で現に起きるのは
      *                          {@code OutOfMemoryError}（スレッドを作れない）のほうである。
-     *                          <b>★★ このときも {@code work} は 1 度も呼ばれていない</b>ので、
-     *                          <b>呼ぶ側の片づけは {@code if (!started)} ではなく
-     *                          {@code finally} に置くこと</b>——戻り値が返らない（#145）。
+     *                          <b>★★ このときも {@code work} は 1 度も呼ばれていない。</b>
      *                          <b>★★ 差し替える始め方は、渡した後に投げてはならない</b>
-     *                          ——渡した後に投げると、呼ぶ側の片づけが、走り出した仕事と同じものを
+     *                          ——渡した後に投げると、片づけが、走り出した仕事と同じものを
      *                          同時に触ることになる
      */
     <T> boolean run(Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
@@ -161,6 +168,10 @@ final class BackgroundTasks {
         task.setOnFailed(event -> finish(() -> onFailed.accept(task.getException())));
         // ★ 取り消しでも下ろす。いまは誰も取り消さないが、下ろす経路が 2 つしか無い形にしておくと、
         //   取り消しを足した日に「進行中のまま二度と戻らない」を作る（#114）。
+        //   ★★ 取り消しを足す日は、持ち主の片づけもここで考えること（run(Password, …)）。
+        //     走り出す前に取り消されると call が呼ばれず、仕事の枠が閉じない——平文が残る。
+        //     ここで閉じる形にはできない。走っている最中の取り消しでは call と並走するので、
+        //     読んでいる最中に消すことになる（#146）。
         task.setOnCancelled(event -> finish(() -> {}));
 
         busy.set(true);
@@ -176,6 +187,57 @@ final class BackgroundTasks {
             throw e;
         }
         return true;
+    }
+
+    /**
+     * 片づけるものを抱えた仕事を走らせる。
+     *
+     * <p><b>★★ 持ち主ごと渡す。</b>走り出したら仕事の枠が閉じ、走り出さなかったらここが閉じる
+     * ——<b>「走り出したか」を知っているのはここだけである</b>（#146）。
+     * <b>呼ぶ側は片づけを 1 行も書かない</b>——<b>書く場所が無ければ、書き忘れようが無い。</b>
+     *
+     * <p><b>★ {@link Password} で受けているのは、{@code close} が投げないことが型から分かる</b>
+     * ためである。{@link AutoCloseable} で受けると<b>片づけが投げうる型まで通り</b>、
+     * それは本当の失敗を置き換える。
+     *
+     * @param owned       仕事に渡すもの。<b>どちらかが必ず閉じる</b>
+     * @param work        バックグラウンドで行う仕事
+     * @param onSucceeded 成功したときに JavaFX スレッドで呼ばれる
+     * @param onFailed    失敗したときに JavaFX スレッドで呼ばれる
+     * @param <T>         仕事の結果
+     * <p><b>★★ 受け取った仕事を捨てる実行係には渡せない。</b>閉じるのは
+     * <b>断ったとき・始め方が投げたとき・仕事が終わったとき</b>の 3 つだけなので、
+     * <b>受け取っておいて一度も実行しない実行係には、閉じる契機がそもそも訪れない</b>
+     * ——平文が残る（INV-5）。<b>これは持ち主に固有の穴ではない</b>——
+     * 同じ実行係の下では {@link #busy()} も下りず、<b>門が二度と開かない</b>（#114）。
+     * <b>捨てたことを知る手段が無いので、機械では縛れない。</b>既定の始め方
+     * （{@link #startWorker}）とテストの実行係は、どちらも必ず 1 度実行する。
+     *
+     * @return 走り出したなら {@code true}。断ったなら {@code false}
+     * @throws RuntimeException {@link #run(Supplier, Consumer, Consumer)} と同じ。
+     *                          <b>投げる前に {@code owned} を閉じてある</b>
+     */
+    <T> boolean run(Password owned, Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
+        boolean started = false;
+        try {
+            started = run(
+                    () -> {
+                        try (owned) {
+                            return work.get();
+                        }
+                    },
+                    onSucceeded,
+                    onFailed);
+            return started;
+        } finally {
+            // ★★ finally で見る。断られる（false）だけでなく、始め方が投げることもある
+            //   ——代入が済まないので、if だけでは素通りする（#145）。
+            //   ★ ここで閉じてよい根拠は、投げた時点で仕事が 1 行も走っていないことである
+            //   （上の @throws）。★ 二重に閉じても害は無い。
+            if (!started) {
+                owned.close();
+            }
+        }
     }
 
     /**

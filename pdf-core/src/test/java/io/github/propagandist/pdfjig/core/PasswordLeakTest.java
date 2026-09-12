@@ -17,6 +17,9 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>パスワードが例外メッセージ・スタックトレースに載らないことを明示的に確かめる。
  * PDFBox の例外をそのまま再スローすると、この保証は簡単に壊れる。
+ *
+ * <p><b>あわせて、開く経路のどれを通っても枠を出れば消えていることを見る。</b>
+ * {@code open} は渡された秘密を読むだけであり、<b>消すのは作った場所である</b>（#146）。
  */
 class PasswordLeakTest {
 
@@ -39,7 +42,10 @@ class PasswordLeakTest {
     void exceptionMustNotRevealAnyPassword() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
 
-        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, WRONG.toCharArray()));
+        PdfjigException thrown;
+        try (Password password = Password.copyOf(WRONG)) {
+            thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
+        }
 
         assertEquals(ErrorCode.INVALID_PASSWORD, thrown.errorCode());
 
@@ -53,7 +59,10 @@ class PasswordLeakTest {
     void causeMustNotBeChained() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
 
-        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, WRONG.toCharArray()));
+        PdfjigException thrown;
+        try (Password password = Password.copyOf(WRONG)) {
+            thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
+        }
 
         assertEquals(null, thrown.getCause(), "原因例外を連結してはならない");
         assertEquals(
@@ -61,61 +70,75 @@ class PasswordLeakTest {
     }
 
     @Test
-    @DisplayName("open に渡した char[] は失敗時もゼロ埋めされる")
-    void passwordArrayIsZeroedOnFailure() throws Exception {
+    @DisplayName("open は渡された秘密を消さない（消すのは作った場所である）")
+    void openDoesNotEraseWhatItWasGiven() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
-        char[] password = WRONG.toCharArray();
+        char[] raw = CORRECT.toCharArray();
 
-        assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
-
-        assertArrayEquals(new char[password.length], password, "失敗時もゼロ埋めすること");
-    }
-
-    @Test
-    @DisplayName("open に渡した char[] は成功時もゼロ埋めされる")
-    void passwordArrayIsZeroedOnSuccess() throws Exception {
-        Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
-        char[] password = CORRECT.toCharArray();
-
-        try (PdfDocument document = PdfDocument.open(pdf, password)) {
+        try (Password password = Password.of(raw);
+                PdfDocument document = PdfDocument.open(pdf, password)) {
             assertEquals(1, document.pageCount());
             assertEquals(true, document.encrypted());
+            // ★★ 開いた後もまだ読める。ここで消す形にすると、片づけが 2 か所になり、
+            //   どちらが持ち主かを註でしか書けなくなる（#146）。
+            assertArrayEquals(CORRECT.toCharArray(), raw, "open は読むだけである");
         }
 
-        assertArrayEquals(new char[password.length], password, "成功時もゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "枠を出たら消えていること");
     }
 
     @Test
-    @DisplayName("読めないファイルに渡した char[] もゼロ埋めされる")
-    void passwordArrayIsZeroedWhenFileCannotBeRead() {
-        Path missing = tempDir.resolve("does-not-exist.pdf");
-        char[] password = CORRECT.toCharArray();
+    @DisplayName("パスワードが誤っていた経路でも、枠を出れば消えている")
+    void passwordIsZeroedAfterFailure() throws Exception {
+        Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
+        char[] raw = WRONG.toCharArray();
 
-        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, password));
+        try (Password password = Password.of(raw)) {
+            assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
+        }
+
+        assertArrayEquals(new char[raw.length], raw, "失敗した経路でもゼロ埋めすること");
+    }
+
+    @Test
+    @DisplayName("読めないファイルに渡した経路でも、枠を出れば消えている")
+    void passwordIsZeroedWhenFileCannotBeRead() {
+        Path missing = tempDir.resolve("does-not-exist.pdf");
+        char[] raw = CORRECT.toCharArray();
+
+        PdfjigException thrown;
+        try (Password password = Password.of(raw)) {
+            thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, password));
+        }
 
         assertEquals(ErrorCode.FILE_NOT_FOUND, thrown.errorCode());
         assertFalse(renderFully(thrown).contains(CORRECT), "パスワードが例外に露出している");
 
-        assertArrayEquals(new char[password.length], password, "開けなかった経路でもゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "開けなかった経路でもゼロ埋めすること");
     }
 
     @Test
-    @DisplayName("null を渡されても、片づけが本当の失敗を握りつぶさない")
-    void nullPasswordMustNotHideTheRealFailure() {
+    @DisplayName("読めないことは、秘密に触れる前に分かる")
+    void unreadableFileIsRejectedBeforeTheSecretIsTouched() {
         Path missing = tempDir.resolve("does-not-exist.pdf");
 
+        // ★★ null を渡せるのは、この順序を縛るためである。requireReadable が先に投げるので
+        //   ここへ届かない——後ろへ回すと、開けないファイルでも先に秘密を String 化することになる。
         PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, null));
 
-        assertEquals(ErrorCode.FILE_NOT_FOUND, thrown.errorCode(), "finally から投げると、この ErrorCode ごと消える");
+        assertEquals(ErrorCode.FILE_NOT_FOUND, thrown.errorCode(), "秘密を読む前に落ちること");
     }
 
     @Test
     @DisplayName("パスワードに使えない文字が混ざっても、PDFBox の例外がそのまま出ない")
     void prohibitedCharacterMustNotEscapeUnwrapped() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
-        char[] password = PROHIBITED.toCharArray();
+        char[] raw = PROHIBITED.toCharArray();
 
-        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
+        PdfjigException thrown;
+        try (Password password = Password.of(raw)) {
+            thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
+        }
 
         assertEquals(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, thrown.errorCode());
         assertEquals("java.lang.IllegalArgumentException", thrown.causeType(), "包んだ相手の型だけは残す");
@@ -131,7 +154,7 @@ class PasswordLeakTest {
         assertFalse(rendered.contains("org.apache.pdfbox"), "PDFBox のフレームが残っている");
         assertFalse(rendered.contains("LEFT-TO-RIGHT MARK"), "パスワードの文字が露出している");
 
-        assertArrayEquals(new char[password.length], password, "包む経路でもゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "包む経路でもゼロ埋めすること");
     }
 
     /** メッセージ・toString・スタックトレースをすべて連結した文字列。 */
