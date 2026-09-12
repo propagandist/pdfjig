@@ -35,11 +35,21 @@ public final class PdfjigException extends RuntimeException {
      * <p>{@code cause} は {@link Throwable#initCause} で連結せず、型名だけを取り出す。
      * メッセージもスタックトレースも引き継がない。
      *
-     * @param errorCode 失敗の分類
+     * <p><b>★★ 既に包んであるものは、そのまま返す。</b>未検査例外まで捕まえる
+     * {@code catch} は<b>自分で分類した失敗もろとも拾う</b>ので、ここで通さないと
+     * <b>{@code PAGE_OUT_OF_RANGE} が「抽出できませんでした」に化ける</b>——
+     * <b>利用者は次に何をすればよいか分からなくなる</b>（CLAUDE.md 優先順位 2）。
+     * <b>その判断をここに置くのは、境界を足すたびに写されるのを止めるためである</b>
+     * ——#150 の前は、同じ 1 行が 7 か所に別々の綴りで在った。
+     *
+     * @param errorCode 失敗の分類。<b>{@code cause} が既に {@link PdfjigException} なら使われない</b>
      * @param cause     元の例外。メッセージは読まれない
      * @return 原因の型名だけを保持する例外
      */
     public static PdfjigException wrapping(ErrorCode errorCode, Throwable cause) {
+        if (cause instanceof PdfjigException already) {
+            return already;
+        }
         return new PdfjigException(errorCode, cause.getClass().getName());
     }
 

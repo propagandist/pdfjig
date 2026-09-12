@@ -70,7 +70,12 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             applyInformation(merged, information, inputs.size() > 1);
             save(merged, output);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // ★★ 未検査例外も捕まえる。appendDocument は入力のページツリーを辿るので、
+            //   そこは細工 PDF が決められるところである（#144 / #150）。
+            //   ★★ ここが IOException だけだった間も検査は緑だった——javac が
+            //   try-with-resources のために吐く catch (Throwable) を「包み」と読んでいた
+            //   （2026-09-12 実測。pdf-archtest の catchesUnchecked）。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
         return output;
@@ -198,28 +203,24 @@ public final class PdfBoxPageOperations implements PageOperations {
             // 回転はページ属性の変更だけで済む。ページの並びに手を触れないため、
             // ページツリーを均す必要もない。元の文書をそのまま保存する。
             PDDocument delegate = source.delegate();
-            // ★★ forEach ではなく for で書く。ラムダは別のメソッドへ落ちるので、
-            //   try で囲んでも「その中に在る」とは見えない——検査の都合ではなく、
-            //   遅延して評価される渡し方なら本当に try の外で走る（pdf-archtest）。
+            // ★ forEach ではなく for で書く。ArchUnit はラムダの本体を、囲む try の中とは
+            //   見ない（pdf-archtest）——Map#forEach は即時に同じスレッドで走るので、
+            //   包み自体は forEach でも効く。ここは検査から見えるようにするための形である。
             try {
                 for (Map.Entry<Integer, Rotation> entry : rotations.entrySet()) {
                     PDPage page = delegate.getPage(entry.getKey() - 1);
                     page.setRotation(rotationOf(page).plus(entry.getValue()).degrees());
                 }
-            } catch (PdfjigException e) {
-                // ★★ 合併した catch より先に置く。自分で分類した失敗を自分で塗り替えない。
-                throw e;
+                // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
+                // M0 が扱うのは EncryptionPropagation.NONE のみであり、
+                // 保護は落ちる（警告は open で発している）。
+                delegate.setAllSecurityToBeRemoved(true);
+                save(delegate, output);
             } catch (RuntimeException e) {
                 // ★★ ページツリーは細工 PDF が決められるところであり、PDFBox は IOException では
                 //   ない例外を投げる（#144 / #150）。包まないと素の未検査例外が外へ出る。
                 throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
             }
-
-            // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
-            // M0 が扱うのは EncryptionPropagation.NONE のみであり、
-            // 保護は落ちる（警告は open で発している）。
-            delegate.setAllSecurityToBeRemoved(true);
-            save(delegate, output);
         }
         return output;
     }

@@ -41,11 +41,6 @@ public final class PdfDocument implements AutoCloseable {
             return new PdfDocument(Loader.loadPDF(path.toFile()));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
-        } catch (PdfjigException e) {
-            // ★★ 合併した catch より先に置く。PdfjigException も RuntimeException なので、
-            //   これが無いと、この try の中で分類した失敗が黙って NOT_A_PDF に塗り替わる。
-            //   いまは requireReadable が try の外に在って届かないが、中へ入れた日に効く。
-            throw e;
         } catch (IOException | RuntimeException e) {
             // ★ PDFBox は IOException ではない例外も投げる（#144）。ここでは秘密を持たないので
             //   INV-5 には当たらないが、包むのは「外へ出るのは PdfjigException だけ」という
@@ -86,10 +81,6 @@ public final class PdfDocument implements AutoCloseable {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        } catch (PdfjigException e) {
-            // ★★ 無いと requireReadable の FILE_NOT_FOUND が「原因を絞れない失敗」に化ける
-            //   ——自分で分類したものを、自分で捨てることになる。外すと #135 の 2 本が赤くなる。
-            throw e;
         } catch (RuntimeException e) {
             // ★★ INV-5。PDFBox は AES-256 のとき、照合する前に SASLprep を通す。禁止文字に
             //   当たると、本物のパスワードの文字と位置をメッセージに載せた
@@ -104,13 +95,18 @@ public final class PdfDocument implements AutoCloseable {
     /**
      * 総ページ数。
      *
+     * <p><b>★ 符号は {@link ErrorCode#NOT_A_PDF} である</b>——<b>開けたのだから PDF では
+     * あったが、読もうとしたところが壊れていた。</b>{@link #open(Path)} の
+     * 「PDF でないこととは限らない」と同じ扱いであり、<b>原因を絞る材料がここにも無い。</b>
+     * 下の {@link #encrypted()} と {@link #signed()} も同じである。
+     *
      * @throws PdfjigException 数えられない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public int pageCount() {
         try {
             return delegate.getNumberOfPages();
         } catch (RuntimeException e) {
-            throw wrapping(e);
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
     }
 
@@ -123,7 +119,7 @@ public final class PdfDocument implements AutoCloseable {
         try {
             return delegate.isEncrypted();
         } catch (RuntimeException e) {
-            throw wrapping(e);
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
     }
 
@@ -145,7 +141,7 @@ public final class PdfDocument implements AutoCloseable {
         try {
             return !delegate.getSignatureDictionaries().isEmpty();
         } catch (RuntimeException e) {
-            throw wrapping(e);
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
     }
 
@@ -173,28 +169,8 @@ public final class PdfDocument implements AutoCloseable {
         try {
             delegate.close();
         } catch (IOException | RuntimeException e) {
-            if (e instanceof PdfjigException pdfjig) {
-                throw pdfjig;
-            }
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
-    }
-
-    /**
-     * 開いた後に中身を読めなかったときの包み。
-     *
-     * <p><b>★ 自分で分類した失敗は塗り替えない。</b>{@code PdfjigException} も
-     * {@code RuntimeException} なので、{@code catch} がそれごと拾う。
-     *
-     * <p><b>符号は {@link ErrorCode#NOT_A_PDF} である</b>——<b>開けたのだから PDF では
-     * あったが、読もうとしたところが壊れていた。</b>{@link #open(Path)} の
-     * 「PDF でないこととは限らない」と同じ扱いであり、<b>原因を絞る材料がここにも無い。</b>
-     */
-    private static PdfjigException wrapping(RuntimeException e) {
-        if (e instanceof PdfjigException pdfjig) {
-            return pdfjig;
-        }
-        return PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
     }
 
     private static void requireReadable(Path path) {
