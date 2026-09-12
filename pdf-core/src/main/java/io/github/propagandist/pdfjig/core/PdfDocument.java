@@ -4,9 +4,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+import org.apache.pdfbox.pdmodel.encryption.PDCryptFilterDictionary;
 import org.apache.pdfbox.pdmodel.encryption.PDEncryption;
 
 /**
@@ -136,10 +138,16 @@ public final class PdfDocument implements AutoCloseable {
      * 認証の結果であり、<b>オーナーパスワードで開くとすべてを許可した値になる</b>
      * ——<b>同じ文書でも誰が開いたかで答えが変わってはならない</b>（§4.3.1）。
      *
+     * <p><b>★★ まだ公開しない。</b>{@code open(Path, Password)} で開いたときの
+     * {@code userPasswordRequired} は<b>「パスワードを渡した」しか意味せず、
+     * オーナーパスワードだけの文書でも真になる</b>——<b>公開の口が嘘を返す。</b>
+     * <b>言い直せる呼ぶ側</b>（{@link #encryptionWith}）<b>を通す。</b>
+     * 公開するのは #180 が正しい形を決めてからである。
+     *
      * @return 暗号化の状態
      * @throws PdfjigException 読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
-    public EncryptionInfo encryption() {
+    EncryptionInfo encryption() {
         try {
             if (!delegate.isEncrypted()) {
                 return EncryptionInfo.none();
@@ -174,7 +182,13 @@ public final class PdfDocument implements AutoCloseable {
      * 方式を読む。
      *
      * <p><b>鍵の長さだけでは足りない</b>——128 ビットは RC4 と AES の両方にある。
-     * <b>版（{@code /R}）で分ける。</b>
+     *
+     * <p><b>★★ 版（{@code /R}）だけでも足りない。</b>{@code /V 4 /R 4} は
+     * <b>暗号フィルタの方式（{@code /CFM}）で AES と RC4 に分かれる</b>——
+     * Acrobat が「Acrobat 6.0 以降」で書くのは {@code /CFM /V2}（RC4-128）である。
+     * <b>そこを見ずに版だけで決めると、RC4 の文書を AES-128 と答える。</b>
+     * ★ <b>往復のテストでは捕まらない</b>——PDFBox 自身が書く RC4-128 は {@code /V 2 /R 3}
+     * であり、{@code /R 4} の枝を通らない。
      */
     private static EncryptionAlgorithm algorithmOf(PDEncryption encryption) {
         int revision = encryption.getRevision();
@@ -182,9 +196,23 @@ public final class PdfDocument implements AutoCloseable {
             return EncryptionAlgorithm.AES_256;
         }
         if (revision == 4) {
-            return EncryptionAlgorithm.AES_128;
+            return aesFilter(encryption) ? EncryptionAlgorithm.AES_128 : EncryptionAlgorithm.RC4_128;
         }
         return encryption.getLength() > 40 ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.RC4_40;
+    }
+
+    /** 暗号フィルタが AES か。読めなければ AES として扱う（{@code /R 4} の既定）。 */
+    private static boolean aesFilter(PDEncryption encryption) {
+        try {
+            PDCryptFilterDictionary filter = encryption.getStdCryptFilterDictionary();
+            if (filter == null) {
+                return true;
+            }
+            COSName method = filter.getCryptFilterMethod();
+            return method == null || method.getName().startsWith("AESV");
+        } catch (RuntimeException e) {
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        }
     }
 
     private static AccessPermissions permissionsOf(AccessPermission permission) {

@@ -55,7 +55,27 @@ public final class PdfBoxEncryption implements Encryption {
         requireAbsent(output);
 
         try (PdfDocument source = PdfDocument.open(input)) {
-            PDDocument document = source.delegate();
+            protectInto(source.delegate(), userPassword, ownerPassword, permissions, algorithm, output);
+        }
+        return output;
+    }
+
+    /**
+     * 方針を当てて書き出す。
+     *
+     * <p><b>★★ 閉じる失敗をここへ入れない。</b>呼ぶ側の try-with-resources が入力を閉じるのは
+     * この後であり、<b>そこを同じ {@code catch} で覆うと、書けた出力を「失敗した」として消す</b>
+     * ——細工 PDF は閉じるときに投げる（#150）。<b>完全に書けた保護付きの出力が、
+     * 入力を閉じ損ねただけで消えることになる。</b>
+     */
+    private static void protectInto(
+            PDDocument document,
+            Password userPassword,
+            Password ownerPassword,
+            AccessPermissions permissions,
+            EncryptionAlgorithm algorithm,
+            Path output) {
+        try {
             // ★★ String 化はここでも避けられない。PDFBox の StandardProtectionPolicy は
             //   String しか受け付けない（PdfDocument#open と同じ既知の限界。INV-5）。
             //   ★ pdf-core で String 化が起きるのは、あちらとここの 2 か所だけである。
@@ -69,13 +89,18 @@ public final class PdfBoxEncryption implements Encryption {
             //   位置をメッセージに載せた IllegalArgumentException を投げる——IOException ではない。
             //   wrapping は型名しか残さないので、ここで包めば漏れない（#144 / INV-5）。
             document.save(output.toFile());
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException e) {
+            // ★★ 書けなかったことを、パスワードのせいにしない。出力先が無い・ディスクが満杯
+            //   といった失敗まで PASSWORD_OR_DOCUMENT_FAILURE に畳むと、利用者は打ち直す
+            //   ——ErrorCode 自身が「絞れないときにだけ使う」と書いている符号である。
+            deleteQuietly(output);
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        } catch (RuntimeException e) {
             // 書けたところまでを残さない。保護が掛かっていない半端な出力は、
             // 保護されているつもりで配られる元になる（優先順位 1・2）。
             deleteQuietly(output);
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
         }
-        return output;
     }
 
     @Override
@@ -83,7 +108,14 @@ public final class PdfBoxEncryption implements Encryption {
         requireAbsent(output);
 
         try (PdfDocument source = PdfDocument.open(input, password)) {
-            PDDocument document = source.delegate();
+            unprotectInto(source.delegate(), output);
+        }
+        return output;
+    }
+
+    /** 保護を外して書き出す。<b>閉じる失敗をここへ入れない</b>（{@link #protectInto} と同じ理由）。 */
+    private static void unprotectInto(PDDocument document, Path output) {
+        try {
             document.setAllSecurityToBeRemoved(true);
             document.save(output.toFile());
         } catch (IOException | RuntimeException e) {
@@ -92,7 +124,6 @@ public final class PdfBoxEncryption implements Encryption {
             //   付けていれば、wrapping がそれを素通しする。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
-        return output;
     }
 
     /**
