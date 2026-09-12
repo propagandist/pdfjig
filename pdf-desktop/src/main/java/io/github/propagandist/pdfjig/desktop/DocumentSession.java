@@ -55,11 +55,11 @@ public final class DocumentSession implements AutoCloseable {
     /**
      * パスワード付きで開く。
      *
-     * <p>{@code password} は {@link PdfDocument#open(Path, Password)} の規約どおり、
-     * 成否によらずゼロ埋めされる。
+     * <p>{@code password} は読むだけである（{@link PdfDocument#open(Path, Password)}）。
+     * <b>消すのは作った場所である。</b>
      *
      * @param path     対象ファイル
-     * @param password パスワード
+     * @param password パスワード。ここでは消さない
      * @return 開かれたセッション
      */
     public static DocumentSession open(Path path, Password password) {
@@ -79,7 +79,7 @@ public final class DocumentSession implements AutoCloseable {
      * パスワード付きの文書を足す。
      *
      * @param path     足すファイル
-     * @param password パスワード。{@link PdfDocument#open(Path, Password)} がゼロ埋めする
+     * @param password パスワード。ここでは消さない（{@link PdfDocument#open(Path, Password)}）
      */
     public void add(Path path, Password password) {
         adopt(path, PdfDocument.open(path, password));

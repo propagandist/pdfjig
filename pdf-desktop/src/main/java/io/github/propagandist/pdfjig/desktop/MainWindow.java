@@ -468,27 +468,16 @@ public final class MainWindow {
         if (entered.isEmpty()) {
             return;
         }
-        // ★★ 持ち主をここに置く。走り出さなかった経路（断られた・始め方が投げた）は
-        //   仕事そのものが呼ばれないので、ゼロ埋めはこの close でしか起きない（#145）。
-        try (Password password = entered.get()) {
-            boolean started = tasks.run(() -> DocumentSession.open(path, password), this::adopt, failure -> {
-                if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
-                    askPasswordAndOpen(path, true);
-                } else {
-                    messages.failure(failure);
-                }
-            });
-            if (started) {
-                // ★★ 走り出した。以後この秘密を読むのは背景スレッドであり、消すのも向こうである
-                //   （PdfDocument#open）。ここで消すと、読んでいる最中に消すことになる。
-                //   ★★ 書き忘れたときに落ちるのは、正しいパスワードが弾かれる側である
-                //   ——画面に出る。註で守っていた頃は、書き忘れると平文が黙って残った。
-                //   ★ 走り出したかを見て呼ぶ根拠は、始め方が投げた時点で本体が 1 行も
-                //   走っていないことである（BackgroundTasks#run の @throws）。
-                //   差し替えた実行係が「渡してから投げる」なら、この前提は成り立たない。
-                password.handOff();
+        // ★★ 持ち主ごと渡す。走り出したら仕事の枠が閉じ、走り出さなかったら向こうが閉じる
+        //   ——ここには片づけを書く場所が無い（BackgroundTasks#run。#146）。
+        Password password = entered.get();
+        tasks.run(password, () -> DocumentSession.open(path, password), this::adopt, failure -> {
+            if (errorCodeOf(failure) == ErrorCode.INVALID_PASSWORD) {
+                askPasswordAndOpen(path, true);
+            } else {
+                messages.failure(failure);
             }
-        }
+        });
     }
 
     /**
@@ -775,11 +764,9 @@ public final class MainWindow {
         if (entered.isEmpty()) {
             return;
         }
-        // ★★ 中まで届かずに投げることがある（session は null になりうるし、窓を挟んだ後の
-        //   検め直しを足せば早く戻る経路も増える）。そこを通ってもゼロ埋めされるように、
-        //   持ち主をここに置く（INV-5。#145）。★ 二重に消しても害は無い。
-        //   ★ ここは handOff しない。同じスレッドの中で終わるので、渡した先が消し損ねても
-        //   この close が拾う——askPasswordAndOpen が記録するのは、あちらが背景へ渡すからである。
+        // ★★ ここは同じスレッドの中で終わるので、持ち主のまま閉じる。中まで届かずに投げることが
+        //   あり（session は null になりうるし、窓を挟んだ後の検め直しを足せば早く戻る経路も
+        //   増える）、そこを通ってもこの close が消す（INV-5。#145）。
         try (Password password = entered.get()) {
             session.add(path, password);
         } catch (PdfjigException e) {
