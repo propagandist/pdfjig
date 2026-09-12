@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.DisplayName;
@@ -25,14 +23,6 @@ class PdfBoxEncryptionTest {
 
     private static final String USER = "user-Passw0rd";
     private static final String OWNER = "owner-Passw0rd";
-
-    /**
-     * SASLprep が禁じる文字を含むパスワード。U+200E は LEFT-TO-RIGHT MARK である。
-     *
-     * <p><b>★★ 書き出す側でも同じ漏えいが開く</b>（#28 の申し送り）——
-     * {@code save} が SASLprep を通し、<b>本物の文字と位置をメッセージに載せて投げる。</b>
-     */
-    private static final String PROHIBITED = "pa\u200Ess";
 
     private final Encryption encryption = new PdfBoxEncryption();
 
@@ -233,7 +223,7 @@ class PdfBoxEncryptionTest {
             Path output = tempDir.resolve("protected.pdf");
 
             PdfjigException thrown;
-            try (Password user = Password.copyOf(PROHIBITED);
+            try (Password user = Password.copyOf(Secrets.PROHIBITED);
                     Password owner = Password.copyOf(OWNER)) {
                 thrown = assertThrows(
                         PdfjigException.class,
@@ -243,7 +233,7 @@ class PdfBoxEncryptionTest {
 
             // ★★ 落ちるのは protect ではなく save である（#28 の申し送り）。
             //   包む関門を「方針を当てるところ」に置いていたら、ここは素の例外で抜ける。
-            String rendered = renderFully(thrown);
+            String rendered = Secrets.renderFully(thrown);
             assertFalse(rendered.contains("org.apache.pdfbox"), "PDFBox のフレームが残っている");
             assertFalse(rendered.contains("LEFT-TO-RIGHT MARK"), "パスワードの文字が露出している");
             assertFalse(rendered.contains(OWNER), "オーナーパスワードが露出している");
@@ -294,19 +284,10 @@ class PdfBoxEncryptionTest {
                 thrown = assertThrows(PdfjigException.class, () -> encryption.unprotect(input, password, output));
             }
 
-            String rendered = renderFully(thrown);
+            String rendered = Secrets.renderFully(thrown);
             assertFalse(rendered.contains(USER), "正解のパスワードが露出している");
             assertFalse(rendered.contains("まったく違う"), "入力したパスワードが露出している");
             assertFalse(rendered.contains("org.apache.pdfbox"), "PDFBox のフレームが残っている");
         }
-    }
-
-    /** メッセージ・toString・スタックトレースをすべて連結した文字列。 */
-    private static String renderFully(Throwable throwable) {
-        StringWriter buffer = new StringWriter();
-        try (PrintWriter writer = new PrintWriter(buffer)) {
-            throwable.printStackTrace(writer);
-        }
-        return throwable.getMessage() + '\n' + throwable + '\n' + buffer;
     }
 }

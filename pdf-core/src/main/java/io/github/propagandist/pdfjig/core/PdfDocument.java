@@ -5,7 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+import org.apache.pdfbox.pdmodel.encryption.PDEncryption;
 
 /**
  * 開かれた PDF 文書のハンドル。
@@ -20,8 +22,18 @@ public final class PdfDocument implements AutoCloseable {
 
     private final PDDocument delegate;
 
-    private PdfDocument(PDDocument delegate) {
+    /**
+     * パスワードなしでは開けなかったか。
+     *
+     * <p><b>★★ 開いたときにしか分からない。</b>暗号化辞書からは読めない——
+     * <b>ユーザーパスワードが空かどうかはハッシュ化されており、実際に試すしかない。</b>
+     * だから<b>開いた側が覚えておく。</b>
+     */
+    private final boolean userPasswordRequired;
+
+    private PdfDocument(PDDocument delegate, boolean userPasswordRequired) {
         this.delegate = delegate;
+        this.userPasswordRequired = userPasswordRequired;
     }
 
     /**
@@ -38,7 +50,7 @@ public final class PdfDocument implements AutoCloseable {
     public static PdfDocument open(Path path) {
         requireReadable(path);
         try {
-            return new PdfDocument(Loader.loadPDF(path.toFile()));
+            return new PdfDocument(Loader.loadPDF(path.toFile()), false);
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
         } catch (IOException | RuntimeException e) {
@@ -76,7 +88,10 @@ public final class PdfDocument implements AutoCloseable {
             requireReadable(path);
             // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
             String boundaryPassword = new String(password.value());
-            return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
+            // ★ パスワードを渡して開けたが、それが要ったかどうかはここからは分からない
+            //   ——オーナーパスワードだけの文書も、同じ道で開ける。requiredWhenOpened が
+            //   知っている呼ぶ側だけが、正しい値を載せられる（Encryption#inspect）。
+            return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword), true);
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
@@ -108,6 +123,80 @@ public final class PdfDocument implements AutoCloseable {
         } catch (RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
+    }
+
+    /**
+     * 暗号化の状態。
+     *
+     * <p><b>★★ 読む手段はここである</b>（{@code docs/SPEC.md} §4.1 / §6.1.1）——
+     * {@code Encryption#inspect} は {@code Path} を取るので、<b>既に開いた文書からは呼べず、
+     * パスワードの要る文書では開き直せない。</b>
+     *
+     * <p><b>★ 権限は素の {@code /P} を読む。</b>{@code getCurrentAccessPermission} は
+     * 認証の結果であり、<b>オーナーパスワードで開くとすべてを許可した値になる</b>
+     * ——<b>同じ文書でも誰が開いたかで答えが変わってはならない</b>（§4.3.1）。
+     *
+     * @return 暗号化の状態
+     * @throws PdfjigException 読めない場合は {@link ErrorCode#NOT_A_PDF}
+     */
+    public EncryptionInfo encryption() {
+        try {
+            if (!delegate.isEncrypted()) {
+                return EncryptionInfo.none();
+            }
+            PDEncryption encryption = delegate.getEncryption();
+            return new EncryptionInfo(
+                    true,
+                    algorithmOf(encryption),
+                    userPasswordRequired,
+                    permissionsOf(new AccessPermission(encryption.getPermissions())));
+        } catch (RuntimeException e) {
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        }
+    }
+
+    /**
+     * 同じ状態を、パスワードが要ったかどうかを言い直して返す。
+     *
+     * <p><b>開いた側は「パスワードを渡した」ことしか知らない</b>——
+     * <b>それが要ったのか、オーナーパスワードだっただけなのかは、試さないと分からない。</b>
+     * 知っている呼ぶ側（{@code Encryption#inspect(Path, Password)}）が言い直す。
+     *
+     * @param required パスワードなしでは開けなかったか
+     * @return その値を載せた状態
+     */
+    EncryptionInfo encryptionWith(boolean required) {
+        EncryptionInfo info = encryption();
+        return new EncryptionInfo(info.encrypted(), info.algorithm(), required, info.permissions());
+    }
+
+    /**
+     * 方式を読む。
+     *
+     * <p><b>鍵の長さだけでは足りない</b>——128 ビットは RC4 と AES の両方にある。
+     * <b>版（{@code /R}）で分ける。</b>
+     */
+    private static EncryptionAlgorithm algorithmOf(PDEncryption encryption) {
+        int revision = encryption.getRevision();
+        if (revision >= 5) {
+            return EncryptionAlgorithm.AES_256;
+        }
+        if (revision == 4) {
+            return EncryptionAlgorithm.AES_128;
+        }
+        return encryption.getLength() > 40 ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.RC4_40;
+    }
+
+    private static AccessPermissions permissionsOf(AccessPermission permission) {
+        return new AccessPermissions(
+                permission.canPrint(),
+                permission.canModify(),
+                permission.canExtractContent(),
+                permission.canModifyAnnotations(),
+                permission.canFillInForm(),
+                permission.canAssembleDocument(),
+                permission.canExtractForAccessibility(),
+                permission.canPrintFaithful());
     }
 
     /**

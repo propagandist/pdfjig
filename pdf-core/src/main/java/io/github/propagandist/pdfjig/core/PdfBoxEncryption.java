@@ -3,62 +3,44 @@ package io.github.propagandist.pdfjig.core;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
-import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
-import org.apache.pdfbox.pdmodel.encryption.PDEncryption;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
 /**
  * PDFBox による {@link Encryption} の実装。
  *
  * <p>状態を持たない。複数スレッドから同時に呼び出してよい。
+ *
+ * <p><b>★★ 開くのは {@link PdfDocument} を通す。</b>{@code Loader} を直に呼ばない——
+ * <b>INV-5 の {@code String} 化も、PDFBox の例外の分類も、あちらが 1 か所で持っている。</b>
+ * ここが自前で開くと、<b>同じ判断の写しが 2 つになり、片方が腐る。</b>
  */
 public final class PdfBoxEncryption implements Encryption {
 
     @Override
     public EncryptionInfo inspect(Path input) {
-        requireReadable(input);
-        try (PDDocument document = Loader.loadPDF(input.toFile())) {
-            return infoOf(document, false);
-        } catch (InvalidPasswordException e) {
-            // ★★ 開けなかった。暗号化されていることは分かるが、方式も権限も読めていない
-            //   ——PDFBox は文書を返さないので、暗号化辞書そのものが手に入らない
-            //   （2026-09-12 実測）。NONE ではなく UNKNOWN を返す。混ぜると、保護されて
-            //   いない文書と区別が付かなくなる（優先順位 2）。
-            return new EncryptionInfo(true, EncryptionAlgorithm.UNKNOWN, true, AccessPermissions.all());
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        try (PdfDocument document = PdfDocument.open(input)) {
+            return document.encryption();
+        } catch (PdfjigException e) {
+            if (e.errorCode() == ErrorCode.PASSWORD_REQUIRED) {
+                // ★★ 開けなかった。暗号化されていることは分かるが、方式も権限も読めていない
+                //   ——PDFBox は文書を返さないので、暗号化辞書そのものが手に入らない
+                //   （2026-09-12 実測）。NONE ではなく UNKNOWN を返す（EncryptionAlgorithm）。
+                //   ★ 権限に all() が入るのは置き値であって、読めた値ではない（#187）。
+                return new EncryptionInfo(true, EncryptionAlgorithm.UNKNOWN, true, AccessPermissions.all());
+            }
+            throw e;
         }
     }
 
     @Override
     public EncryptionInfo inspect(Path input, Password password) {
-        requireReadable(input);
-        try (PDDocument document = Loader.loadPDF(input.toFile(), new String(password.value()))) {
-            // ★ 開けたということは、渡したパスワードで足りたということである。
-            //   それがユーザーパスワードだったかオーナーパスワードだったかは、ここからは分からない
-            //   ——分からないことを分からないまま扱うため、パスワードなしで開けるかを別に見る。
-            return infoOf(document, needsUserPassword(input));
-        } catch (InvalidPasswordException e) {
-            throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        }
-    }
-
-    /** パスワードなしでは開けないか。 */
-    private static boolean needsUserPassword(Path input) {
-        try {
-            // ★ 開けたかどうかだけが要るので、閉じて捨てる。try-with-resources に載せると
-            //   「本体で参照されない」警告になり、-Werror で落ちる。
-            Loader.loadPDF(input.toFile()).close();
-            return false;
-        } catch (InvalidPasswordException e) {
-            return true;
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        // ★ パスワードが要ったかどうかは、渡して開いただけでは分からない——オーナー
+        //   パスワードだけの文書も同じ道で開ける。先に訊いてから、その答えを載せる。
+        boolean required = inspect(input).userPasswordRequired();
+        try (PdfDocument document = PdfDocument.open(input, password)) {
+            return document.encryptionWith(required);
         }
     }
 
@@ -70,19 +52,16 @@ public final class PdfBoxEncryption implements Encryption {
             AccessPermissions permissions,
             EncryptionAlgorithm algorithm,
             Path output) {
-        if (algorithm == EncryptionAlgorithm.NONE) {
-            throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
-        }
         requireAbsent(output);
-        requireReadable(input);
 
-        try (PDDocument document = Loader.loadPDF(input.toFile())) {
+        try (PdfDocument source = PdfDocument.open(input)) {
+            PDDocument document = source.delegate();
             // ★★ String 化はここでも避けられない。PDFBox の StandardProtectionPolicy は
             //   String しか受け付けない（PdfDocument#open と同じ既知の限界。INV-5）。
+            //   ★ pdf-core で String 化が起きるのは、あちらとここの 2 か所だけである。
             StandardProtectionPolicy policy = new StandardProtectionPolicy(
                     new String(ownerPassword.value()), new String(userPassword.value()), permissionOf(permissions));
-            policy.setEncryptionKeyLength(algorithm.keyLengthBits());
-            policy.setPreferAES(algorithm.aes());
+            configure(policy, algorithm);
             document.protect(policy);
 
             // ★★ ここが漏えいの関門である（#28 の申し送り）。SASLprep が走るのは protect ではなく
@@ -102,69 +81,48 @@ public final class PdfBoxEncryption implements Encryption {
     @Override
     public Path unprotect(Path input, Password password, Path output) {
         requireAbsent(output);
-        requireReadable(input);
 
-        try (PDDocument document = Loader.loadPDF(input.toFile(), new String(password.value()))) {
+        try (PdfDocument source = PdfDocument.open(input, password)) {
+            PDDocument document = source.delegate();
             document.setAllSecurityToBeRemoved(true);
             document.save(output.toFile());
-        } catch (InvalidPasswordException e) {
-            throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException | RuntimeException e) {
             deleteQuietly(output);
-            throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
+            // ★ 自分で分類した失敗は塗り替えない。PdfDocument#open が INVALID_PASSWORD を
+            //   付けていれば、wrapping がそれを素通しする。
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
         return output;
     }
 
     /**
-     * 開いた文書から状態を組み立てる。
+     * 方式を方針に当てる。
      *
-     * @param document            開いた文書
-     * @param userPasswordWasUsed ユーザーパスワードを使って開いたか
+     * <p><b>★ 網羅的な {@code switch} にする。</b>書ける方式が増えた日に
+     * <b>コンパイラが知らせる</b>——列挙の側に鍵の長さを持たせると、
+     * <b>{@link EncryptionAlgorithm#NONE} と {@link EncryptionAlgorithm#UNKNOWN} が
+     * 同じ値を返す</b>形になり、<b>混ぜるなと書いた隣で 2 つが同値になる。</b>
      */
-    private static EncryptionInfo infoOf(PDDocument document, boolean userPasswordWasUsed) {
-        if (!document.isEncrypted()) {
-            return EncryptionInfo.none();
+    private static void configure(StandardProtectionPolicy policy, EncryptionAlgorithm algorithm) {
+        switch (algorithm) {
+            case RC4_40 -> {
+                policy.setEncryptionKeyLength(40);
+                policy.setPreferAES(false);
+            }
+            case RC4_128 -> {
+                policy.setEncryptionKeyLength(128);
+                policy.setPreferAES(false);
+            }
+            case AES_128 -> {
+                policy.setEncryptionKeyLength(128);
+                policy.setPreferAES(true);
+            }
+            case AES_256 -> {
+                policy.setEncryptionKeyLength(256);
+                policy.setPreferAES(true);
+            }
+            case NONE, UNKNOWN -> throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
         }
-        PDEncryption encryption = document.getEncryption();
-        return new EncryptionInfo(
-                true,
-                algorithmOf(encryption),
-                userPasswordWasUsed,
-                // ★★ 素の /P を読む。getCurrentAccessPermission は認証の結果であり、
-                //   オーナーパスワードで開くとすべてを許可した値になる——同じ文書でも
-                //   誰が開いたかで答えが変わる（docs/SPEC.md §4.3.1 / §6.1.1）。
-                permissionsOf(new AccessPermission(encryption.getPermissions())));
-    }
-
-    /**
-     * 方式を読む。
-     *
-     * <p><b>鍵の長さだけでは足りない</b>——128 ビットは RC4 と AES の両方にある。
-     * <b>版（{@code /R}）で分ける</b>: 2 までが RC4、4 は AES-128（{@code /V} が 4 のとき）、
-     * 5 以上が AES-256 である。
-     */
-    private static EncryptionAlgorithm algorithmOf(PDEncryption encryption) {
-        int revision = encryption.getRevision();
-        if (revision >= 5) {
-            return EncryptionAlgorithm.AES_256;
-        }
-        if (revision == 4) {
-            return EncryptionAlgorithm.AES_128;
-        }
-        return encryption.getLength() > 40 ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.RC4_40;
-    }
-
-    private static AccessPermissions permissionsOf(AccessPermission permission) {
-        return new AccessPermissions(
-                permission.canPrint(),
-                permission.canModify(),
-                permission.canExtractContent(),
-                permission.canModifyAnnotations(),
-                permission.canFillInForm(),
-                permission.canAssembleDocument(),
-                permission.canExtractForAccessibility(),
-                permission.canPrintFaithful());
     }
 
     private static AccessPermission permissionOf(AccessPermissions permissions) {
@@ -180,13 +138,17 @@ public final class PdfBoxEncryption implements Encryption {
         return permission;
     }
 
-    private static void requireReadable(Path path) {
-        if (!Files.isReadable(path)) {
-            throw new PdfjigException(ErrorCode.FILE_NOT_FOUND);
-        }
-    }
-
+    /**
+     * 出力が既にあれば拒む。
+     *
+     * <p>{@code pdf-core} 全体の契約である（{@code docs/SPEC.md} §4.2）。
+     * <b>★ 同じ検査が {@code PdfBoxPageOperations} にもある</b>——
+     * <b>寄せ先を作るのは差分の外へ広がるので、#187 が持つ。</b>
+     */
     private static void requireAbsent(Path output) {
+        if (output == null) {
+            throw new IllegalArgumentException("output は null にできません。");
+        }
         if (Files.exists(output)) {
             throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
         }
