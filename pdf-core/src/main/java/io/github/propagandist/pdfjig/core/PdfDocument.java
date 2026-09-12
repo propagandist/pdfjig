@@ -4,8 +4,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+import org.apache.pdfbox.pdmodel.encryption.PDCryptFilterDictionary;
+import org.apache.pdfbox.pdmodel.encryption.PDEncryption;
 
 /**
  * 開かれた PDF 文書のハンドル。
@@ -20,8 +24,18 @@ public final class PdfDocument implements AutoCloseable {
 
     private final PDDocument delegate;
 
-    private PdfDocument(PDDocument delegate) {
+    /**
+     * パスワードなしでは開けなかったか。
+     *
+     * <p><b>★★ 開いたときにしか分からない。</b>暗号化辞書からは読めない——
+     * <b>ユーザーパスワードが空かどうかはハッシュ化されており、実際に試すしかない。</b>
+     * だから<b>開いた側が覚えておく。</b>
+     */
+    private final boolean userPasswordRequired;
+
+    private PdfDocument(PDDocument delegate, boolean userPasswordRequired) {
         this.delegate = delegate;
+        this.userPasswordRequired = userPasswordRequired;
     }
 
     /**
@@ -38,7 +52,7 @@ public final class PdfDocument implements AutoCloseable {
     public static PdfDocument open(Path path) {
         requireReadable(path);
         try {
-            return new PdfDocument(Loader.loadPDF(path.toFile()));
+            return new PdfDocument(Loader.loadPDF(path.toFile()), false);
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
         } catch (IOException | RuntimeException e) {
@@ -76,7 +90,10 @@ public final class PdfDocument implements AutoCloseable {
             requireReadable(path);
             // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
             String boundaryPassword = new String(password.value());
-            return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
+            // ★ パスワードを渡して開けたが、それが要ったかどうかはここからは分からない
+            //   ——オーナーパスワードだけの文書も、同じ道で開ける。requiredWhenOpened が
+            //   知っている呼ぶ側だけが、正しい値を載せられる（Encryption#inspect）。
+            return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword), true);
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
         } catch (IOException e) {
@@ -108,6 +125,123 @@ public final class PdfDocument implements AutoCloseable {
         } catch (RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
         }
+    }
+
+    /**
+     * 暗号化の状態。
+     *
+     * <p><b>★★ 読む手段はここである</b>（{@code docs/SPEC.md} §4.1 / §6.1.1）——
+     * {@code Encryption#inspect} は {@code Path} を取るので、<b>既に開いた文書からは呼べず、
+     * パスワードの要る文書では開き直せない。</b>
+     *
+     * <p><b>★ 権限は素の {@code /P} を読む。</b>{@code getCurrentAccessPermission} は
+     * 認証の結果であり、<b>オーナーパスワードで開くとすべてを許可した値になる</b>
+     * ——<b>同じ文書でも誰が開いたかで答えが変わってはならない</b>（§4.3.1）。
+     *
+     * <p><b>★★ まだ公開しない。</b>{@code open(Path, Password)} で開いたときの
+     * {@code userPasswordRequired} は<b>「パスワードを渡した」しか意味せず、
+     * オーナーパスワードだけの文書でも真になる</b>——<b>公開の口が嘘を返す。</b>
+     * <b>言い直せる呼ぶ側</b>（{@link #encryptionWith}）<b>を通す。</b>
+     * 公開するのは #180 が正しい形を決めてからである。
+     *
+     * @return 暗号化の状態
+     * @throws PdfjigException 読めない場合は {@link ErrorCode#NOT_A_PDF}
+     */
+    EncryptionInfo encryption() {
+        try {
+            if (!delegate.isEncrypted()) {
+                return EncryptionInfo.none();
+            }
+            PDEncryption encryption = delegate.getEncryption();
+            return new EncryptionInfo(
+                    true,
+                    algorithmOf(encryption),
+                    userPasswordRequired,
+                    permissionsOf(new AccessPermission(encryption.getPermissions())));
+        } catch (RuntimeException e) {
+            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+        }
+    }
+
+    /**
+     * 同じ状態を、パスワードが要ったかどうかを言い直して返す。
+     *
+     * <p><b>開いた側は「パスワードを渡した」ことしか知らない</b>——
+     * <b>それが要ったのか、オーナーパスワードだっただけなのかは、試さないと分からない。</b>
+     * 知っている呼ぶ側（{@code Encryption#inspect(Path, Password)}）が言い直す。
+     *
+     * @param required パスワードなしでは開けなかったか
+     * @return その値を載せた状態
+     */
+    EncryptionInfo encryptionWith(boolean required) {
+        EncryptionInfo info = encryption();
+        return new EncryptionInfo(info.encrypted(), info.algorithm(), required, info.permissions());
+    }
+
+    /**
+     * 方式を読む。
+     *
+     * <p><b>鍵の長さだけでは足りない</b>——128 ビットは RC4 と AES の両方にある。
+     *
+     * <p><b>★★ 版（{@code /R}）だけでも足りない。</b>{@code /V 4 /R 4} は
+     * <b>暗号フィルタの方式（{@code /CFM}）で AES と RC4 に分かれる</b>——
+     * Acrobat が「Acrobat 6.0 以降」で書くのは {@code /CFM /V2}（RC4-128）である。
+     * <b>そこを見ずに版だけで決めると、RC4 の文書を AES-128 と答える。</b>
+     * ★ <b>往復のテストでは捕まらない</b>——PDFBox 自身が書く RC4-128 は {@code /V 2 /R 3}
+     * であり、{@code /R 4} の枝を通らない。
+     */
+    private static EncryptionAlgorithm algorithmOf(PDEncryption encryption) {
+        int revision = encryption.getRevision();
+        if (revision >= 5) {
+            return EncryptionAlgorithm.AES_256;
+        }
+        if (revision == 4) {
+            return filterAlgorithm(encryption);
+        }
+        return encryption.getLength() > 40 ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.RC4_40;
+    }
+
+    /**
+     * {@code /V 4} の暗号フィルタが指す方式。
+     *
+     * <p><b>★★ 読めなければ {@link EncryptionAlgorithm#UNKNOWN} である。AES ではない。</b>
+     * <b>{@code /CF} が無いときの既定は {@code /Identity}——本文も文字列も暗号化されない。</b>
+     * <b>そこを AES と答えると、中身が生のままの文書を「AES-128 で保護済み」と報告することになる</b>
+     * ——<b>入力の側が完全に決められる値であり、保護の状態を偽装できる</b>
+     * （{@code SECURITY.md}「対象範囲」／優先順位 2）。{@code /CFM /None} も同じである。
+     *
+     * <p><b>★★ この入力をテストで作れていない</b>（2026-09-12 実測）。PDFBox は
+     * <b>{@code /Encrypt} を持つ文書の保存を拒む</b>（{@code COSWriter}。平文が落ちる経路を
+     * 塞ぐ仕組みであり、それ自体は正しい）ので、<b>{@code TestPdfs} の作法では組めない。</b>
+     * <b>作れないことは、穴が無いことを意味しない</b>——<b>攻撃者は PDFBox を使わない。</b>
+     * 縛る形は #187 が持つ。
+     */
+    private static EncryptionAlgorithm filterAlgorithm(PDEncryption encryption) {
+        PDCryptFilterDictionary filter = encryption.getStdCryptFilterDictionary();
+        if (filter == null) {
+            return EncryptionAlgorithm.UNKNOWN;
+        }
+        COSName method = filter.getCryptFilterMethod();
+        if (method == null) {
+            return EncryptionAlgorithm.UNKNOWN;
+        }
+        String name = method.getName();
+        if (name.startsWith("AESV")) {
+            return EncryptionAlgorithm.AES_128;
+        }
+        return "V2".equals(name) ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.UNKNOWN;
+    }
+
+    private static AccessPermissions permissionsOf(AccessPermission permission) {
+        return new AccessPermissions(
+                permission.canPrint(),
+                permission.canModify(),
+                permission.canExtractContent(),
+                permission.canModifyAnnotations(),
+                permission.canFillInForm(),
+                permission.canAssembleDocument(),
+                permission.canExtractForAccessibility(),
+                permission.canPrintFaithful());
     }
 
     /**
