@@ -41,17 +41,20 @@ public final class PdfBoxTextExtraction implements TextExtraction {
     public List<PageText> extractByPage(PdfDocument document) {
         int pageCount = document.pageCount();
         PDFTextStripper stripper = newStripper();
-        List<PageText> pages = new ArrayList<>(pageCount);
+        // ★★ 入れ物を作るところも try の中である。pageCount が返すのは PDFBox が読んだ /Count
+        //   そのものなので、細工 PDF では負にも巨大にもなる——外に置くと、そこで投げる
+        //   IllegalArgumentException が素のまま出る（#150）。
         try {
+            List<PageText> pages = new ArrayList<>(pageCount);
             for (int pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
                 stripper.setStartPage(pageNumber);
                 stripper.setEndPage(pageNumber);
                 pages.add(new PageText(pageNumber, stripper.getText(document.delegate())));
             }
+            return List.copyOf(pages);
         } catch (IOException | RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
         }
-        return List.copyOf(pages);
     }
 
     @Override

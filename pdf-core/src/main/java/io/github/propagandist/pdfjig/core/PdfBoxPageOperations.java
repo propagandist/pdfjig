@@ -76,6 +76,9 @@ public final class PdfBoxPageOperations implements PageOperations {
             //   ★★ ここが IOException だけだった間も検査は緑だった——javac が
             //   try-with-resources のために吐く catch (Throwable) を「包み」と読んでいた
             //   （2026-09-12 実測。pdf-archtest の catchesUnchecked）。
+            //   ★★ 既知の限界: sources.open がこの中に在るので、呼ぶ側の WarningListener が
+            //   投げた失敗も IO_FAILURE に化ける。型では区別が付かず、直すには警告の通知を
+            //   包みの外へ出す必要がある（#178）。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
         return output;
@@ -113,6 +116,8 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
         } catch (RuntimeException e) {
             written.forEach(PdfBoxPageOperations::deleteQuietly);
+            // ★ 包まずに投げ直す。ここを通る失敗には、呼ぶ側の WarningListener が投げたものが
+            //   混じる——包むと、呼ぶ側の失敗が入力のせいに化ける（writeFromSingleSource。#178）。
             throw e;
         }
         return List.copyOf(outputs);
@@ -182,6 +187,8 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
         } catch (RuntimeException e) {
             written.forEach(PdfBoxPageOperations::deleteQuietly);
+            // ★ 包まずに投げ直す。ここを通る失敗には、呼ぶ側の WarningListener が投げたものが
+            //   混じる——包むと、呼ぶ側の失敗が入力のせいに化ける（writeFromSingleSource。#178）。
             throw e;
         }
         return List.copyOf(outputs);
@@ -328,7 +335,21 @@ public final class PdfBoxPageOperations implements PageOperations {
         return sourceIndex;
     }
 
-    /** 元の文書から要らないページを取り除いて並べ替え、その文書を保存する。 */
+    /**
+     * 元の文書から要らないページを取り除いて並べ替え、その文書を保存する。
+     *
+     * <p><b>★★ ここが 5 つの公開操作の書き出しの実体である</b>——{@code reorder} /
+     * {@code extractPages} / {@code deletePages} / {@code assemble} / {@code split} が通る。
+     * <b>入口が PDFBox を直に呼んでいないので、{@code pdf-archtest} の規則からは見えない</b>
+     * （#178）。<b>ここは包んでいない。</b>
+     *
+     * <p><b>★★ 包もうとして戻した</b>（2026-09-12）。この下は
+     * {@code PageReferences.removeDangling} から {@code WarningListener} を呼ぶ——
+     * <b>そこで走るのは呼ぶ側のコードである。</b>包むと<b>呼ぶ側が投げた失敗まで
+     * 「PDF として読み取れません」に塗り替わる</b>——{@code PdfBoxPageOperationsTest} の
+     * 「書き出しの途中で失敗したら、それまでに書いたものも残さない」が、まさにそれを縛っている。
+     * <b>型では区別が付かない</b>ので、包むより先に<b>警告の通知を包みの外へ出す</b>必要がある（#178）。
+     */
     private void writeFromSingleSource(PdfDocument source, List<PageSelection> pages, Path output) {
         PDDocument document = source.delegate();
 
@@ -408,7 +429,10 @@ public final class PdfBoxPageOperations implements PageOperations {
 
             target.setAllSecurityToBeRemoved(true);
             save(target, output);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // ★★ merge と同じ形にそろえる。ページツリーも属性も入力から来るので、
+            //   PDFBox は IOException ではない例外を投げる（#144 / #150）。
+            //   save が投げた IO_FAILURE は wrapping が素通しするので、符号は化けない。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
     }
@@ -571,7 +595,15 @@ public final class PdfBoxPageOperations implements PageOperations {
                 warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
             }
         } catch (RuntimeException e) {
-            document.close();
+            // ★★ 閉じる側も投げうる（PdfDocument#close は未検査例外を IO_FAILURE で包む）。
+            //   そのまま書くと、開いた後に投げた本当の失敗がそこで消える。
+            //   ★ 伝えるのは元の失敗である。閉じられなかったことは抑制例外として付ける
+            //   （OpenDocuments と同じ作法）。
+            try {
+                document.close();
+            } catch (RuntimeException closing) {
+                e.addSuppressed(closing);
+            }
             throw e;
         }
         return document;
@@ -725,10 +757,20 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
     }
 
+    /**
+     * 書き出す。
+     *
+     * <p><b>★★ 失敗は必ず {@link ErrorCode#IO_FAILURE} である。</b>ここで包まないと、
+     * 呼ぶ側の {@code catch} が拾って<b>その場の符号に塗り替える</b>——
+     * {@code rotate} なら「PDF として読み取れません」になり、
+     * <b>出力が書けなかっただけなのに入力のせいにされる</b>（#150）。
+     * 包んであれば {@link PdfjigException#wrapping} が素通しするので、
+     * <b>どの呼ぶ側を通っても符号は変わらない。</b>
+     */
     private static void save(PDDocument document, Path output) {
         try {
             document.save(output.toFile());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
     }
