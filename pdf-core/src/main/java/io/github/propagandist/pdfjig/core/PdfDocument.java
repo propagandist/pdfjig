@@ -196,23 +196,40 @@ public final class PdfDocument implements AutoCloseable {
             return EncryptionAlgorithm.AES_256;
         }
         if (revision == 4) {
-            return aesFilter(encryption) ? EncryptionAlgorithm.AES_128 : EncryptionAlgorithm.RC4_128;
+            return filterAlgorithm(encryption);
         }
         return encryption.getLength() > 40 ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.RC4_40;
     }
 
-    /** 暗号フィルタが AES か。読めなければ AES として扱う（{@code /R 4} の既定）。 */
-    private static boolean aesFilter(PDEncryption encryption) {
-        try {
-            PDCryptFilterDictionary filter = encryption.getStdCryptFilterDictionary();
-            if (filter == null) {
-                return true;
-            }
-            COSName method = filter.getCryptFilterMethod();
-            return method == null || method.getName().startsWith("AESV");
-        } catch (RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+    /**
+     * {@code /V 4} の暗号フィルタが指す方式。
+     *
+     * <p><b>★★ 読めなければ {@link EncryptionAlgorithm#UNKNOWN} である。AES ではない。</b>
+     * <b>{@code /CF} が無いときの既定は {@code /Identity}——本文も文字列も暗号化されない。</b>
+     * <b>そこを AES と答えると、中身が生のままの文書を「AES-128 で保護済み」と報告することになる</b>
+     * ——<b>入力の側が完全に決められる値であり、保護の状態を偽装できる</b>
+     * （{@code SECURITY.md}「対象範囲」／優先順位 2）。{@code /CFM /None} も同じである。
+     *
+     * <p><b>★★ この入力をテストで作れていない</b>（2026-09-12 実測）。PDFBox は
+     * <b>{@code /Encrypt} を持つ文書の保存を拒む</b>（{@code COSWriter}。平文が落ちる経路を
+     * 塞ぐ仕組みであり、それ自体は正しい）ので、<b>{@code TestPdfs} の作法では組めない。</b>
+     * <b>作れないことは、穴が無いことを意味しない</b>——<b>攻撃者は PDFBox を使わない。</b>
+     * 縛る形は #187 が持つ。
+     */
+    private static EncryptionAlgorithm filterAlgorithm(PDEncryption encryption) {
+        PDCryptFilterDictionary filter = encryption.getStdCryptFilterDictionary();
+        if (filter == null) {
+            return EncryptionAlgorithm.UNKNOWN;
         }
+        COSName method = filter.getCryptFilterMethod();
+        if (method == null) {
+            return EncryptionAlgorithm.UNKNOWN;
+        }
+        String name = method.getName();
+        if (name.startsWith("AESV")) {
+            return EncryptionAlgorithm.AES_128;
+        }
+        return "V2".equals(name) ? EncryptionAlgorithm.RC4_128 : EncryptionAlgorithm.UNKNOWN;
     }
 
     private static AccessPermissions permissionsOf(AccessPermission permission) {
