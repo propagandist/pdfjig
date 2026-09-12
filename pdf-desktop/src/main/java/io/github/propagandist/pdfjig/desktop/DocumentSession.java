@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.nio.file.Path;
@@ -54,14 +55,14 @@ public final class DocumentSession implements AutoCloseable {
     /**
      * パスワード付きで開く。
      *
-     * <p>{@code password} は {@link PdfDocument#open(Path, char[])} の規約どおり、
+     * <p>{@code password} は {@link PdfDocument#open(Path, Password)} の規約どおり、
      * 成否によらずゼロ埋めされる。
      *
      * @param path     対象ファイル
      * @param password パスワード
      * @return 開かれたセッション
      */
-    public static DocumentSession open(Path path, char[] password) {
+    public static DocumentSession open(Path path, Password password) {
         return wrap(path, PdfDocument.open(path, password));
     }
 
@@ -78,9 +79,9 @@ public final class DocumentSession implements AutoCloseable {
      * パスワード付きの文書を足す。
      *
      * @param path     足すファイル
-     * @param password パスワード。{@link PdfDocument#open(Path, char[])} がゼロ埋めする
+     * @param password パスワード。{@link PdfDocument#open(Path, Password)} がゼロ埋めする
      */
-    public void add(Path path, char[] password) {
+    public void add(Path path, Password password) {
         adopt(path, PdfDocument.open(path, password));
     }
 
