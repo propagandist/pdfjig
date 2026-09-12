@@ -197,6 +197,23 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("★★ 警告の受け手が投げた失敗を、包みが飲まない")
+        void callerFailureIsNotWrapped() throws Exception {
+            // ★★ merge の包みの中で onWarning を呼んでいる（sources.open 経由）。
+            //   そこで走るのは呼ぶ側のコードであり、包むと「ファイルの読み書きに失敗しました」に
+            //   化ける——呼ぶ側の失敗が入力のせいにされる（#178）。
+            Path encrypted = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "pw");
+            Path output = tempDir.resolve("merged.pdf");
+            PageOperations failing = new PdfBoxPageOperations(warning -> {
+                throw new IllegalStateException("受け手が投げる");
+            });
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> failing.merge(List.of(encrypted), output, MergeOptions.defaults()));
+        }
+
+        @Test
         @DisplayName("出力名が 1 つでも既存なら、何も書かずに失敗する")
         void writesNothingWhenAnyOutputExists() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 3);
