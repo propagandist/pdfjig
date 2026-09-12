@@ -13,12 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
@@ -572,6 +574,99 @@ class ArchitectureTest {
                 reaches,
                 "UpdateCheck が java.net.HttpURLConnection を使っていない。"
                         + "desktopReachesTheNetworkOnlyThroughUpdateCheck は緑でも何も守っていない");
+    }
+
+    /**
+     * 秘密を素の配列でやり取りする口を、持ち主の型の中だけに閉じる。
+     *
+     * <p><b>★★ これ単独では #135 / #144 / #145 を捕まえられない</b>——
+     * <b>{@code Arrays.fill} は最初から在ったからである。</b>ArchUnit は呼び出しを見るが、
+     * <b>文の順序も例外表の範囲も見ない。</b>捕まえるのは<b>新しい入口が増えたとき</b>である
+     * ——{@code Encryption#protect} は秘密を 2 本取り、{@code pdf-cli} の
+     * {@code --password-stdin} は読み手をもう 1 つ増やす（#146 / #28）。
+     *
+     * <p><b>★ 禁止の形では書かない。</b>{@code noMethods().should()} は<b>対象が 1 つも無ければ
+     * 黙って成功する</b>ので、{@code Password} を改名した日に何も見なくなる。
+     * <b>口の集合そのものを突き合わせる</b>——空になれば落ちる。
+     *
+     * <p><b>★ 期待値に {@code copyOf} は入らない。</b>あちらが作る配列は局所変数であり、
+     * <b>外から見える口ではない</b>——そこが「持ち主の無い配列を作れない」形の要である。
+     */
+    @Test
+    @DisplayName("素の char[] でパスワードを受け渡す口は Password の中だけである")
+    void rawCharArraysStayInsidePassword() {
+        assertEquals(
+                Set.of("Password.<init>()", "Password.of()", "Password.value()", "Password.value"),
+                membersTouchingCharArrays(),
+                "素の char[] が現れる口が増減している。増えたなら、そこは持ち主の無い配列を"
+                        + "作れる場所である——ゼロ埋めを守るものが、また註だけに戻る"
+                        + "（#146。CLAUDE.md INV-5）");
+    }
+
+    /**
+     * ゼロ埋めそのものも 1 か所に閉じる。
+     *
+     * <p><b>★★ 上のルールだけでは足りない。</b>{@code char[]} を引数に取らなくても、
+     * <b>自分で配列を作って自分で消す形</b>は書ける——そこは持ち主の型を通らないので、
+     * <b>「移したかどうか」を誰も見ていない。</b>
+     *
+     * <p>対象は {@code Arrays.fill(char[], char)} だけである。
+     * <b>他の型の {@code fill} まで縛ると、パスワードと関係のない差分で赤くなる</b>
+     * ——守れているのに赤が出る検査は、無視する習慣を作る。
+     */
+    @Test
+    @DisplayName("ゼロ埋めするのは Password の中だけである")
+    void zeroingHappensOnlyInsidePassword() {
+        assertEquals(
+                Set.of("Password.erase"),
+                unitsZeroingCharArrays(),
+                "char[] のゼロ埋めが Password の外で起きている。持ち主の型を通らない片づけは、" + "移したかどうかを見ないので、まだ読んでいる秘密を消しうる（#146）");
+    }
+
+    /**
+     * 素の {@code char[]} が現れる本番のフィールド・メソッド・コンストラクタ。
+     *
+     * <p>表記は、コード単位が {@code 型.名前()}、フィールドが {@code 型.名前} である。
+     */
+    private static Set<String> membersTouchingCharArrays() {
+        Stream<String> units = classes.stream()
+                .flatMap(javaClass -> javaClass.getCodeUnits().stream())
+                .filter(ArchitectureTest::touchesCharArray)
+                .map(unit -> unit.getOwner().getSimpleName() + "." + unit.getName() + "()");
+        Stream<String> fields = classes.stream()
+                .flatMap(javaClass -> javaClass.getFields().stream())
+                .filter(field -> isCharArray(field.getRawType()))
+                .map(field -> field.getOwner().getSimpleName() + "." + field.getName());
+        return Stream.concat(units, fields).collect(Collectors.toSet());
+    }
+
+    /** 引数か戻り値に素の {@code char[]} を持つか。 */
+    private static boolean touchesCharArray(JavaCodeUnit unit) {
+        return unit.getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray)
+                || isCharArray(unit.getRawReturnType());
+    }
+
+    /**
+     * {@code char[]} そのものか。
+     *
+     * <p>型の名前で見ない。<b>配列の表し方は版で変わりうる</b>ので、
+     * 配列であることと要素の型で判定する。
+     */
+    private static boolean isCharArray(JavaClass type) {
+        return type.isArray() && type.getComponentType().getName().equals("char");
+    }
+
+    /** {@code Arrays.fill(char[], char)} を呼んでいる本番のコード単位。 */
+    private static Set<String> unitsZeroingCharArrays() {
+        return classes.stream()
+                .flatMap(javaClass -> javaClass.getMethodCallsFromSelf().stream())
+                .filter(call -> call.getTargetOwner().getName().equals("java.util.Arrays"))
+                .filter(call -> call.getTarget().getName().equals("fill"))
+                .filter(call ->
+                        call.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
+                .map(call -> call.getOriginOwner().getSimpleName() + "."
+                        + call.getOrigin().getName())
+                .collect(Collectors.toSet());
     }
 
     /**
