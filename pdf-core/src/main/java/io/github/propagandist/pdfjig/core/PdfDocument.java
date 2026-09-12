@@ -101,14 +101,30 @@ public final class PdfDocument implements AutoCloseable {
         }
     }
 
-    /** 総ページ数。 */
+    /**
+     * 総ページ数。
+     *
+     * @throws PdfjigException 数えられない場合は {@link ErrorCode#NOT_A_PDF}
+     */
     public int pageCount() {
-        return delegate.getNumberOfPages();
+        try {
+            return delegate.getNumberOfPages();
+        } catch (RuntimeException e) {
+            throw wrapping(e);
+        }
     }
 
-    /** 暗号化されているか。 */
+    /**
+     * 暗号化されているか。
+     *
+     * @throws PdfjigException 読み取れない場合は {@link ErrorCode#NOT_A_PDF}
+     */
     public boolean encrypted() {
-        return delegate.isEncrypted();
+        try {
+            return delegate.isEncrypted();
+        } catch (RuntimeException e) {
+            throw wrapping(e);
+        }
     }
 
     /**
@@ -119,9 +135,18 @@ public final class PdfDocument implements AutoCloseable {
      * それでも在ることを知る必要があるのは、ページを並べ替えて書き出せば
      * 署名が無効になるためである。黙って壊すと、利用者は署名済みのつもりで
      * 検証に落ちる文書を配ることになる。
+     *
+     * <p><b>★★ 壊れた {@code /AcroForm} で投げる。</b>{@code getSignatureDictionaries} は
+     * フォームと欄の木を辿るので、そこは細工 PDF が決められるところである（#150）。
+     *
+     * @throws PdfjigException 読み取れない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public boolean signed() {
-        return !delegate.getSignatureDictionaries().isEmpty();
+        try {
+            return !delegate.getSignatureDictionaries().isEmpty();
+        } catch (RuntimeException e) {
+            throw wrapping(e);
+        }
     }
 
     /**
@@ -133,13 +158,43 @@ public final class PdfDocument implements AutoCloseable {
         return delegate;
     }
 
+    /**
+     * 閉じる。
+     *
+     * <p><b>★★ 閉じるときに初めて投げることがある。</b>{@code COSDocument#close} は
+     * オブジェクトの溜まりを辿って参照を解決するので、<b>そこで初めて壊れた参照に当たる</b>
+     * 細工 PDF がある。{@code PDDocument#close} が通す {@code IOUtils} は
+     * {@code IOException} しか握らないため、<b>未検査例外はそのまま抜ける</b>（#150）。
+     *
+     * @throws PdfjigException 閉じられない場合は {@link ErrorCode#IO_FAILURE}
+     */
     @Override
     public void close() {
         try {
             delegate.close();
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof PdfjigException pdfjig) {
+                throw pdfjig;
+            }
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
+    }
+
+    /**
+     * 開いた後に中身を読めなかったときの包み。
+     *
+     * <p><b>★ 自分で分類した失敗は塗り替えない。</b>{@code PdfjigException} も
+     * {@code RuntimeException} なので、{@code catch} がそれごと拾う。
+     *
+     * <p><b>符号は {@link ErrorCode#NOT_A_PDF} である</b>——<b>開けたのだから PDF では
+     * あったが、読もうとしたところが壊れていた。</b>{@link #open(Path)} の
+     * 「PDF でないこととは限らない」と同じ扱いであり、<b>原因を絞る材料がここにも無い。</b>
+     */
+    private static PdfjigException wrapping(RuntimeException e) {
+        if (e instanceof PdfjigException pdfjig) {
+            return pdfjig;
+        }
+        return PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
     }
 
     private static void requireReadable(Path path) {

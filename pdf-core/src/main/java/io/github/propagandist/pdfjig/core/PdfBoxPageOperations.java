@@ -198,10 +198,22 @@ public final class PdfBoxPageOperations implements PageOperations {
             // 回転はページ属性の変更だけで済む。ページの並びに手を触れないため、
             // ページツリーを均す必要もない。元の文書をそのまま保存する。
             PDDocument delegate = source.delegate();
-            rotations.forEach((pageNumber, rotation) -> {
-                PDPage page = delegate.getPage(pageNumber - 1);
-                page.setRotation(rotationOf(page).plus(rotation).degrees());
-            });
+            // ★★ forEach ではなく for で書く。ラムダは別のメソッドへ落ちるので、
+            //   try で囲んでも「その中に在る」とは見えない——検査の都合ではなく、
+            //   遅延して評価される渡し方なら本当に try の外で走る（pdf-archtest）。
+            try {
+                for (Map.Entry<Integer, Rotation> entry : rotations.entrySet()) {
+                    PDPage page = delegate.getPage(entry.getKey() - 1);
+                    page.setRotation(rotationOf(page).plus(entry.getValue()).degrees());
+                }
+            } catch (PdfjigException e) {
+                // ★★ 合併した catch より先に置く。自分で分類した失敗を自分で塗り替えない。
+                throw e;
+            } catch (RuntimeException e) {
+                // ★★ ページツリーは細工 PDF が決められるところであり、PDFBox は IOException では
+                //   ない例外を投げる（#144 / #150）。包まないと素の未検査例外が外へ出る。
+                throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+            }
 
             // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
             // M0 が扱うのは EncryptionPropagation.NONE のみであり、
@@ -537,14 +549,29 @@ public final class PdfBoxPageOperations implements PageOperations {
         return merger;
     }
 
-    /** 入力を開き、暗号化や電子署名があれば警告する。 */
+    /**
+     * 入力を開き、暗号化や電子署名があれば警告する。
+     *
+     * <p><b>★★ 検めるところで投げたら、開いたものを閉じてから投げ直す</b>（#150）。
+     * {@code signed()} はフォームと欄の木を辿るので、<b>壊れた {@code /AcroForm} で投げる</b>
+     * ——そのとき文書は {@code OpenDocuments} にも呼ぶ側の try-with-resources にも渡っておらず、
+     * <b>誰も閉じない。</b>Windows では<b>その PDF への手が握られたまま</b>になり、
+     * 後から同じ場所へ保存できない。
+     *
+     * <p><b>{@code pdf-desktop} の {@code DocumentSession#wrap} が同じ形を持っている。</b>
+     */
     private PdfDocument open(Path input) {
         PdfDocument document = PdfDocument.open(input);
-        if (document.encrypted()) {
-            warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
-        }
-        if (document.signed()) {
-            warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+        try {
+            if (document.encrypted()) {
+                warnings.onWarning(Warning.ENCRYPTION_NOT_PROPAGATED);
+            }
+            if (document.signed()) {
+                warnings.onWarning(Warning.SIGNATURE_INVALIDATED);
+            }
+        } catch (RuntimeException e) {
+            document.close();
+            throw e;
         }
         return document;
     }
