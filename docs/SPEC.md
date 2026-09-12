@@ -125,10 +125,18 @@ flowchart LR
 ### 4.1 主要型
 
 ```java
-// 文書ハンドル。AutoCloseable。パスワードは char[] で受け取る
+// パスワードの持ち主。char[] を包み、ゼロ埋めの責任を型にする（§6）
+final class Password implements AutoCloseable {
+    static Password of(char[] value);            // 渡した配列の持ち主になる（写し取らない）
+    static Password copyOf(CharSequence typed);  // 消せない入れ物から写し取る
+    void handOff();  // 持ち主が移った。以後 close は何もしない
+    void close();    // 移していなければゼロ埋めする
+}
+
+// 文書ハンドル。AutoCloseable。パスワードは持ち主の型で受け取る
 final class PdfDocument implements AutoCloseable {
     static PdfDocument open(Path path);
-    static PdfDocument open(Path path, char[] password);
+    static PdfDocument open(Path path, Password password);
     int pageCount();
     EncryptionInfo encryption();
     DocumentMetadata metadata();
@@ -197,9 +205,9 @@ interface TableExtraction {
 
 interface Encryption {
     EncryptionInfo inspect(Path input);
-    Path protect(Path input, char[] userPassword, char[] ownerPassword,
+    Path protect(Path input, Password userPassword, Password ownerPassword,
                  AccessPermissions permissions, EncryptionAlgorithm algorithm, Path output);
-    Path unprotect(Path input, char[] password, Path output);
+    Path unprotect(Path input, Password password, Path output);
 }
 
 interface Exporter {
@@ -368,6 +376,7 @@ record Proposal<T>(
 機能そのものより神経を使う領域。以下は **すべて必須要件** とする。
 
 - **`String` ではなく `char[]` で保持し、使用後に `Arrays.fill(pw, '\0')` でゼロ埋めする。** String はインターン領域に残り、ヒープダンプから回収される
+- ★★ **ゼロ埋めを持つのは `Password`（§4.1）である。** 素の `char[]` を受け渡す口をこの型の中だけに置き、**作った場所で try-with-resources に載せる。** 註で守る形は 3 度破れた（#135 / #144 / #145）。**責任は 2 つに分かれる**——**渡した側は `close`、受け取った側は無条件のゼロ埋め**であり、**背景スレッドへ渡した後は `handOff` で持ち主を移す**（#146）
 - **CLI の引数で受け取らない。** `ps` や shell history から見える。標準入力、環境変数、ファイル参照のいずれかに限定する
 - **設定ファイルに保存しない。** バッチ処理で使い回す場合もセッション中のメモリ保持に留める
 - **例外メッセージとログに載せない。** PDFBox の例外をそのまま再スローすると混入する可能性がある。必ずラップして再構築する
