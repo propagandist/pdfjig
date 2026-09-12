@@ -144,7 +144,7 @@ final class PdfDocument implements AutoCloseable {
 // 暗号化状態
 record EncryptionInfo(
     boolean encrypted,
-    EncryptionAlgorithm algorithm,   // NONE, RC4_40, RC4_128, AES_128, AES_256
+    EncryptionAlgorithm algorithm,   // NONE, RC4_40, RC4_128, AES_128, AES_256, UNKNOWN
     boolean userPasswordRequired,
     AccessPermissions permissions
 ) {}
@@ -204,6 +204,7 @@ interface TableExtraction {
 
 interface Encryption {
     EncryptionInfo inspect(Path input);
+    EncryptionInfo inspect(Path input, Password password);
     Path protect(Path input, Password userPassword, Password ownerPassword,
                  AccessPermissions permissions, EncryptionAlgorithm algorithm, Path output);
     Path unprotect(Path input, Password password, Path output);
@@ -214,6 +215,14 @@ interface Exporter {
 }
 // ExportFormat: CSV, JSON, XLSX
 ```
+
+★★ **`UNKNOWN` は「暗号化されているが、方式を読めなかった」である**（#28、2026-09-12 実測）。
+
+**`NONE`（暗号化されていない）と混ぜない。** 混ぜると**保護されていない文書と区別が付かなくなる**（優先順位 2）。
+
+**ユーザーパスワードが要る文書をパスワードなしで調べると、これが返る。** PDFBox は**そのとき文書を返さない**ので、**暗号化辞書そのものが手に入らない。**
+
+★ **権限も読めないので `AccessPermissions.all()` が返る。読めたと誤解しないこと**——読むなら `inspect(Path, Password)` を使う。
 
 **`pdf-core` は既存の出力を拒む**（`ErrorCode.OUTPUT_ALREADY_EXISTS`）。上のすべてのシグネチャにかかる契約である。上書きの判断は利用者のものであり、暗黙に行わない。この規約により、入力と同じパスを出力に指定して入力を壊す事故も同時に防がれる。
 
