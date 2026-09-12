@@ -58,10 +58,9 @@ public final class PdfDocument implements AutoCloseable {
     /**
      * パスワード付きで開く。
      *
-     * <p><b>ここが受け取った側である。</b>渡された {@code password} は、成否によらず
-     * <b>このメソッドの中でゼロ埋めされる</b>（{@link Password#erase()}）。
-     * <b>渡した側は、渡したことを {@link Password#handOff()} で記録してから手を引く</b>
-     * ——記録せずに閉じると、まだ読んでいない配列が消える。
+     * <p><b>★★ 渡された {@code password} は読むだけである。</b>ゼロ埋めはしない——
+     * <b>消すのは作った場所である</b>（{@link Password}）。ここで消すと、
+     * <b>片づけが 2 か所になり、どちらが持ち主かを註でしか書けなくなる。</b>
      *
      * <p><b>既知の限界:</b> PDFBox 3 の {@code Loader.loadPDF} は {@code String} しか受け付けない。
      * そのため境界で一度だけ {@code String} が生成され、これは GC されるまでヒープに残り、
@@ -69,7 +68,7 @@ public final class PdfDocument implements AutoCloseable {
      * 生成箇所をこの 1 か所に限定することで影響範囲を最小化している。
      *
      * @param path     入力ファイル
-     * @param password パスワード。呼び出し後にゼロ埋めされる
+     * @param password パスワード。ここでは消さない
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。パスワード誤りは
      *                         {@link ErrorCode#INVALID_PASSWORD}、
@@ -78,9 +77,6 @@ public final class PdfDocument implements AutoCloseable {
      *                         原因を絞れない場合は {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
      */
     public static PdfDocument open(Path path, Password password) {
-        // ★ 秘密を持つ側は、読めるかを見る関門も try の中に置く。ここより外で投げると
-        //   finally を通らず、平文が残る（INV-5。#135）。
-        //   パスワードを取らない open(Path) には掛からない——消すものが無い。
         try {
             requireReadable(path);
             // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
@@ -102,15 +98,6 @@ public final class PdfDocument implements AutoCloseable {
             //   ★ どちらが原因かは、呼んだ側からは区別が付かない。文書かもしれず、
             //   パスワードかもしれない。分からないことを分からないまま伝える。
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
-        } finally {
-            // ★★ 片づけからは投げない。null を渡されると NPE になり、finally から投げた例外は
-            //   本当の失敗を「置き換える」——ErrorCode ごと消える。
-            //   消すものが無いときは、何も言わずに何もしないのが正しい。
-            //   ★ close ではなく erase を呼ぶ。受け取った側は「移された」印を見てはならない
-            //     ——見ると、まさに消すべき経路で消さなくなる（Password の Javadoc）。
-            if (password != null) {
-                password.erase();
-            }
         }
     }
 

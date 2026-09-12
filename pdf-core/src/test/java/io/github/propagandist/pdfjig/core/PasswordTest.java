@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
  * パスワードの持ち主（CLAUDE.md INV-5）。
  *
  * <p><b>見ているのは「誰が消すか」である。</b>{@code char[]} を註で守っていた頃、
- * 同じ軸で 3 本の破れが出た（#135 / #144 / #145）。
- * <b>持ち主を移す側と受け取る側の振る舞いが、ここで分かれていることを確かめる。</b>
+ * 同じ軸で 3 本の破れが出た（#135 / #144 / #145）。<b>片づけの動詞は 1 つしかなく、
+ * 呼ぶのは作った場所だけである</b>——受け渡しの判断は {@code BackgroundTasks#run} が持つ（#146）。
  */
 class PasswordTest {
 
@@ -32,43 +32,15 @@ class PasswordTest {
     }
 
     @Test
-    @DisplayName("持ち主を移した後は、閉じても消えない")
-    void handedOffValueSurvivesClose() {
-        char[] raw = SECRET.toCharArray();
-
-        try (Password password = Password.of(raw)) {
-            password.handOff();
-        }
-
-        // ★★ ここが背景スレッドへ渡す経路の本体である。渡した側が消すと、
-        //   まだ読んでいない秘密が消え、正しいパスワードが弾かれる。
-        assertArrayEquals(SECRET.toCharArray(), raw, "移した後は、渡した側が消してはならない");
-    }
-
-    @Test
-    @DisplayName("受け取った側は、移された後でも消す")
-    void eraseIgnoresTheHandOffMark() {
-        char[] raw = SECRET.toCharArray();
-        Password password = Password.of(raw);
-        password.handOff();
-
-        password.erase();
-
-        // ★★ erase が印を見ると、まさに消すべき経路で消さなくなる。
-        //   受け取った側（PdfDocument#open の finally）が呼ぶのはこちらである。
-        assertArrayEquals(new char[raw.length], raw, "受け取った側は無条件に消すこと");
-    }
-
-    @Test
-    @DisplayName("二度閉じても、二度消しても落ちない")
+    @DisplayName("二度閉じても落ちない")
     void closingTwiceIsHarmless() {
         char[] raw = SECRET.toCharArray();
         Password password = Password.of(raw);
 
         password.close();
-        password.erase();
         password.close();
 
+        // BackgroundTasks#run は、走り出さなかったときに自分でも閉じる。二重は実際に起きる。
         assertArrayEquals(new char[raw.length], raw, "二重の片づけは実際に起きる経路である");
     }
 
