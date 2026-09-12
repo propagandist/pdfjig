@@ -3,7 +3,6 @@ package io.github.propagandist.pdfjig.core;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
@@ -59,8 +58,10 @@ public final class PdfDocument implements AutoCloseable {
     /**
      * パスワード付きで開く。
      *
-     * <p>渡された {@code password} は、成否によらず <b>このメソッドの中でゼロ埋めされる</b>。
-     * 呼び出し側は戻った後の配列の内容に依存してはならない。
+     * <p><b>ここが受け取った側である。</b>渡された {@code password} は、成否によらず
+     * <b>このメソッドの中でゼロ埋めされる</b>（{@link Password#erase()}）。
+     * <b>渡した側は、渡したことを {@link Password#handOff()} で記録してから手を引く</b>
+     * ——記録せずに閉じると、まだ読んでいない配列が消える。
      *
      * <p><b>既知の限界:</b> PDFBox 3 の {@code Loader.loadPDF} は {@code String} しか受け付けない。
      * そのため境界で一度だけ {@code String} が生成され、これは GC されるまでヒープに残り、
@@ -76,14 +77,14 @@ public final class PdfDocument implements AutoCloseable {
      *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}、
      *                         原因を絞れない場合は {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
      */
-    public static PdfDocument open(Path path, char[] password) {
-        // ★ char[] を持つ側は、読めるかを見る関門も try の中に置く。ここより外で投げると
+    public static PdfDocument open(Path path, Password password) {
+        // ★ 秘密を持つ側は、読めるかを見る関門も try の中に置く。ここより外で投げると
         //   finally を通らず、平文が残る（INV-5。#135）。
         //   パスワードを取らない open(Path) には掛からない——消すものが無い。
         try {
             requireReadable(path);
             // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
-            String boundaryPassword = new String(password);
+            String boundaryPassword = new String(password.value());
             return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword));
         } catch (InvalidPasswordException e) {
             throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
@@ -102,11 +103,13 @@ public final class PdfDocument implements AutoCloseable {
             //   パスワードかもしれない。分からないことを分からないまま伝える。
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
         } finally {
-            // ★★ 片づけからは投げない。null を渡されると Arrays.fill は NPE を投げ、
-            //   finally から投げた例外は本当の失敗を「置き換える」——ErrorCode ごと消える。
+            // ★★ 片づけからは投げない。null を渡されると NPE になり、finally から投げた例外は
+            //   本当の失敗を「置き換える」——ErrorCode ごと消える。
             //   消すものが無いときは、何も言わずに何もしないのが正しい。
+            //   ★ close ではなく erase を呼ぶ。受け取った側は「移された」印を見てはならない
+            //     ——見ると、まさに消すべき経路で消さなくなる（Password の Javadoc）。
             if (password != null) {
-                Arrays.fill(password, '\0');
+                password.erase();
             }
         }
     }

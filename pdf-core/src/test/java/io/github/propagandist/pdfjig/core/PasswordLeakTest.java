@@ -39,7 +39,8 @@ class PasswordLeakTest {
     void exceptionMustNotRevealAnyPassword() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
 
-        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, WRONG.toCharArray()));
+        PdfjigException thrown =
+                assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, Password.of(WRONG.toCharArray())));
 
         assertEquals(ErrorCode.INVALID_PASSWORD, thrown.errorCode());
 
@@ -53,7 +54,8 @@ class PasswordLeakTest {
     void causeMustNotBeChained() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
 
-        PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, WRONG.toCharArray()));
+        PdfjigException thrown =
+                assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, Password.of(WRONG.toCharArray())));
 
         assertEquals(null, thrown.getCause(), "原因例外を連結してはならない");
         assertEquals(
@@ -61,42 +63,45 @@ class PasswordLeakTest {
     }
 
     @Test
-    @DisplayName("open に渡した char[] は失敗時もゼロ埋めされる")
+    @DisplayName("open に渡した Password は失敗時もゼロ埋めされる")
     void passwordArrayIsZeroedOnFailure() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
-        char[] password = WRONG.toCharArray();
+        char[] raw = WRONG.toCharArray();
+        Password password = Password.of(raw);
 
         assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
 
-        assertArrayEquals(new char[password.length], password, "失敗時もゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "失敗時もゼロ埋めすること");
     }
 
     @Test
-    @DisplayName("open に渡した char[] は成功時もゼロ埋めされる")
+    @DisplayName("open に渡した Password は成功時もゼロ埋めされる")
     void passwordArrayIsZeroedOnSuccess() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
-        char[] password = CORRECT.toCharArray();
+        char[] raw = CORRECT.toCharArray();
+        Password password = Password.of(raw);
 
         try (PdfDocument document = PdfDocument.open(pdf, password)) {
             assertEquals(1, document.pageCount());
             assertEquals(true, document.encrypted());
         }
 
-        assertArrayEquals(new char[password.length], password, "成功時もゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "成功時もゼロ埋めすること");
     }
 
     @Test
-    @DisplayName("読めないファイルに渡した char[] もゼロ埋めされる")
+    @DisplayName("読めないファイルに渡した Password もゼロ埋めされる")
     void passwordArrayIsZeroedWhenFileCannotBeRead() {
         Path missing = tempDir.resolve("does-not-exist.pdf");
-        char[] password = CORRECT.toCharArray();
+        char[] raw = CORRECT.toCharArray();
+        Password password = Password.of(raw);
 
         PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(missing, password));
 
         assertEquals(ErrorCode.FILE_NOT_FOUND, thrown.errorCode());
         assertFalse(renderFully(thrown).contains(CORRECT), "パスワードが例外に露出している");
 
-        assertArrayEquals(new char[password.length], password, "開けなかった経路でもゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "開けなかった経路でもゼロ埋めすること");
     }
 
     @Test
@@ -113,7 +118,8 @@ class PasswordLeakTest {
     @DisplayName("パスワードに使えない文字が混ざっても、PDFBox の例外がそのまま出ない")
     void prohibitedCharacterMustNotEscapeUnwrapped() throws Exception {
         Path pdf = TestPdfs.encrypted(tempDir.resolve("encrypted.pdf"), CORRECT);
-        char[] password = PROHIBITED.toCharArray();
+        char[] raw = PROHIBITED.toCharArray();
+        Password password = Password.of(raw);
 
         PdfjigException thrown = assertThrows(PdfjigException.class, () -> PdfDocument.open(pdf, password));
 
@@ -131,7 +137,7 @@ class PasswordLeakTest {
         assertFalse(rendered.contains("org.apache.pdfbox"), "PDFBox のフレームが残っている");
         assertFalse(rendered.contains("LEFT-TO-RIGHT MARK"), "パスワードの文字が露出している");
 
-        assertArrayEquals(new char[password.length], password, "包む経路でもゼロ埋めすること");
+        assertArrayEquals(new char[raw.length], raw, "包む経路でもゼロ埋めすること");
     }
 
     /** メッセージ・toString・スタックトレースをすべて連結した文字列。 */
