@@ -168,6 +168,10 @@ final class BackgroundTasks {
         task.setOnFailed(event -> finish(() -> onFailed.accept(task.getException())));
         // ★ 取り消しでも下ろす。いまは誰も取り消さないが、下ろす経路が 2 つしか無い形にしておくと、
         //   取り消しを足した日に「進行中のまま二度と戻らない」を作る（#114）。
+        //   ★★ 取り消しを足す日は、持ち主の片づけもここで考えること（run(Password, …)）。
+        //     走り出す前に取り消されると call が呼ばれず、仕事の枠が閉じない——平文が残る。
+        //     ここで閉じる形にはできない。走っている最中の取り消しでは call と並走するので、
+        //     読んでいる最中に消すことになる（#146）。
         task.setOnCancelled(event -> finish(() -> {}));
 
         busy.set(true);
@@ -201,6 +205,14 @@ final class BackgroundTasks {
      * @param onSucceeded 成功したときに JavaFX スレッドで呼ばれる
      * @param onFailed    失敗したときに JavaFX スレッドで呼ばれる
      * @param <T>         仕事の結果
+     * <p><b>★★ 受け取った仕事を捨てる実行係には渡せない。</b>閉じるのは
+     * <b>断ったとき・始め方が投げたとき・仕事が終わったとき</b>の 3 つだけなので、
+     * <b>受け取っておいて一度も実行しない実行係には、閉じる契機がそもそも訪れない</b>
+     * ——平文が残る（INV-5）。<b>これは持ち主に固有の穴ではない</b>——
+     * 同じ実行係の下では {@link #busy()} も下りず、<b>門が二度と開かない</b>（#114）。
+     * <b>捨てたことを知る手段が無いので、機械では縛れない。</b>既定の始め方
+     * （{@link #startWorker}）とテストの実行係は、どちらも必ず 1 度実行する。
+     *
      * @return 走り出したなら {@code true}。断ったなら {@code false}
      * @throws RuntimeException {@link #run(Supplier, Consumer, Consumer)} と同じ。
      *                          <b>投げる前に {@code owned} を閉じてある</b>
