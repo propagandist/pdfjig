@@ -595,10 +595,17 @@ public final class PdfBoxPageOperations implements PageOperations {
      * {@code writeByMerging} の 2 つがそれである——<b>差分の前は保存より前に流れていた。</b>
      * <b>「書き出す前に伝えて選ばせる」は、これとは別の口が持つ</b>
      * （{@code docs/SPEC.md} §4.3.1。問うのは画面である）。
+     *
+     * <p><b>★★ ここで受け手が投げたとき、出力は既に書かれている。</b>
+     * <b>書けたものは消さない</b>——<b>通知に失敗したことは、書き出しに失敗したことではない</b>
+     * （優先順位 1）。<b>呼ぶ側には自分が投げた失敗がそのまま届く</b>ので、
+     * <b>出力が在ることは分かる。</b>★ <b>この判断は #178 が引き取る</b>
+     * ——{@code split} は後始末の {@code try} の外で呼ぶので、同じ形で N 個が残る。
      */
     private void report(List<Warning> collected) {
         // ★ forEach ではなく for で書く。ArchUnit はメソッド参照を呼び出しとして数えない
-        //   ことがあり、「onWarning を呼ぶのはここだけ」を縛る規則から漏れる（#178）。
+        //   ことがあるので、呼び出しを数える規則を将来置くときに漏れる（#178 が持つ）。
+        //   ★ その規則はまだ無い——いまこの形にしてあるのは、置く日に書き換えずに済ませるためである。
         for (Warning warning : collected) {
             warnings.onWarning(warning);
         }
