@@ -514,20 +514,22 @@ public final class MainWindow {
         }
 
         DocumentSession saving = session;
-        // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
-        //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
-        Optional<Sources> keyed = askKeys(saving);
-        if (keyed.isEmpty()) {
-            return;
-        }
-        Sources inputs = keyed.get();
-
         List<Path> sources = saving.paths();
         List<PageSelection> pages = saving.order().toPageSelections();
         // 区切りと選択位置は書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
         List<Boolean> breaks = saving.order().breaks();
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
+
+        // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
+        //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
+        //   持ち主の決まっていない平文の鍵がそこに残る（INV-5）——渡せば向こうが必ず閉じる。
+        //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
+        Optional<Sources> keyed = askKeys(saving);
+        if (keyed.isEmpty()) {
+            return;
+        }
+        Sources inputs = keyed.get();
         boolean started = run(
                 inputs,
                 () -> {
@@ -905,8 +907,11 @@ public final class MainWindow {
             return;
         }
 
-        // ★ 控えてから訊く。窓が出ている間も Platform.runLater は回るので、
-        //   その間に文書が入れ替わりうる（#133）。saveAs と同じ形に揃えてある。
+        // ★★ 控えるのは、呼ぶ側が既に確定させた segments と対にする出どころである。
+        //   窓（フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
+        //   その間に文書が入れ替わりうる（#133）——入れ替わった後の出どころに
+        //   入れ替わる前の segments を当てると、別の文書のページを書き出す。
+        //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
         DocumentSession writing = session;
         Optional<Sources> keyed = askKeys(writing);
         if (keyed.isEmpty()) {
@@ -1061,9 +1066,15 @@ public final class MainWindow {
      * <p><b>★ 訊くのは、開くとき鍵が要った出どころだけである。</b>
      * オーナーパスワードだけが掛かった文書は<b>鍵なしで開けており、書き出しも鍵なしで通る。</b>
      *
-     * <p><b>★★ 途中で取り消されたら、そこまでに入力された鍵をここで閉じる。</b>
-     * <b>まだ仕事へ渡していないので、持ち主はここである</b>——渡した後の片づけは
+     * <p><b>★★ 渡しきるまでの持ち主はここである。</b>取り消されても、途中で投げても、
+     * <b>そこまでに入力された鍵はここで閉じる</b>——渡した後の片づけは
      * {@link BackgroundTasks} が持つ。
+     *
+     * <p><b>★ 取り消しだけを見る形では足りない</b>（#196 の門の 2 段目）。
+     * <b>窓の中で投げる経路は別に在り</b>、そこを通ると<b>持ち主の決まっていない平文が残る</b>
+     * ——{@code addWithPassword} が 1 本ぶんについて同じ形を持っている（INV-5。#145）。
+     * <b>渡しきったかどうかで分ける形は {@link BackgroundTasks#run(List, Supplier,
+     * Consumer, Consumer)} と同じである。</b>
      *
      * @param saving 書き出すセッション
      * @return 書き出しに使う入力。取り消されたら空
@@ -1071,20 +1082,28 @@ public final class MainWindow {
     private Optional<Sources> askKeys(DocumentSession saving) {
         List<Path> paths = saving.paths();
         List<Source> inputs = new ArrayList<>(paths.size());
-        for (int sourceIndex = 0; sourceIndex < paths.size(); sourceIndex++) {
-            Path path = paths.get(sourceIndex);
-            if (!saving.keyed(sourceIndex)) {
-                inputs.add(Source.of(path));
-                continue;
+        boolean handedOver = false;
+        try {
+            for (int sourceIndex = 0; sourceIndex < paths.size(); sourceIndex++) {
+                Path path = paths.get(sourceIndex);
+                if (!saving.keyed(sourceIndex)) {
+                    inputs.add(Source.of(path));
+                    continue;
+                }
+                Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.WRITE, false);
+                if (entered.isEmpty()) {
+                    return Optional.empty();
+                }
+                inputs.add(Source.of(path, entered.get()));
             }
-            Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.WRITE, false);
-            if (entered.isEmpty()) {
+            Optional<Sources> asked = Optional.of(new Sources(inputs));
+            handedOver = true;
+            return asked;
+        } finally {
+            if (!handedOver) {
                 keysOf(inputs).forEach(Password::close);
-                return Optional.empty();
             }
-            inputs.add(Source.of(path, entered.get()));
         }
-        return Optional.of(new Sources(inputs));
     }
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
