@@ -146,9 +146,7 @@ class PdfBoxPageOperationsTest {
             //   開く前に PASSWORD_REQUIRED で落ちて、警告に届かない。
             Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
             Path output = tempDir.resolve("merged.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             // ★★ 包みの中で受け手を動かしていた間は、これが「ファイルの読み書きに失敗しました」
             //   に化けていた——呼ぶ側の失敗が入力のせいにされる（#178）。
@@ -162,9 +160,7 @@ class PdfBoxPageOperationsTest {
         void outputSurvivesAFailingListener() throws Exception {
             Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
             Path output = tempDir.resolve("merged.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(
                     IllegalStateException.class,
@@ -185,9 +181,7 @@ class PdfBoxPageOperationsTest {
             Path first = TestPdfs.plain(tempDir.resolve("a.pdf"), 1);
             Path second = TestPdfs.plain(tempDir.resolve("b.pdf"), 1);
             Path output = tempDir.resolve("assembled.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(
                     IllegalStateException.class,
@@ -274,25 +268,37 @@ class PdfBoxPageOperationsTest {
         void removesPartialOutputOnFailure() throws Exception {
             // 出力先が既にある場合は書き出しに入る前に弾かれるため、この経路は通らない。
             // 実際に途中で落ちるのはディスクが尽きた・権限を失ったといった場合であり、
-            // それは環境に依らせて起こせない。警告の通知を故意に失敗させて代わりにする。
-            //
-            // ページどうしがリンクで繋がった文書を 1 ページずつに切ると、宛先を失った
-            // 参照の警告が出力ごとに 1 度ずつ出る。その 2 度目で落とせば、
-            // 1 つ目を書き終えて 2 つ目を書く前という狙った位置で失敗する。
-            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            // それは環境に依らせて起こせない。書き出しそのものを 2 個目で失敗させる。
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
             Path outputDir = tempDir.resolve("out");
 
-            AtomicInteger notified = new AtomicInteger();
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                if (notified.incrementAndGet() == 2) {
-                    throw new IllegalStateException("書き出しの途中で失敗させる");
-                }
-            });
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), failingOnSave(2));
+
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir))
+                            .errorCode());
+
+            assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
+        }
+
+        @Test
+        @DisplayName("★★ 通知で失敗しても、書けた N 個は消さない")
+        void outputsSurviveAFailingListener() throws Exception {
+            // ★★ 差分の前は、ここで全部消えていた——受け手を後始末の try の中で動かしていたので、
+            //   通知の失敗が「書き出しの失敗」として扱われた（#178）。
+            //   通知に失敗したことは、書き出しに失敗したことではない（優先順位 1）。
+            //   ★ 隣の removesPartialOutputOnFailure と同じ形で 2 通りの結末になっていた側である。
+            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            Path outputDir = tempDir.resolve("out");
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(
                     IllegalStateException.class, () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir));
 
-            assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
+            assertEquals(List.of("doc_001.pdf", "doc_002.pdf", "doc_003.pdf"), listFilesIn(outputDir), "書けた出力を消している");
         }
     }
 
@@ -318,6 +324,20 @@ class PdfBoxPageOperationsTest {
             assertEquals(ErrorCode.INVALID_PAGE_ORDER, reorderFailure(input, List.of(1, 2)));
             assertEquals(ErrorCode.INVALID_PAGE_ORDER, reorderFailure(input, List.of(1, 2, 2)));
             assertEquals(ErrorCode.INVALID_PAGE_ORDER, reorderFailure(input, List.of(1, 2, 4)));
+        }
+
+        @Test
+        @DisplayName("★★ 単一の入力を書き出す経路でも、包みが飲まない")
+        void callerFailureIsNotWrapped() throws Exception {
+            // ★★ ここが #178 の「残った石」だった経路である——reorder / extractPages /
+            //   deletePages / assemble / split の 6 つが writeFromSingleSource を通る。
+            //   包みを入口へ置いた以上、受け手を包みの中で動かすと呼ぶ側の失敗が
+            //   NOT_A_PDF に化ける。溜めて抜けてから流すことで、それが起きない。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 2);
+            Path output = tempDir.resolve("reordered.pdf");
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
+
+            assertThrows(IllegalStateException.class, () -> failing.reorder(encrypted, List.of(2, 1), output));
         }
 
         private ErrorCode reorderFailure(Path input, List<Integer> newOrder) {
@@ -626,28 +646,25 @@ class PdfBoxPageOperationsTest {
         @Test
         @DisplayName("書き出しの途中で失敗したら、それまでに書いたものも残さない")
         void removesPartialOutputOnFailure() throws Exception {
-            // 手法は Split の同名のテストと同じである。実際に途中で落ちるのはディスクが
-            // 尽きた・権限を失ったといった場合で、環境に依らせて起こせない。宛先を失った
-            // 参照の警告を 2 度目で失敗させ、1 つ目を書き終えて 2 つ目を書く前で落とす。
-            Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            // 手法は Split の同名のテストと同じである。書き出しそのものを 2 個目で失敗させ、
+            // 1 つ目を書き終えて 2 つ目を書く前という狙った位置で落とす。
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
             Path outputDir = tempDir.resolve("out");
 
-            AtomicInteger notified = new AtomicInteger();
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                if (notified.incrementAndGet() == 2) {
-                    throw new IllegalStateException("書き出しの途中で失敗させる");
-                }
-            });
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), failingOnSave(2));
 
-            assertThrows(
-                    IllegalStateException.class,
-                    () -> failing.assembleEach(
-                            List.of(input),
-                            List.of(
-                                    List.of(PageSelection.of(0, 1)),
-                                    List.of(PageSelection.of(0, 2)),
-                                    List.of(PageSelection.of(0, 3))),
-                            outputDir));
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> failing.assembleEach(
+                                            List.of(input),
+                                            List.of(
+                                                    List.of(PageSelection.of(0, 1)),
+                                                    List.of(PageSelection.of(0, 2)),
+                                                    List.of(PageSelection.of(0, 3))),
+                                            outputDir))
+                            .errorCode());
 
             assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
         }
@@ -1261,6 +1278,46 @@ class PdfBoxPageOperationsTest {
                 collect(array.get(i), seen, collected);
             }
         }
+    }
+
+    /**
+     * {@code n} 個目の書き出しで失敗する書き出し係。
+     *
+     * <p><b>★★ 以前は {@link WarningListener} を投げさせて代わりにしていた</b>（#178）。
+     * <b>あの契約は「実装は例外を投げてはならない」と定めている</b>ので、
+     * <b>契約違反を常用の道具にしていたことになる</b>——そのせいで
+     * {@code writeFromSingleSource} を溜める形へ替えられなかった。
+     *
+     * <p><b>★ 本物の失敗では作れない。</b>ディスクが尽きる・権限を失うは環境に依らせて
+     * 起こせず、<b>Windows では出力先のディレクトリを書き込み不可にもできない</b>
+     * （{@code File#setWritable(false)} が {@code false} を返し、3 ファイルとも書けた。
+     * <b>2026-09-13 実測</b>）。<b>事前に出力名を塞ぐ手も使えない</b>——
+     * {@code split} は書き出しに入る前に「1 つでも既にあれば何も書かない」を通すので、
+     * <b>作りたい「1 つ目を書き終えて 2 つ目を書く前」より手前で弾かれる。</b>
+     */
+    private static PdfBoxPageOperations.DocumentSaver failingOnSave(int nth) {
+        AtomicInteger saved = new AtomicInteger();
+        return (document, output) -> {
+            if (saved.incrementAndGet() == nth) {
+                throw new PdfjigException(ErrorCode.IO_FAILURE);
+            }
+            PdfBoxPageOperations.saveDocument(document, output);
+        };
+    }
+
+    /**
+     * 警告を受け取ったら必ず投げる受け手。
+     *
+     * <p><b>★ 契約違反をわざと起こす道具である</b>（{@code WarningListener} は
+     * 「実装は例外を投げてはならない」と定めている）。<b>縛りたいのは、破られたときに
+     * {@code pdf-core} が何をするかである</b>——塗り替えずに通し、書けた出力も消さない（#178）。
+     * <b>書き出しを失敗させたいときは {@link #failingOnSave} を使うこと</b>——
+     * あちらは契約を破らない。
+     */
+    private static WarningListener throwingListener() {
+        return warning -> {
+            throw new IllegalStateException("受け手が投げる");
+        };
     }
 
     /** そのディレクトリにあるファイル名。ディレクトリが無ければ空。 */

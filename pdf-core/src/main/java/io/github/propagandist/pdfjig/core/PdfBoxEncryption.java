@@ -1,5 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
+import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guarded;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +22,17 @@ public final class PdfBoxEncryption implements Encryption {
 
     @Override
     public EncryptionInfo inspect(Path input) {
+        return guarded(ErrorCode.NOT_A_PDF, () -> inspectAt(input));
+    }
+
+    /**
+     * 暗号化の状態を読む実体。
+     *
+     * <p><b>★ 公開の {@code inspect} どうしで呼び合わない。</b>包みが二重になるだけなら
+     * 害は無いが、<b>{@code pdf-archtest} が「公開の入口はどれも包みを通る」を見るとき、
+     * 呼び合いは入口の形を読みにくくする</b>（#178）。
+     */
+    private static EncryptionInfo inspectAt(Path input) {
         try (PdfDocument document = PdfDocument.open(input)) {
             return document.encryption();
         } catch (PdfjigException e) {
@@ -36,12 +49,14 @@ public final class PdfBoxEncryption implements Encryption {
 
     @Override
     public EncryptionInfo inspect(Path input, Password password) {
-        // ★ パスワードが要ったかどうかは、渡して開いただけでは分からない——オーナー
-        //   パスワードだけの文書も同じ道で開ける。先に訊いてから、その答えを載せる。
-        boolean required = inspect(input).userPasswordRequired();
-        try (PdfDocument document = PdfDocument.open(input, password)) {
-            return document.encryptionWith(required);
-        }
+        return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
+            // ★ パスワードが要ったかどうかは、渡して開いただけでは分からない——オーナー
+            //   パスワードだけの文書も同じ道で開ける。先に訊いてから、その答えを載せる。
+            boolean required = inspectAt(input).userPasswordRequired();
+            try (PdfDocument document = PdfDocument.open(input, password)) {
+                return document.encryptionWith(required);
+            }
+        });
     }
 
     @Override
@@ -54,10 +69,14 @@ public final class PdfBoxEncryption implements Encryption {
             Path output) {
         requireAbsent(output);
 
-        try (PdfDocument source = PdfDocument.open(input)) {
-            protectInto(source.delegate(), userPassword, ownerPassword, permissions, algorithm, output);
-        }
-        return output;
+        // ★★ この包みは消さない。入力を閉じ損ねただけで書けた出力が消えるのを避けるため、
+        //   消す判断は protectInto の中だけに置いてある（下）。ここは符号を畳むだけである。
+        return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
+            try (PdfDocument source = PdfDocument.open(input)) {
+                protectInto(source.delegate(), userPassword, ownerPassword, permissions, algorithm, output);
+            }
+            return output;
+        });
     }
 
     /**
@@ -107,10 +126,12 @@ public final class PdfBoxEncryption implements Encryption {
     public Path unprotect(Path input, Password password, Path output) {
         requireAbsent(output);
 
-        try (PdfDocument source = PdfDocument.open(input, password)) {
-            unprotectInto(source.delegate(), output);
-        }
-        return output;
+        return guarded(ErrorCode.IO_FAILURE, () -> {
+            try (PdfDocument source = PdfDocument.open(input, password)) {
+                unprotectInto(source.delegate(), output);
+            }
+            return output;
+        });
     }
 
     /** 保護を外して書き出す。<b>閉じる失敗をここへ入れない</b>（{@link #protectInto} と同じ理由）。 */

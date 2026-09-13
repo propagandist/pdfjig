@@ -1,5 +1,8 @@
 package io.github.propagandist.pdfjig.core;
 
+import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guarded;
+import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guardedRun;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,17 +54,17 @@ public final class PdfDocument implements AutoCloseable {
      */
     public static PdfDocument open(Path path) {
         requireReadable(path);
-        try {
-            return new PdfDocument(Loader.loadPDF(path.toFile()), false);
-        } catch (InvalidPasswordException e) {
-            throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
-        } catch (IOException | RuntimeException e) {
-            // ★ PDFBox は IOException ではない例外も投げる（#144）。ここでは秘密を持たないので
-            //   INV-5 には当たらないが、包むのは「外へ出るのは PdfjigException だけ」という
-            //   契約のためである——包まないと、呼ぶ側の分岐がどれも当たらない。
-            //   ★ 分類を細かくする材料がここには無い。開こうとして駄目だった、しか分からない。
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        }
+        // ★ 分類を細かくする材料がここには無い。開こうとして駄目だった、しか分からない。
+        //   包むのは「外へ出るのは PdfjigException だけ」という契約のためである
+        //   ——包まないと、呼ぶ側の分岐がどれも当たらない（#144 / #178）。
+        return guarded(ErrorCode.NOT_A_PDF, () -> {
+            try {
+                return new PdfDocument(Loader.loadPDF(path.toFile()), false);
+            } catch (InvalidPasswordException e) {
+                // ★ 絞れた失敗は内側で言い直す。wrapping が素通しするので、包みには塗り替えられない。
+                throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
+            }
+        });
     }
 
     /**
@@ -86,27 +89,27 @@ public final class PdfDocument implements AutoCloseable {
      *                         原因を絞れない場合は {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
      */
     public static PdfDocument open(Path path, Password password) {
-        try {
+        // ★★ INV-5。PDFBox は AES-256 のとき、照合する前に SASLprep を通す。禁止文字に
+        //   当たると、本物のパスワードの文字と位置をメッセージに載せた
+        //   IllegalArgumentException を投げる——IOException ではないので、下の 2 つに
+        //   当たらない。wrapping は型名しか残さないので、包めば漏れない（#144）。
+        //   ★ どちらが原因かは、呼んだ側からは区別が付かない。文書かもしれず、
+        //   パスワードかもしれない。分からないことを分からないまま伝える。
+        return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
             requireReadable(path);
             // INV-5 の境界。PDFBox の API 制約により String 化は避けられない。
             String boundaryPassword = new String(password.value());
-            // ★ パスワードを渡して開けたが、それが要ったかどうかはここからは分からない
-            //   ——オーナーパスワードだけの文書も、同じ道で開ける。requiredWhenOpened が
-            //   知っている呼ぶ側だけが、正しい値を載せられる（Encryption#inspect）。
-            return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword), true);
-        } catch (InvalidPasswordException e) {
-            throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        } catch (RuntimeException e) {
-            // ★★ INV-5。PDFBox は AES-256 のとき、照合する前に SASLprep を通す。禁止文字に
-            //   当たると、本物のパスワードの文字と位置をメッセージに載せた
-            //   IllegalArgumentException を投げる——IOException ではないので、上の 2 つに
-            //   当たらない。wrapping は型名しか残さないので、ここで包めば漏れない（#144）。
-            //   ★ どちらが原因かは、呼んだ側からは区別が付かない。文書かもしれず、
-            //   パスワードかもしれない。分からないことを分からないまま伝える。
-            throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
-        }
+            try {
+                // ★ パスワードを渡して開けたが、それが要ったかどうかはここからは分からない
+                //   ——オーナーパスワードだけの文書も、同じ道で開ける。requiredWhenOpened が
+                //   知っている呼ぶ側だけが、正しい値を載せられる（Encryption#inspect）。
+                return new PdfDocument(Loader.loadPDF(path.toFile(), boundaryPassword), true);
+            } catch (InvalidPasswordException e) {
+                throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
+            } catch (IOException e) {
+                throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+            }
+        });
     }
 
     /**
@@ -120,11 +123,7 @@ public final class PdfDocument implements AutoCloseable {
      * @throws PdfjigException 数えられない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public int pageCount() {
-        try {
-            return delegate.getNumberOfPages();
-        } catch (RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        }
+        return guarded(ErrorCode.NOT_A_PDF, () -> delegate.getNumberOfPages());
     }
 
     /**
@@ -148,7 +147,7 @@ public final class PdfDocument implements AutoCloseable {
      * @throws PdfjigException 読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
     EncryptionInfo encryption() {
-        try {
+        return guarded(ErrorCode.NOT_A_PDF, () -> {
             if (!delegate.isEncrypted()) {
                 return EncryptionInfo.none();
             }
@@ -158,9 +157,7 @@ public final class PdfDocument implements AutoCloseable {
                     algorithmOf(encryption),
                     userPasswordRequired,
                     permissionsOf(new AccessPermission(encryption.getPermissions())));
-        } catch (RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        }
+        });
     }
 
     /**
@@ -250,11 +247,7 @@ public final class PdfDocument implements AutoCloseable {
      * @throws PdfjigException 読み取れない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public boolean encrypted() {
-        try {
-            return delegate.isEncrypted();
-        } catch (RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        }
+        return guarded(ErrorCode.NOT_A_PDF, () -> delegate.isEncrypted());
     }
 
     /**
@@ -272,11 +265,8 @@ public final class PdfDocument implements AutoCloseable {
      * @throws PdfjigException 読み取れない場合は {@link ErrorCode#NOT_A_PDF}
      */
     public boolean signed() {
-        try {
-            return !delegate.getSignatureDictionaries().isEmpty();
-        } catch (RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
-        }
+        return guarded(
+                ErrorCode.NOT_A_PDF, () -> !delegate.getSignatureDictionaries().isEmpty());
     }
 
     /**
@@ -300,11 +290,7 @@ public final class PdfDocument implements AutoCloseable {
      */
     @Override
     public void close() {
-        try {
-            delegate.close();
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
-        }
+        guardedRun(ErrorCode.IO_FAILURE, () -> delegate.close());
     }
 
     private static void requireReadable(Path path) {
