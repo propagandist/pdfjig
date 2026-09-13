@@ -78,6 +78,9 @@ class ArchitectureTest {
     /** 警告を溜めて、包みを抜けてから流す型。 */
     private static final String WARNINGS = "io.github.propagandist.pdfjig.core.Warnings";
 
+    /** 包みと受け口の規律が掛かる範囲。{@code pdf-desktop} の受け手は対象外である。 */
+    private static final String CORE_PACKAGE = "io.github.propagandist.pdfjig.core";
+
     private static JavaClasses classes;
 
     @BeforeAll
@@ -723,6 +726,12 @@ class ArchitectureTest {
      * <p><b>★ クラスを数え上げない。</b>境界が増えても規則を直さずに効く——
      * {@code PdfBoxTextExtraction} に警告の口が付く日（#180）も、{@code pdf-mcp} が来る日（#103）も、
      * <b>受け口を握るのが {@code Warnings} である限りここが見る。</b>
+     *
+     * <p><b>★ 見るのは {@code pdf-core} だけである。</b>守っている性質は
+     * <b>「{@code pdf-core} が包みの中で呼ぶ側のコードを走らせない」</b>であり、
+     * {@code WarningListener} は {@code pdf-desktop} が実装する公開の口でもある——
+     * <b>絞らないと、画面側の受け手が別の受け手へ流した日に、包みと無関係な理由で赤くなる。</b>
+     * <b>そのとき打てる手は期待値へ名前を足すことだけで、避けたはずの数え上げが戻る。</b>
      */
     @Test
     @DisplayName("警告の受け口を動かすのは Warnings だけである")
@@ -731,6 +740,32 @@ class ArchitectureTest {
                 Set.of(WARNINGS + ".report()"),
                 unitsNotifyingWarningListener(),
                 "警告の受け口が Warnings の外から動かされている。包みの中でそれが走ると、" + "呼ぶ側が投げた失敗を包みが飲み、入力のせいに化ける（#178）");
+    }
+
+    /**
+     * 溜めた警告は、溜め始めたところが流す。
+     *
+     * <p><b>★★ 上の 2 本が見ない失敗が 1 つある</b>——<b>{@code Warnings} を作ったのに
+     * {@code report()} を呼び忘れる</b>形である。<b>包みも受け口も規律どおりなのに、
+     * 警告が 1 件も届かない</b>——「保護は引き継がれません」が黙って消える（優先順位 2）。
+     * <b>公開の入口が 9 本あり、同じ枠を手で書き写している</b>ので、
+     * <b>次に 1 本足す日がいちばん危ない。</b>
+     *
+     * <p>作るコード単位と流すコード単位が一致していれば、書き忘れはここで落ちる。
+     *
+     * <p><b>★ 置く場所までは見ない。</b>{@code report()} が包みの<b>中</b>で呼ばれていても
+     * ここは緑である——<b>ラムダの中と外を、呼び出しの一覧からは区別できない</b>
+     * （{@link #publicEntryPointsGoThroughTheGuard} と同じ限界）。
+     * <b>そちらは挙動のテストが縛っている</b>（{@code PdfBoxPageOperationsTest} の
+     * 「包みが飲まない」3 本）。
+     */
+    @Test
+    @DisplayName("Warnings を作ったところが、溜めたものを流す")
+    void whoeverCollectsAlsoReports() {
+        assertEquals(
+                unitsConstructing(WARNINGS),
+                unitsCalling(WARNINGS, "report"),
+                "溜め始めたところと流すところが食い違っている。作って流さなければ、" + "規律どおりに見えるまま警告が 1 件も届かない（#178）");
     }
 
     /**
@@ -788,14 +823,36 @@ class ArchitectureTest {
         return type.getPackageName().startsWith(PDFBOX);
     }
 
-    /** {@code WarningListener#onWarning} を呼んでいる本番のコード単位。 */
+    /**
+     * {@code WarningListener#onWarning} を呼んでいる {@code pdf-core} のコード単位。
+     *
+     * <p>絞る理由は {@link #onlyWarningsNotifiesTheListener()} にある。
+     */
     private static Set<String> unitsNotifyingWarningListener() {
-        return classes.stream()
+        return unitsCalling(WARNING_LISTENER, "onWarning");
+    }
+
+    /** その型のそのメソッドを呼んでいる、{@code pdf-core} のコード単位。 */
+    private static Set<String> unitsCalling(String owner, String method) {
+        return coreClasses()
                 .flatMap(javaClass -> javaClass.getMethodCallsFromSelf().stream())
-                .filter(call -> call.getTargetOwner().getName().equals(WARNING_LISTENER))
-                .filter(call -> call.getTarget().getName().equals("onWarning"))
+                .filter(call -> call.getTargetOwner().getName().equals(owner))
+                .filter(call -> call.getTarget().getName().equals(method))
                 .map(call -> describe(call.getOrigin()))
                 .collect(Collectors.toSet());
+    }
+
+    /** その型を作っている、{@code pdf-core} のコード単位。 */
+    private static Set<String> unitsConstructing(String owner) {
+        return coreClasses()
+                .flatMap(javaClass -> javaClass.getConstructorCallsFromSelf().stream())
+                .filter(call -> call.getTargetOwner().getName().equals(owner))
+                .map(call -> describe(call.getOrigin()))
+                .collect(Collectors.toSet());
+    }
+
+    private static Stream<JavaClass> coreClasses() {
+        return classes.stream().filter(javaClass -> javaClass.getPackageName().equals(CORE_PACKAGE));
     }
 
     /**
@@ -812,7 +869,7 @@ class ArchitectureTest {
                 .flatMap(javaClass -> Stream.concat(
                         javaClass.getCodeUnits().stream()
                                 .filter(ArchitectureTest::touchesCharArray)
-                                .map(unit -> unit.getOwner().getName() + "." + unit.getName() + "()"),
+                                .map(ArchitectureTest::describe),
                         javaClass.getFields().stream()
                                 .filter(field -> isCharArray(field.getRawType()))
                                 .map(field -> field.getOwner().getName() + "." + field.getName())))
@@ -843,8 +900,7 @@ class ArchitectureTest {
                 .filter(call -> call.getTarget().getName().equals("fill"))
                 .filter(call ->
                         call.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
-                .map(call ->
-                        call.getOriginOwner().getName() + "." + call.getOrigin().getName() + "()")
+                .map(call -> describe(call.getOrigin()))
                 .collect(Collectors.toSet());
     }
 
