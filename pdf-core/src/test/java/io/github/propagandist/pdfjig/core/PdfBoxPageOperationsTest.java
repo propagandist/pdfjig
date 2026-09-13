@@ -146,9 +146,7 @@ class PdfBoxPageOperationsTest {
             //   開く前に PASSWORD_REQUIRED で落ちて、警告に届かない。
             Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
             Path output = tempDir.resolve("merged.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             // ★★ 包みの中で受け手を動かしていた間は、これが「ファイルの読み書きに失敗しました」
             //   に化けていた——呼ぶ側の失敗が入力のせいにされる（#178）。
@@ -162,9 +160,7 @@ class PdfBoxPageOperationsTest {
         void outputSurvivesAFailingListener() throws Exception {
             Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 1);
             Path output = tempDir.resolve("merged.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(
                     IllegalStateException.class,
@@ -185,9 +181,7 @@ class PdfBoxPageOperationsTest {
             Path first = TestPdfs.plain(tempDir.resolve("a.pdf"), 1);
             Path second = TestPdfs.plain(tempDir.resolve("b.pdf"), 1);
             Path output = tempDir.resolve("assembled.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(
                     IllegalStateException.class,
@@ -299,9 +293,7 @@ class PdfBoxPageOperationsTest {
             //   ★ 隣の removesPartialOutputOnFailure と同じ形で 2 通りの結末になっていた側である。
             Path input = TestPdfs.withInternalLinks(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
             Path outputDir = tempDir.resolve("out");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(
                     IllegalStateException.class, () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir));
@@ -343,9 +335,7 @@ class PdfBoxPageOperationsTest {
             //   NOT_A_PDF に化ける。溜めて抜けてから流すことで、それが起きない。
             Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("enc.pdf"), "owner", 2);
             Path output = tempDir.resolve("reordered.pdf");
-            PageOperations failing = new PdfBoxPageOperations(warning -> {
-                throw new IllegalStateException("受け手が投げる");
-            });
+            PageOperations failing = new PdfBoxPageOperations(throwingListener());
 
             assertThrows(IllegalStateException.class, () -> failing.reorder(encrypted, List.of(2, 1), output));
         }
@@ -1290,7 +1280,6 @@ class PdfBoxPageOperationsTest {
         }
     }
 
-    /** そのディレクトリにあるファイル名。ディレクトリが無ければ空。 */
     /**
      * {@code n} 個目の書き出しで失敗する書き出し係。
      *
@@ -1316,6 +1305,22 @@ class PdfBoxPageOperationsTest {
         };
     }
 
+    /**
+     * 警告を受け取ったら必ず投げる受け手。
+     *
+     * <p><b>★ 契約違反をわざと起こす道具である</b>（{@code WarningListener} は
+     * 「実装は例外を投げてはならない」と定めている）。<b>縛りたいのは、破られたときに
+     * {@code pdf-core} が何をするかである</b>——塗り替えずに通し、書けた出力も消さない（#178）。
+     * <b>書き出しを失敗させたいときは {@link #failingOnSave} を使うこと</b>——
+     * あちらは契約を破らない。
+     */
+    private static WarningListener throwingListener() {
+        return warning -> {
+            throw new IllegalStateException("受け手が投げる");
+        };
+    }
+
+    /** そのディレクトリにあるファイル名。ディレクトリが無ければ空。 */
     private static List<String> listFilesIn(Path directory) throws IOException {
         if (!Files.isDirectory(directory)) {
             return List.of();

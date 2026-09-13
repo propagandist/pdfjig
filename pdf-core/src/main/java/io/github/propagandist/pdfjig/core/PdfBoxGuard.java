@@ -24,7 +24,27 @@ import java.io.IOException;
  *
  * <p><b>★ {@code Error} は捕まえない。</b>包むかどうかは #151 が持つ判断であり、この差分では
  * 変えていない。<b>ただし変える場所はもうここ 1 か所である</b>——以前は同じ判断が
- * 境界ごとの {@code catch} に散っていた。
+ * 境界ごとの {@code catch} に散っていた。<b>だから {@code pdf-core} に
+ * 「{@code catch (IOException | RuntimeException)} を書いて包む」形を新しく作らないこと</b>
+ * ——作った瞬間に、この行が嘘になる。
+ *
+ * <h2>符号の選び方</h2>
+ *
+ * <p><b>入口へ渡す {@code ErrorCode} は、最後まで絞れなかったときの行き先である。</b>
+ * 内側で分類したものは {@link PdfjigException#wrapping} が素通しするので、
+ * <b>ここへ来るのは「何が起きたか分からなかった」場合だけ</b>である。
+ * <b>だから「そのとき何をしていたか」を名指す。</b>
+ *
+ * <ul>
+ *   <li><b>読む・ページの木をいじる</b> → {@link ErrorCode#NOT_A_PDF}</li>
+ *   <li><b>書き出しが主である</b> → {@link ErrorCode#IO_FAILURE}</li>
+ *   <li><b>パスワードを渡して開く</b> → {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}</li>
+ *   <li><b>描画・抽出</b> → それぞれの専用の符号</li>
+ * </ul>
+ *
+ * <p><b>★ 揃えていないと、同じ公開メソッドが内側の分岐で違う符号を返すことになる</b>
+ * ——呼ぶ側は分岐を見られないので、<b>何をすればよいか分からなくなる</b>
+ * （{@code CLAUDE.md} 優先順位 2）。
  */
 final class PdfBoxGuard {
 
@@ -35,11 +55,7 @@ final class PdfBoxGuard {
      *
      * <p><b>★ 自分で分類した失敗は塗り替えない。</b>{@link PdfjigException#wrapping} が
      * 既に包んであるものを素通しするので、<b>内側で細かく分けた符号はそのまま外へ出る</b>
-     * ——{@code code} は<b>絞れなかったときの行き先</b>である。
-     *
-     * <p><b>★ 引数を返さない版は置かない。</b>ラムダは値を返す形と返さない形の
-     * <b>どちらにも当てはまる</b>ので、同じ名前で 2 つ置くと呼び出しが曖昧になる。
-     * 返すものが無いところは {@code Void} で受ける（{@link PdfDocument#close()}）。
+     * ——{@code code} は<b>絞れなかったときの行き先</b>である（上の「符号の選び方」）。
      *
      * @param code 絞れなかった失敗の符号
      * @param call PDFBox を走らせる仕事
@@ -55,6 +71,24 @@ final class PdfBoxGuard {
     }
 
     /**
+     * 返すもののない仕事を包む。
+     *
+     * <p><b>★ 同じ名前で重ねない。</b>ラムダは<b>値を返す形と返さない形のどちらにも
+     * 当てはまる</b>ので、{@code guarded} という名前を 2 つ置くと呼び出しが曖昧になる。
+     * <b>名前を分ければ済む</b>——{@code pdf-archtest} の規則は<b>呼ぶ先の型だけ</b>を見るので、
+     * どちらを呼んでも「包みを通った」と数えられる。
+     *
+     * @param code   絞れなかった失敗の符号
+     * @param action PDFBox を走らせる仕事
+     */
+    static void guardedRun(ErrorCode code, PdfBoxAction action) {
+        guarded(code, () -> {
+            action.run();
+            return null;
+        });
+    }
+
+    /**
      * PDFBox を走らせる仕事。
      *
      * <p><b>★ ここだけはチェック例外を通す</b>（{@code CLAUDE.md} の「チェック例外は使わない」は
@@ -65,5 +99,12 @@ final class PdfBoxGuard {
     interface PdfBoxCall<T> {
 
         T call() throws IOException;
+    }
+
+    /** 返すもののない {@link PdfBoxCall}。 */
+    @FunctionalInterface
+    interface PdfBoxAction {
+
+        void run() throws IOException;
     }
 }

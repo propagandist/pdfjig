@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
 import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guarded;
+import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guardedRun;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -101,12 +102,12 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.IO_FAILURE, () -> mergeInto(inputs, output, warnings));
+        guardedRun(ErrorCode.IO_FAILURE, () -> mergeInto(inputs, output, warnings));
         warnings.report();
         return output;
     }
 
-    private Path mergeInto(List<Path> inputs, Path output, Warnings warnings) throws IOException {
+    private void mergeInto(List<Path> inputs, Path output, Warnings warnings) throws IOException {
         try (OpenDocuments sources = new OpenDocuments();
                 PDDocument merged = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
@@ -123,7 +124,6 @@ public final class PdfBoxPageOperations implements PageOperations {
             applyInformation(merged, information, inputs.size() > 1, warnings);
             saver.save(merged, output);
         }
-        return output;
     }
 
     @Override
@@ -175,17 +175,16 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.NOT_A_PDF, () -> reorderInto(input, newOrder, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> reorderInto(input, newOrder, output, warnings));
         warnings.report();
         return output;
     }
 
-    private Path reorderInto(Path input, List<Integer> newOrder, Path output, Warnings warnings) {
+    private void reorderInto(Path input, List<Integer> newOrder, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             requirePermutation(newOrder, source.pageCount());
             writeFromSingleSource(source, selectionsOf(newOrder), output, warnings);
         }
-        return output;
     }
 
     @Override
@@ -193,7 +192,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.NOT_A_PDF, () -> assembleInto(List.of(input), pages, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> assembleInto(List.of(input), pages, output, warnings));
         warnings.report();
         return output;
     }
@@ -206,7 +205,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.NOT_A_PDF, () -> assembleInto(inputs, pages, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> assembleInto(inputs, pages, output, warnings));
         warnings.report();
         return output;
     }
@@ -218,8 +217,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 呼び合うと、<b>内側の {@code report} が外側の包みの中で走る</b>——
      * まさに {@link Warnings} が避けている形である。
      */
-    private Path assembleInto(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings)
-            throws IOException {
+    private void assembleInto(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings) {
         // 結合では保存が終わるまで入力を閉じられない。まとめて開いたまま保持する。
         try (OpenDocuments sources = new OpenDocuments()) {
             List<PdfDocument> documents = new ArrayList<>(inputs.size());
@@ -230,7 +228,6 @@ public final class PdfBoxPageOperations implements PageOperations {
             warnAboutContributing(documents, pages, warnings);
             write(inputs, documents, pages, output, warnings);
         }
-        return output;
     }
 
     @Override
@@ -253,8 +250,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     private List<Path> assembleEachInto(
-            List<Path> inputs, List<List<PageSelection>> segments, Path outputDir, Warnings warnings)
-            throws IOException {
+            List<Path> inputs, List<List<PageSelection>> segments, Path outputDir, Warnings warnings) {
         // 名前は最初の入力から作る。split と同じ規則を使う。
         List<Path> outputs = splitOutputPaths(inputs.get(0), outputDir, segments.size());
         // 1 つでも書けないなら、何も書かずに失敗させる。
@@ -285,12 +281,12 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.NOT_A_PDF, () -> rotateInto(input, rotations, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> rotateInto(input, rotations, output, warnings));
         warnings.report();
         return output;
     }
 
-    private Path rotateInto(Path input, Map<Integer, Rotation> rotations, Path output, Warnings warnings) {
+    private void rotateInto(Path input, Map<Integer, Rotation> rotations, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             int pageCount = source.pageCount();
             rotations
@@ -310,7 +306,6 @@ public final class PdfBoxPageOperations implements PageOperations {
             delegate.setAllSecurityToBeRemoved(true);
             saver.save(delegate, output);
         }
-        return output;
     }
 
     @Override
@@ -318,17 +313,16 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.NOT_A_PDF, () -> extractPagesInto(input, range, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> extractPagesInto(input, range, output, warnings));
         warnings.report();
         return output;
     }
 
-    private Path extractPagesInto(Path input, PageRange range, Path output, Warnings warnings) {
+    private void extractPagesInto(Path input, PageRange range, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             range.validateAgainst(source.pageCount());
             writeRange(source, range, output, warnings);
         }
-        return output;
     }
 
     @Override
@@ -336,12 +330,12 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guarded(ErrorCode.NOT_A_PDF, () -> deletePagesInto(input, range, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> deletePagesInto(input, range, output, warnings));
         warnings.report();
         return output;
     }
 
-    private Path deletePagesInto(Path input, PageRange range, Path output, Warnings warnings) {
+    private void deletePagesInto(Path input, PageRange range, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             int pageCount = source.pageCount();
             range.validateAgainst(pageCount);
@@ -355,7 +349,6 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             writeFromSingleSource(source, selectionsOf(remaining), output, warnings);
         }
-        return output;
     }
 
     /**
@@ -378,8 +371,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 取り除いたはずのページが参照から辿れて出力に残る。
      */
     private void write(
-            List<Path> inputs, List<PdfDocument> sources, List<PageSelection> pages, Path output, Warnings warnings)
-            throws IOException {
+            List<Path> inputs, List<PdfDocument> sources, List<PageSelection> pages, Path output, Warnings warnings) {
         int single = singleSourceIndexOf(pages);
         if (single >= 0) {
             writeFromSingleSource(sources.get(single), pages, output, warnings);
@@ -486,8 +478,19 @@ public final class PdfBoxPageOperations implements PageOperations {
      * {@link ErrorCode#NOT_A_PDF} を渡すので、<b>内側で言い直す</b>——
      * {@link PdfjigException#wrapping} が既に包んであるものを素通しするため、
      * <b>入口の符号には塗り替わらない。</b>
+     *
+     * <p><b>★★ 同じ公開メソッドが内側の分岐で違う符号を返す。</b>{@code assemble} は
+     * 出どころが 1 つなら {@link ErrorCode#NOT_A_PDF}、混ざれば {@link ErrorCode#IO_FAILURE} に
+     * なる——<b>呼ぶ側はその分岐を見られない</b>（{@code CLAUDE.md} 優先順位 2）。
+     * <b>この差分では揃えていない</b>——{@code merge} の符号ごと動かすことになり、
+     * <b>利用者へ届く値が変わる</b>。#191 が持つ。
      */
     private void writeByMerging(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings) {
+        guardedRun(ErrorCode.IO_FAILURE, () -> mergeCopiesInto(inputs, pages, output, warnings));
+    }
+
+    private void mergeCopiesInto(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings)
+            throws IOException {
         try (OpenDocuments copies = new OpenDocuments();
                 PDDocument target = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
@@ -529,8 +532,6 @@ public final class PdfBoxPageOperations implements PageOperations {
 
             target.setAllSecurityToBeRemoved(true);
             saver.save(target, output);
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
     }
 
@@ -883,11 +884,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <b>どの呼ぶ側を通っても符号は変わらない。</b>
      */
     static void saveDocument(PDDocument document, Path output) {
-        try {
-            document.save(output.toFile());
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
-        }
+        guardedRun(ErrorCode.IO_FAILURE, () -> document.save(output.toFile()));
     }
 
     /**

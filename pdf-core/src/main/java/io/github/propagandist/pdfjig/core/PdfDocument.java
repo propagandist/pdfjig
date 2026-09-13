@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
 import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guarded;
+import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guardedRun;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -289,12 +290,7 @@ public final class PdfDocument implements AutoCloseable {
      */
     @Override
     public void close() {
-        // ★ 返すものが無いので Void で受ける。値を返さない版を同じ名前で置くと、
-        //   ラムダがどちらにも当てはまって呼び出しが曖昧になる（PdfBoxGuard）。
-        guarded(ErrorCode.IO_FAILURE, () -> {
-            delegate.close();
-            return null;
-        });
+        guardedRun(ErrorCode.IO_FAILURE, () -> delegate.close());
     }
 
     private static void requireReadable(Path path) {

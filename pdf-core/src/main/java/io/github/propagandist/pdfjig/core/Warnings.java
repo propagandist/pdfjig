@@ -40,9 +40,9 @@ final class Warnings {
     private final List<Warning> collected = new ArrayList<>();
 
     Warnings(WarningListener listener) {
-        if (listener == null) {
-            throw new IllegalArgumentException("warnings は null にできません。");
-        }
+        // ★ null は検めない。作るのは受け口を既に検めた側だけであり
+        //   （PdfBoxPageOperations のコンストラクタ）、ここで重ねると
+        //   同じ文言の正本が 2 つになる。
         this.listener = listener;
     }
 
@@ -61,8 +61,10 @@ final class Warnings {
      * ——以前は {@code split} だけが後始末の {@code try} の外で流しており、
      * <b>同じ原因で 2 通りの結末になっていた。</b>
      *
-     * <p><b>★ メソッド参照で書かない。</b>{@code collected.forEach(listener::onWarning)} だと
-     * ArchUnit が呼び出しとして数えないことがあり、<b>上の規則がここを見落とす。</b>
+     * <p><b>★ メソッド参照で書かない。</b>{@code collected.forEach(listener::onWarning)} にすると
+     * <b>ArchUnit は呼び出しとして数えず、集合が空になる</b>（<b>2026-09-13 実測</b>）。
+     * <b>見落とすのではなく、守れているのに赤が出る</b>——そういう検査は無視する習慣を作る。
+     * <b>ラムダは数えられるが、メソッド参照は数えられない</b>（同日実測。同じ規則で両方を測った）。
      */
     void report() {
         for (Warning warning : collected) {
