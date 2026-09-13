@@ -22,7 +22,10 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -683,6 +686,17 @@ class ArchitectureTest {
      * ここが赤くなる。</b>同じ理由で、規則から見えなかった直の呼び出し 109 件
      * （{@code PageReferences} の 60 件を含む）も<b>包みの内側に入った。</b>
      *
+     * <p><b>★★ 対象はメソッド単位である。</b>以前は「PDFBox に触れる<b>クラス</b>の公開メソッド」
+     * を見ていたが、<b>PDFBox へ 1 歩も降りない公開メソッドを足した日に赤くなる</b>
+     * ——{@code PdfDocument#openedWithPassword()} は<b>控えた真偽を返すだけ</b>である。
+     * <b>意味のない {@code guarded} を書かせるか、除外を 1 つ増やすかになる</b>
+     * （#189 の門が予告し、#193 で現に踏んだ）。<b>いまは自分のクラスの中をたどって、
+     * ほんとうに PDFBox へ届くものだけを対象にする。</b>
+     *
+     * <p><b>★ たどるのは同じクラスの中だけである。</b>別のクラスを経由して届く形は対象外になる
+     * ——{@code renderThumbnail} が {@code PdfDocument#pageCount()} を呼ぶ類である。
+     * <b>そちらは呼ばれる側の公開メソッドが自分で包むので、二重に縛らない。</b>
+     *
      * <p><b>★ ここが見ないもの。</b>「その入口の PDFBox の仕事が<b>すべて</b>包みの中にあるか」は
      * <b>見ていない</b>——包みを呼びつつ、その外でも PDFBox を呼ぶ形は通る。
      * <b>ラムダの中と外を、呼び出しの一覧からは区別できない</b>（上の「閉じる側」と同じ限界である）。
@@ -775,7 +789,7 @@ class ArchitectureTest {
     }
 
     /**
-     * PDFBox に触れる公開クラスの、公開メソッド。
+     * PDFBox へ届く公開メソッド。
      *
      * <p><b>★ コンストラクタは数えない。</b>{@code PdfBoxPageOperations} の公開コンストラクタは
      * 受け口を控えるだけであり、<b>PDFBox へは降りない</b>——数えると、
@@ -784,21 +798,39 @@ class ArchitectureTest {
     private static Stream<JavaMethod> publicEntryPointsTouchingPdfBox() {
         return classes.stream()
                 .filter(javaClass -> javaClass.getModifiers().contains(JavaModifier.PUBLIC))
-                .filter(ArchitectureTest::touchesPdfBox)
                 .flatMap(javaClass -> javaClass.getMethods().stream())
-                .filter(method -> method.getModifiers().contains(JavaModifier.PUBLIC));
+                .filter(method -> method.getModifiers().contains(JavaModifier.PUBLIC))
+                .filter(ArchitectureTest::reachesPdfBox);
     }
 
     /**
-     * そのクラスのどこかが PDFBox を走らせるか。
+     * そのコード単位から、同じクラスの中をたどって PDFBox へ届くか。
      *
      * <p><b>★ 型の持ち方では見ない。</b>{@code EncryptionInfo} のような値の型は
      * PDFBox から読んだ値を運ぶが、<b>向こうのコードは走らせない。</b>
+     *
+     * <p><b>★ 同じクラスの中だけをたどる理由は {@link #publicEntryPointsGoThroughTheGuard()}
+     * にある。</b>
      */
-    private static boolean touchesPdfBox(JavaClass javaClass) {
-        return javaClass.getCodeUnits().stream()
-                .flatMap(ArchitectureTest::accessesFromSelf)
-                .anyMatch(access -> isPdfBoxOwned(access.getTargetOwner()));
+    private static boolean reachesPdfBox(JavaCodeUnit from) {
+        Set<JavaCodeUnit> seen = new HashSet<>();
+        Deque<JavaCodeUnit> pending = new ArrayDeque<>();
+        pending.add(from);
+        while (!pending.isEmpty()) {
+            JavaCodeUnit unit = pending.poll();
+            if (!seen.add(unit)) {
+                continue;
+            }
+            for (JavaCodeUnitAccess<?> access : accessesFromSelf(unit).toList()) {
+                if (isPdfBoxOwned(access.getTargetOwner())) {
+                    return true;
+                }
+                if (access.getTargetOwner().equals(from.getOwner())) {
+                    access.getTarget().resolveMember().ifPresent(pending::add);
+                }
+            }
+        }
+        return false;
     }
 
     /** そのコード単位が、自分たちの包みを呼ぶか。 */

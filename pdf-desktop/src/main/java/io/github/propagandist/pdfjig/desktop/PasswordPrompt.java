@@ -29,28 +29,58 @@ final class PasswordPrompt {
     private PasswordPrompt() {}
 
     /**
+     * 何のために訊いているか。
+     *
+     * <p><b>★★ 文言を分ける。</b>保存のときに「開く」と書いたボタンを出すと、
+     * <b>何を押しているのか読んで分からない</b>（{@code CLAUDE.md} 優先順位 2）。
+     * <b>窓の id は変えない</b>——あれはテストとの契約である（{@code desktop-ui.md}）。
+     */
+    enum Purpose {
+
+        /** 文書を開くために訊く。 */
+        OPEN("はパスワードで保護されています。", "開く"),
+
+        /**
+         * 書き出すために訊く。
+         *
+         * <p><b>開いたときの鍵は誰も持っていない</b>ので、書き出しのたびに訊く（#193）。
+         */
+        WRITE("はパスワードで保護されています。書き出しにも同じパスワードが要ります。", "続ける");
+
+        private final String explanation;
+
+        private final String action;
+
+        Purpose(String explanation, String action) {
+            this.explanation = explanation;
+            this.action = action;
+        }
+    }
+
+    /**
      * パスワードを尋ねる。
      *
      * <p><b>返された持ち主は、呼び出し側が try-with-resources に載せる</b>
      * （{@link Password} の Javadoc）。
      *
-     * @param owner  親ウィンドウ
-     * @param path   対象ファイル
-     * @param retry  入力し直しかどうか。true なら誤りである旨を添える
+     * @param owner   親ウィンドウ
+     * @param path    対象ファイル
+     * @param purpose 何のために訊いているか
+     * @param retry   入力し直しかどうか。true なら誤りである旨を添える
      * @return 入力されたパスワード。取り消された場合は空
      */
-    static Optional<Password> ask(Stage owner, Path path, boolean retry) {
+    static Optional<Password> ask(Stage owner, Path path, Purpose purpose, boolean retry) {
         PasswordField field = new PasswordField();
         field.setId("password-field");
         field.setPromptText("パスワード");
 
-        Label explanation = new Label(path.getFileName() + " はパスワードで保護されています。");
+        Label explanation = new Label(path.getFileName() + " " + purpose.explanation);
         explanation.setWrapText(true);
 
         VBox content = new VBox(8, explanation, field);
         content.setPadding(new Insets(12));
 
-        ButtonType unlock = new ButtonType("開く", ButtonData.OK_DONE);
+        ButtonType unlock = new ButtonType(purpose.action, ButtonData.OK_DONE);
 
         Dialog<Password> dialog = new Dialog<>();
         dialog.initOwner(owner);

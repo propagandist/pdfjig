@@ -231,7 +231,7 @@ final class BackgroundTasks {
      * <b>走り出したら仕事の枠が、走り出さなかったらここが、全部を閉じる。</b>
      *
      * <p><b>★ 1 本が閉じ損ねても残りを閉じる形にはしていない。</b>
-     * {@link Password#close()} は {@code Arrays.fill} だけであり、<b>投げる場所が無い</b>
+     * {@link Password#close()} は<b>ゼロ埋めと印を立てるだけであり、投げる場所が無い</b>
      * ——受けているのが {@link AutoCloseable} ではなく {@link Password} なのはそのためである。
      *
      * @param owned       仕事に渡すもの。<b>どちらかが必ず全部を閉じる</b>

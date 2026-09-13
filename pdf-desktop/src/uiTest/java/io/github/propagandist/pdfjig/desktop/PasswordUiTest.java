@@ -54,14 +54,7 @@ class PasswordUiTest extends DesktopUiTest {
 
     @Test
     void 正しいパスワードを入れれば開ける(@TempDir Path dir, FxRobot robot) throws Exception {
-        askFor(dir, robot);
-
-        clickWhenReady(robot, "#password-field");
-        robot.write(CORRECT);
-        clickWhenReady(robot, "#password-unlock");
-
-        waitForNode(robot, "#thumbnail-tile-0");
-        WaitForAsyncUtils.waitForFxEvents();
+        openWithKey(dir, robot);
 
         // 開けたことと、保護されている文書であることの両方を出す。
         assertEquals("1 / 1 ページ（暗号化されています）", statusText(robot));

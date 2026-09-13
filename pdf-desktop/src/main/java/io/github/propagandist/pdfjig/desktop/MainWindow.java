@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -467,7 +468,7 @@ public final class MainWindow {
      * 起きるものであり、開き直しからやらせる理由がない。取り消せば終わる。
      */
     private void askPasswordAndOpen(Path path, boolean retry) {
-        Optional<Password> entered = PasswordPrompt.ask(stage, path, retry);
+        Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -515,11 +516,11 @@ public final class MainWindow {
         DocumentSession saving = session;
         // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
         //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
-        Optional<KeyedSources> keyed = askKeys(saving);
+        Optional<Sources> keyed = askKeys(saving);
         if (keyed.isEmpty()) {
             return;
         }
-        Sources inputs = keyed.get().sources();
+        Sources inputs = keyed.get();
 
         List<Path> sources = saving.paths();
         List<PageSelection> pages = saving.order().toPageSelections();
@@ -528,7 +529,7 @@ public final class MainWindow {
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
         boolean started = run(
-                keyed.get().keys(),
+                inputs,
                 () -> {
                     // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
                     boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
@@ -772,7 +773,7 @@ public final class MainWindow {
 
     /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
     private void addWithPassword(Path path, boolean retry) {
-        Optional<Password> entered = PasswordPrompt.ask(stage, path, retry);
+        Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -904,17 +905,17 @@ public final class MainWindow {
             return;
         }
 
-        Optional<KeyedSources> keyed = askKeys(session);
+        // ★ 控えてから訊く。窓が出ている間も Platform.runLater は回るので、
+        //   その間に文書が入れ替わりうる（#133）。saveAs と同じ形に揃えてある。
+        DocumentSession writing = session;
+        Optional<Sources> keyed = askKeys(writing);
         if (keyed.isEmpty()) {
             return;
         }
-        Sources sources = keyed.get().sources();
+        Sources sources = keyed.get();
         Path outputDir = directory.get();
 
-        if (run(
-                keyed.get().keys(),
-                () -> DocumentWriter.splitInto(sources, segments, outputDir),
-                this::showSplitResult)) {
+        if (run(sources, () -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
             folders.rememberWrittenFolder(outputDir);
         }
     }
@@ -1034,17 +1035,21 @@ public final class MainWindow {
      * ——<b>ここには片づけを書く場所が無い</b>（{@link BackgroundTasks#run(List, Supplier,
      * Consumer, Consumer)}。#146 / #193）。
      */
-    private <T> boolean run(List<Password> keys, Supplier<T> work, Consumer<T> onSucceeded) {
-        return tasks.run(keys, work, onSucceeded, messages::failure);
+    private <T> boolean run(Sources owned, Supplier<T> work, Consumer<T> onSucceeded) {
+        return tasks.run(keysOf(owned.all()), work, onSucceeded, messages::failure);
     }
 
     /**
-     * 書き出しに使う入力と、そのために訊いた鍵。
+     * その入力が抱えている鍵。
      *
-     * <p><b>鍵の持ち主は {@link BackgroundTasks} へ渡す。</b>{@code sources} のほうは
-     * <b>読むだけで持つ</b>（{@code Source} の契約）。
+     * <p><b>★★ 数え上げて別に持たない。</b>持つと<b>「入力に鍵を足したが、片づける一覧へは
+     * 足さなかった」形が書ける</b>——そこを通った平文の配列は<b>二度と消されない</b>
+     * （INV-5。#135 / #144 / #145 で 3 度破れたのと同じ類型である）。
+     * <b>1 つの正本から引けば、書き忘れる場所が無い。</b>
      */
-    private record KeyedSources(Sources sources, List<Password> keys) {}
+    private static List<Password> keysOf(List<Source> inputs) {
+        return inputs.stream().map(Source::password).filter(Objects::nonNull).toList();
+    }
 
     /**
      * 書き出しに要る鍵を訊く。
@@ -1061,27 +1066,25 @@ public final class MainWindow {
      * {@link BackgroundTasks} が持つ。
      *
      * @param saving 書き出すセッション
-     * @return 入力と鍵。取り消されたら空
+     * @return 書き出しに使う入力。取り消されたら空
      */
-    private Optional<KeyedSources> askKeys(DocumentSession saving) {
+    private Optional<Sources> askKeys(DocumentSession saving) {
         List<Path> paths = saving.paths();
         List<Source> inputs = new ArrayList<>(paths.size());
-        List<Password> keys = new ArrayList<>();
         for (int sourceIndex = 0; sourceIndex < paths.size(); sourceIndex++) {
             Path path = paths.get(sourceIndex);
             if (!saving.keyed(sourceIndex)) {
                 inputs.add(Source.of(path));
                 continue;
             }
-            Optional<Password> entered = PasswordPrompt.ask(stage, path, false);
+            Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.WRITE, false);
             if (entered.isEmpty()) {
-                keys.forEach(Password::close);
+                keysOf(inputs).forEach(Password::close);
                 return Optional.empty();
             }
-            keys.add(entered.get());
             inputs.add(Source.of(path, entered.get()));
         }
-        return Optional.of(new KeyedSources(new Sources(inputs), List.copyOf(keys)));
+        return Optional.of(new Sources(inputs));
     }
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
