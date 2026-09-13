@@ -166,22 +166,27 @@ record AccessPermissions(
 
 ```java
 interface PageOperations {
-    Path merge(List<Path> inputs, Path output, MergeOptions opts);
-    List<Path> split(Path input, SplitStrategy strategy, Path outputDir);
-    Path reorder(Path input, List<Integer> newOrder, Path output);
-    Path rotate(Path input, Map<Integer, Rotation> rotations, Path output);
-    Path extractPages(Path input, PageRange range, Path output);
-    Path deletePages(Path input, PageRange range, Path output);
-
-    // 並べ替え・削除・回転を一度の書き出しで確定させる
-    Path assemble(Path input, List<PageSelection> selections, Path output);
+    Path merge(Sources inputs, Path output, MergeOptions opts);
+    List<Path> split(Source input, SplitStrategy strategy, Path outputDir);
+    Path reorder(Source input, List<Integer> newOrder, Path output);
+    Path rotate(Source input, Map<Integer, Rotation> rotations, Path output);
+    Path extractPages(Source input, PageRange range, Path output);
+    Path deletePages(Source input, PageRange range, Path output);
 
     // 複数のファイルにまたがって集める。sourceIndex が inputs の並びを指す
-    Path assemble(List<Path> inputs, List<PageSelection> selections, Path output);
+    Path assemble(Sources inputs, List<PageSelection> selections, Path output);
 
     // 組み立てた並びを、かたまりごとに連番で書き出す
-    List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir);
+    List<Path> assembleEach(Sources inputs, List<List<PageSelection>> segments, Path outputDir);
+
+    // Path / List<Path> を取る形は既定メソッドで残してある（鍵の要らない入力の省略形）
 }
+
+// 入力と、それを開くための鍵。password が null なら鍵は要らない
+record Source(Path path, Password password) {}
+
+// 複数の入力。List<Source> を直に取れないのは、List<Path> と消去後に同じ綴りになるため
+record Sources(List<Source> all) {}
 
 // 出力に含める 1 ページの指定
 record PageSelection(

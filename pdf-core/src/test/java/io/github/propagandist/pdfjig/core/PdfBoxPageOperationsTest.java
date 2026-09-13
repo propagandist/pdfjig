@@ -847,6 +847,158 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * 鍵の要る入力に、9 本のページ操作が通る（#193）。
+     *
+     * <p><b>★★ ここが通っても、画面はまだ保存できない。</b>{@code DocumentWriter} は
+     * いまも {@code List<Path>} を渡しており、<b>鍵を持つ {@code Source} を作る本番のコードは
+     * 1 つも無い</b>（<b>2026-09-13 実測</b>）。<b>このテストが縛るのは {@code pdf-core} の口だけである</b>
+     * ——<b>画面を繋ぐのは #193 の 2 である。</b>
+     *
+     * <p><b>★ 鍵は 1 本を全操作で使い回す。</b>{@link Password} の持ち主は作った場所であり、
+     * <b>受け取った側は読むだけである</b>（INV-5）。try-with-resources で束ねてある。
+     */
+    @Nested
+    class ProtectedInput {
+
+        @Test
+        @DisplayName("鍵を渡せば、単一の入力を取る 6 本が通る")
+        void singleInputOperationsAcceptAKey() throws Exception {
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+            try (Password password = Password.copyOf("user")) {
+                Source source = Source.of(input, password);
+
+                assertEquals(1, pageCountOf(operations.reorder(source, List.of(1), out("reordered"))));
+                assertEquals(
+                        1, pageCountOf(operations.rotate(source, Map.of(1, Rotation.CLOCKWISE_90), out("rotated"))));
+                assertEquals(1, pageCountOf(operations.extractPages(source, PageRange.of(1, 1), out("extracted"))));
+                assertEquals(
+                        1, pageCountOf(operations.assemble(source, List.of(PageSelection.of(0, 1)), out("assembled"))));
+
+                List<Path> split = operations.split(source, SplitStrategy.everyNPages(1), tempDir.resolve("split"));
+                assertEquals(1, split.size());
+
+                // deletePages は全ページを消せないので、2 ページの文書で見る。
+                Path two = TestPdfs.encrypted(tempDir.resolve("enc2.pdf"), "user", 2);
+                assertEquals(
+                        1,
+                        pageCountOf(
+                                operations.deletePages(Source.of(two, password), PageRange.of(1, 1), out("deleted"))));
+            }
+        }
+
+        @Test
+        @DisplayName("鍵を渡せば、複数の入力を取る 3 本が通る")
+        void multiInputOperationsAcceptKeys() throws Exception {
+            Path first = TestPdfs.encrypted(tempDir.resolve("a.pdf"), "one");
+            Path second = TestPdfs.encrypted(tempDir.resolve("b.pdf"), "two");
+            // ★ 入力ごとに鍵が違う。Sources はそれを表せる——並べた List<Path> と
+            //   添字で対応させる形では、ここが崩れる。
+            try (Password one = Password.copyOf("one");
+                    Password two = Password.copyOf("two")) {
+                Sources sources = Sources.of(Source.of(first, one), Source.of(second, two));
+
+                assertEquals(2, pageCountOf(operations.merge(sources, out("merged"), MergeOptions.defaults())));
+                assertEquals(
+                        2,
+                        pageCountOf(operations.assemble(
+                                sources, List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)), out("joined"))));
+
+                List<Path> each = operations.assembleEach(
+                        sources,
+                        List.of(List.of(PageSelection.of(0, 1)), List.of(PageSelection.of(1, 1))),
+                        tempDir.resolve("each"));
+                assertEquals(2, each.size());
+            }
+        }
+
+        @Test
+        @DisplayName("鍵を渡さなければ、いままでどおり PASSWORD_REQUIRED で落ちる")
+        void stillFailsWithoutAKey() throws Exception {
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+
+            assertEquals(
+                    ErrorCode.PASSWORD_REQUIRED,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            List.of(input), List.of(PageSelection.of(0, 1)), out("assembled")))
+                            .errorCode());
+        }
+
+        @Test
+        @DisplayName("鍵が違えば INVALID_PASSWORD で落ち、出力は残らない")
+        void wrongKeyFails() throws Exception {
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+            Path output = out("assembled");
+            try (Password wrong = Password.copyOf("違う")) {
+                assertEquals(
+                        ErrorCode.INVALID_PASSWORD,
+                        assertThrows(
+                                        PdfjigException.class,
+                                        () -> operations.assemble(
+                                                Source.of(input, wrong), List.of(PageSelection.of(0, 1)), output))
+                                .errorCode());
+            }
+            assertFalse(Files.exists(output), "開けなかったのに出力ができている");
+        }
+
+        @Test
+        @DisplayName("★★ 閉じた鍵を使ったことに、名前が付く")
+        void closedKeyIsNamedAsSuch() throws Exception {
+            // ★★ ゼロ埋めした配列はそのまま読めるので、検査が無いと 0 の列が PDFBox まで届く。
+            //   ★ 符号は変わらない（2026-09-13 実測。AES-256 では SASLprep が弾くので、
+            //   検査の有無によらず PASSWORD_OR_DOCUMENT_FAILURE である）。変わるのは原因の型で、
+            //   そこだけが「文書かパスワードのどちらかが悪い」と「閉じた鍵を使った」を分ける。
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+            Password password = Password.copyOf("user");
+            password.close();
+
+            PdfjigException failure = assertThrows(
+                    PdfjigException.class,
+                    () -> operations.assemble(
+                            Source.of(input, password), List.of(PageSelection.of(0, 1)), out("assembled")));
+
+            assertEquals(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, failure.errorCode());
+            assertEquals(IllegalStateException.class.getName(), failure.causeType(), "閉じた鍵が PDFBox まで届いている。誤りに名前が付かない");
+        }
+
+        @Test
+        @DisplayName("★★ 書き終えた後に落ちても、復号した平文を置き去りにしない")
+        void doesNotLeaveDecryptedOutputBehind() throws Exception {
+            // ★★ 鍵の要る入力を扱えるようになって、初めて重くなった経路である（#193 の門の 2 段目）。
+            //   差分の前にここへ届いたのはオーナーパスワードだけの文書で、中身はもともと誰でも
+            //   開けた。いまは「ユーザーパスワードで守られた文書を、完全に復号した写し」が残りうる。
+            //   ★ PdfDocument#close は閉じるときに初めて投げることがある（#150）ので、
+            //   書き終えた後の失敗がいちばん危ない——継ぎ目で、書けた後に落とす。
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+            Path output = out("leaked");
+            PdfBoxPageOperations.DocumentSaver writesThenFails = (document, target) -> {
+                PdfBoxPageOperations.saveDocument(document, target);
+                throw new PdfjigException(ErrorCode.IO_FAILURE);
+            };
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFails);
+
+            try (Password password = Password.copyOf("user")) {
+                assertThrows(
+                        PdfjigException.class,
+                        () -> failing.assemble(Source.of(input, password), List.of(PageSelection.of(0, 1)), output));
+            }
+
+            assertFalse(Files.exists(output), "復号した平文が、失敗したと告げたまま残っている");
+        }
+
+        private Path out(String name) {
+            return tempDir.resolve(name + ".pdf");
+        }
+
+        private int pageCountOf(Path pdf) {
+            try (PdfDocument document = PdfDocument.open(pdf)) {
+                return document.pageCount();
+            }
+        }
+    }
+
     @Nested
     class EncryptionPropagationWarning {
 

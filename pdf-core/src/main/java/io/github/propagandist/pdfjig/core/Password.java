@@ -27,6 +27,30 @@ public final class Password implements AutoCloseable {
     /** 入力そのもの。構築時に非 null を確かめてあるので、片づけが NPE を投げることはない。 */
     private final char[] value;
 
+    /**
+     * 片づけ済みか。
+     *
+     * <p><b>★★ ゼロ埋めした配列は、そのまま読めてしまう</b>（#193）。持ち主より長く使おうとした
+     * 誤りが、<b>PDFBox へ {@code \0} の列を渡す形で静かに通る。</b>
+     * <b>{@link Source} が鍵を書き出しの間ずっと持つようになって、初めて届く経路である。</b>
+     *
+     * <p><b>★ 実測（2026-09-13。AES-256）——符号は変わらない。</b>検査が無くても
+     * {@code PASSWORD_OR_DOCUMENT_FAILURE} であり、<b>変わるのは原因の型だけである</b>
+     * （PDFBox の {@code IllegalArgumentException} → こちらの {@code IllegalStateException}）。
+     * <b>SASLprep が {@code \0} を弾くためで、そこまで届いている。</b>
+     * ★★ <b>RC4 では測っていない</b>——あちらは SASLprep を通らないので、
+     * <b>「鍵が違う」として扱われる可能性がある。</b>
+     *
+     * <p><b>それでも置くのは、誤りに名前を付けるためである。</b>
+     * 「文書かパスワードのどちらかが悪い」ではなく、<b>「閉じた鍵を使った」と言える。</b>
+     *
+     * <p><b>★★ {@code volatile} である。</b>閉じるのと読むのは<b>別のスレッドになりうる</b>
+     * ——{@link Source} が書き出しの間ずっと鍵を持ち、その書き出しは画面の裏で走る
+     * （{@code BackgroundTasks}）。<b>印が見えなければ、この検査は静かに素通りする</b>
+     * ——<b>防ごうとした形がそのまま起きる。</b>
+     */
+    private volatile boolean closed;
+
     private Password(char[] value) {
         this.value = value;
     }
@@ -69,10 +93,14 @@ public final class Password implements AutoCloseable {
      * ゼロ埋めする。
      *
      * <p><b>何度呼んでもよい。</b>二度埋めても結果は変わらない。
+     *
+     * <p><b>★ 閉じた後は {@link #value()} が投げる。</b>ゼロ埋めした配列は読めてしまうので、
+     * <b>持ち主より長く使おうとしたことを、静かに通さない</b>（#193）。
      */
     @Override
     public void close() {
         Arrays.fill(value, '\0');
+        closed = true;
     }
 
     /**
@@ -81,6 +109,10 @@ public final class Password implements AutoCloseable {
      * <p>パッケージプライベート。pdf-core の内部実装のみが使う（INV-5）。
      */
     char[] value() {
+        if (closed) {
+            // ★ 中身は載せない。載せるものがそもそも秘密である（INV-5）。
+            throw new IllegalStateException("閉じた Password は読めません。鍵の枠は書き出しが終わるまで開けておくこと。");
+        }
         return value;
     }
 }

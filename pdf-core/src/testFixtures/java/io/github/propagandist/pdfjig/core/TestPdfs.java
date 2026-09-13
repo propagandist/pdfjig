@@ -145,17 +145,12 @@ public final class TestPdfs {
 
     /** AES-256 で暗号化した 1 ページの PDF を作る。 */
     public static Path encrypted(Path target, String userPassword) throws IOException {
-        try (PDDocument document = new PDDocument()) {
-            document.addPage(new PDPage());
+        return encrypted(target, userPassword, 1);
+    }
 
-            AccessPermission permissions = new AccessPermission();
-            StandardProtectionPolicy policy = new StandardProtectionPolicy(userPassword, userPassword, permissions);
-            policy.setEncryptionKeyLength(256);
-            document.protect(policy);
-
-            document.save(target.toFile());
-        }
-        return target;
+    /** AES-256 で暗号化した PDF を、指定のページ数で作る。 */
+    public static Path encrypted(Path target, String userPassword, int pageCount) throws IOException {
+        return protectedWith(target, userPassword, userPassword, new AccessPermission(), pageCount);
     }
 
     /**
@@ -165,14 +160,26 @@ public final class TestPdfs {
      * 「開けるのに保護されている」という、伝播の判定が効く状態を作るために使う。
      */
     public static Path ownerProtected(Path target, String ownerPassword, int pageCount) throws IOException {
+        AccessPermission permissions = new AccessPermission();
+        permissions.setCanPrint(false);
+        return protectedWith(target, ownerPassword, "", permissions, pageCount);
+    }
+
+    /**
+     * AES-256 で保護した PDF を作る。
+     *
+     * <p><b>★ 作り方を 1 か所に置く</b>——上の 2 つは<b>鍵と権限だけが違う。</b>
+     * 分かれていると、片方だけ直した壊れた入力でテストが通るようになる（{@code testing.md}）。
+     */
+    private static Path protectedWith(
+            Path target, String ownerPassword, String userPassword, AccessPermission permissions, int pageCount)
+            throws IOException {
         try (PDDocument document = new PDDocument()) {
             for (int i = 0; i < pageCount; i++) {
                 document.addPage(new PDPage());
             }
 
-            AccessPermission permissions = new AccessPermission();
-            permissions.setCanPrint(false);
-            StandardProtectionPolicy policy = new StandardProtectionPolicy(ownerPassword, "", permissions);
+            StandardProtectionPolicy policy = new StandardProtectionPolicy(ownerPassword, userPassword, permissions);
             policy.setEncryptionKeyLength(256);
             document.protect(policy);
 
