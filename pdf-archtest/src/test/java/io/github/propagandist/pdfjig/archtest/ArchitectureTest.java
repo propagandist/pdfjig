@@ -14,6 +14,8 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaCodeUnitAccess;
+import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -616,7 +618,11 @@ class ArchitectureTest {
     @DisplayName("素の char[] でパスワードを受け渡す口は Password の中だけである")
     void rawCharArraysStayInsidePassword() {
         assertEquals(
-                Set.of(PASSWORD + ".<init>()", PASSWORD + ".of()", PASSWORD + ".value()", PASSWORD + ".value"),
+                Set.of(
+                        PASSWORD + ".<init>(char[])",
+                        PASSWORD + ".of(char[])",
+                        PASSWORD + ".value()",
+                        PASSWORD + ".value"),
                 membersTouchingCharArrays(),
                 "素の char[] が現れる口が増減している。増えたなら、そこは持ち主の無い配列を"
                         + "作れる場所である——ゼロ埋めを守るものが、また註だけに戻る"
@@ -763,8 +769,8 @@ class ArchitectureTest {
     @DisplayName("Warnings を作ったところが、溜めたものを流す")
     void whoeverCollectsAlsoReports() {
         assertEquals(
-                unitsConstructing(WARNINGS),
-                unitsCalling(WARNINGS, "report"),
+                unitsAccessing(WARNINGS, JavaConstructor.CONSTRUCTOR_NAME),
+                unitsAccessing(WARNINGS, "report"),
                 "溜め始めたところと流すところが食い違っている。作って流さなければ、" + "規律どおりに見えるまま警告が 1 件も届かない（#178）");
     }
 
@@ -791,19 +797,44 @@ class ArchitectureTest {
      */
     private static boolean touchesPdfBox(JavaClass javaClass) {
         return javaClass.getCodeUnits().stream()
-                .flatMap(unit -> unit.getCallsFromSelf().stream())
-                .anyMatch(call -> isPdfBoxOwned(call.getTargetOwner()));
+                .flatMap(ArchitectureTest::accessesFromSelf)
+                .anyMatch(access -> isPdfBoxOwned(access.getTargetOwner()));
     }
 
     /** そのコード単位が、自分たちの包みを呼ぶか。 */
     private static boolean callsGuard(JavaCodeUnit unit) {
-        return unit.getCallsFromSelf().stream()
-                .anyMatch(call -> call.getTargetOwner().getName().equals(PDFBOX_GUARD));
+        return accessesFromSelf(unit)
+                .anyMatch(access -> access.getTargetOwner().getName().equals(PDFBOX_GUARD));
     }
 
-    /** 表記は {@code 型.名前()}。 */
+    /**
+     * そのコード単位が届く先。<b>呼び出しとメソッド参照の両方を数える。</b>
+     *
+     * <p><b>★★ {@code getCallsFromSelf} だけでは足りない</b>（<b>2026-09-13 実測</b>）。
+     * {@code guarded(code, this::work)} と書くと<b>呼び出しとしては数えられず、
+     * 包みの規則が素通りする</b>——<b>同じ形で受け口の規則も素通りした</b>
+     * （{@code forEach(listener::onWarning)} を包みの中へ入れても緑だった）。
+     * <b>物差しを「自分たちの包みを通ったか」へ替えても、読み取りの側が片目なら同じ穴が開く。</b>
+     */
+    private static Stream<JavaCodeUnitAccess<?>> accessesFromSelf(JavaCodeUnit unit) {
+        return Stream.concat(unit.getCallsFromSelf().stream(), unit.getCodeUnitReferencesFromSelf().stream());
+    }
+
+    /**
+     * 表記は {@code 型.名前(引数の型…)}。
+     *
+     * <p><b>★★ 引数の型まで書く。</b>落とすと<b>多重定義が 1 つに潰れる</b>——
+     * {@code assemble(Path, …)} と {@code assemble(List, …)} が同じ綴りになり、
+     * <b>集合を突き合わせる規則が、片方の書き忘れを見逃す</b>（2026-09-13 実測。
+     * 片方から {@code report()} を落としても緑だった）。
+     * <b>多重定義は「次に 1 本足す」いちばんありふれた形である。</b>
+     */
     private static String describe(JavaCodeUnit unit) {
-        return unit.getOwner().getName() + "." + unit.getName() + "()";
+        return unit.getOwner().getName() + "." + unit.getName() + "("
+                + unit.getRawParameterTypes().stream()
+                        .map(JavaClass::getSimpleName)
+                        .collect(Collectors.joining(", "))
+                + ")";
     }
 
     /**
@@ -829,25 +860,21 @@ class ArchitectureTest {
      * <p>絞る理由は {@link #onlyWarningsNotifiesTheListener()} にある。
      */
     private static Set<String> unitsNotifyingWarningListener() {
-        return unitsCalling(WARNING_LISTENER, "onWarning");
+        return unitsAccessing(WARNING_LISTENER, "onWarning");
     }
 
-    /** その型のそのメソッドを呼んでいる、{@code pdf-core} のコード単位。 */
-    private static Set<String> unitsCalling(String owner, String method) {
+    /**
+     * その型のその成員へ届いている、{@code pdf-core} のコード単位。
+     *
+     * <p>コンストラクタは {@link JavaConstructor#CONSTRUCTOR_NAME} で指す。
+     * 呼び出しとメソッド参照の両方を数える理由は {@link #accessesFromSelf} にある。
+     */
+    private static Set<String> unitsAccessing(String owner, String member) {
         return coreClasses()
-                .flatMap(javaClass -> javaClass.getMethodCallsFromSelf().stream())
-                .filter(call -> call.getTargetOwner().getName().equals(owner))
-                .filter(call -> call.getTarget().getName().equals(method))
-                .map(call -> describe(call.getOrigin()))
-                .collect(Collectors.toSet());
-    }
-
-    /** その型を作っている、{@code pdf-core} のコード単位。 */
-    private static Set<String> unitsConstructing(String owner) {
-        return coreClasses()
-                .flatMap(javaClass -> javaClass.getConstructorCallsFromSelf().stream())
-                .filter(call -> call.getTargetOwner().getName().equals(owner))
-                .map(call -> describe(call.getOrigin()))
+                .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                .filter(access -> access.getTargetOwner().getName().equals(owner))
+                .filter(access -> access.getTarget().getName().equals(member))
+                .map(access -> describe(access.getOrigin()))
                 .collect(Collectors.toSet());
     }
 
@@ -862,7 +889,8 @@ class ArchitectureTest {
      * 生まれた日に、そちらの口が期待値へ黙って吸われる</b>——{@code pdf-cli} の
      * {@code --password-stdin} は、まさに口を増やす差分である（#146 / #28）。
      *
-     * <p>表記は、コード単位が {@code 型.名前()}、フィールドが {@code 型.名前} である。
+     * <p>表記は、コード単位が {@code 型.名前(引数の型…)}、フィールドが {@code 型.名前} である
+     * （{@link #describe}）。
      */
     private static Set<String> membersTouchingCharArrays() {
         return classes.stream()
@@ -895,12 +923,12 @@ class ArchitectureTest {
     /** {@code Arrays.fill(char[], char)} を呼んでいる本番のコード単位。 */
     private static Set<String> unitsZeroingCharArrays() {
         return classes.stream()
-                .flatMap(javaClass -> javaClass.getMethodCallsFromSelf().stream())
-                .filter(call -> call.getTargetOwner().getName().equals(Arrays.class.getName()))
-                .filter(call -> call.getTarget().getName().equals("fill"))
-                .filter(call ->
-                        call.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
-                .map(call -> describe(call.getOrigin()))
+                .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                .filter(access -> access.getTargetOwner().getName().equals(Arrays.class.getName()))
+                .filter(access -> access.getTarget().getName().equals("fill"))
+                .filter(access ->
+                        access.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
+                .map(access -> describe(access.getOrigin()))
                 .collect(Collectors.toSet());
     }
 

@@ -39,11 +39,18 @@ import org.apache.pdfbox.pdmodel.PDPage;
  * <p><b>★★ 公開メソッドはすべて同じ枠で書く</b>（#178）。
  *
  * <pre>{@code
- * 引数の検め            ← 包みの外。IllegalArgumentException は畳まない
+ * 引数だけで決まる検め   ← 包みの外。IllegalArgumentException は畳まない
  * Warnings warnings = new Warnings(listener);
  * ... = guarded(符号, () -> 実体(..., warnings));
  * warnings.report();    ← 包みの外。ここで初めて呼ぶ側のコードが走る
  * }</pre>
+ *
+ * <p><b>★ 文書を開かないと決まらない検めは、包みの中にある</b>——ページ数に照らす類である
+ * （{@code requirePermutation} / {@code requireSelectable} / {@code PageRange#validateAgainst}）。
+ * <b>どれも {@link PdfjigException} を投げる</b>ので、包みは素通しする。
+ * <b>だから引数の {@code null} は、外で弾いておかなければならない</b>——
+ * 中で {@code NullPointerException} になると、<b>包みがそれを「PDF として読み取れません」に畳み、
+ * 正しい入力のせいにする</b>（{@code CLAUDE.md} 優先順位 2）。
  *
  * <p><b>★ 枠を 1 つにまとめない。</b>畳むと {@code guarded} を呼ぶのが 1 か所になり、
  * <b>{@code pdf-archtest} が公開の入口を見られなくなる</b>——規則が見ているのは
@@ -310,6 +317,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
     @Override
     public Path extractPages(Path input, PageRange range, Path output) {
+        requireRange(range);
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
@@ -327,6 +335,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
     @Override
     public Path deletePages(Path input, PageRange range, Path output) {
+        requireRange(range);
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
@@ -822,6 +831,19 @@ public final class PdfBoxPageOperations implements PageOperations {
     private static void requireSupported(EncryptionPropagation propagation) {
         if (propagation != EncryptionPropagation.NONE) {
             throw new PdfjigException(ErrorCode.ENCRYPTION_PROPAGATION_UNSUPPORTED);
+        }
+    }
+
+    /**
+     * 範囲が渡されているか。
+     *
+     * <p><b>★ 包みの外で弾く。</b>{@code range.validateAgainst} は文書を開かないと呼べないので
+     * 包みの中に在り、<b>そこで {@code NullPointerException} になると
+     * {@link ErrorCode#NOT_A_PDF} に畳まれて、正しい入力のせいにされる</b>（#178 の門の 2 段目）。
+     */
+    private static void requireRange(PageRange range) {
+        if (range == null) {
+            throw new IllegalArgumentException("range は null にできません。");
         }
     }
 
