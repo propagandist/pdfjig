@@ -850,10 +850,10 @@ class PdfBoxPageOperationsTest {
     /**
      * 鍵の要る入力に、9 本のページ操作が通る（#193）。
      *
-     * <p><b>★★ ここが通らない間、画面は開けた文書を保存できなかった</b>——
-     * {@code DocumentSession} はパスワード付きで開けるのに、保存は {@code assemble} を通り、
-     * あそこが鍵なしで開き直して {@link ErrorCode#PASSWORD_REQUIRED} で落ちていた
-     * （<b>2026-09-13 実測</b>）。
+     * <p><b>★★ ここが通っても、画面はまだ保存できない。</b>{@code DocumentWriter} は
+     * いまも {@code List<Path>} を渡しており、<b>鍵を持つ {@code Source} を作る本番のコードは
+     * 1 つも無い</b>（<b>2026-09-13 実測</b>）。<b>このテストが縛るのは {@code pdf-core} の口だけである</b>
+     * ——<b>画面を繋ぐのは #193 の 2 である。</b>
      *
      * <p><b>★ 鍵は 1 本を全操作で使い回す。</b>{@link Password} の持ち主は作った場所であり、
      * <b>受け取った側は読むだけである</b>（INV-5）。try-with-resources で束ねてある。
@@ -941,6 +941,26 @@ class PdfBoxPageOperationsTest {
                                 .errorCode());
             }
             assertFalse(Files.exists(output), "開けなかったのに出力ができている");
+        }
+
+        @Test
+        @DisplayName("★★ 閉じた鍵を使ったことに、名前が付く")
+        void closedKeyIsNamedAsSuch() throws Exception {
+            // ★★ ゼロ埋めした配列はそのまま読めるので、検査が無いと 0 の列が PDFBox まで届く。
+            //   ★ 符号は変わらない（2026-09-13 実測。AES-256 では SASLprep が弾くので、
+            //   検査の有無によらず PASSWORD_OR_DOCUMENT_FAILURE である）。変わるのは原因の型で、
+            //   そこだけが「文書かパスワードのどちらかが悪い」と「閉じた鍵を使った」を分ける。
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+            Password password = Password.copyOf("user");
+            password.close();
+
+            PdfjigException failure = assertThrows(
+                    PdfjigException.class,
+                    () -> operations.assemble(
+                            Source.of(input, password), List.of(PageSelection.of(0, 1)), out("assembled")));
+
+            assertEquals(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, failure.errorCode());
+            assertEquals(IllegalStateException.class.getName(), failure.causeType(), "閉じた鍵が PDFBox まで届いている。誤りに名前が付かない");
         }
 
         private Path out(String name) {

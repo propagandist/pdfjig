@@ -133,7 +133,7 @@ public interface PageOperations {
      * @return {@code output}
      */
     default Path assemble(Path input, List<PageSelection> pages, Path output) {
-        return assemble(Sources.of(Source.of(input)), pages, output);
+        return assemble(Source.of(input), pages, output);
     }
 
     /**

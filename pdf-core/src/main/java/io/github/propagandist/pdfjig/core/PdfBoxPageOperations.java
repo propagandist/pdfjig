@@ -102,6 +102,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
     @Override
     public Path merge(Sources inputs, Path output, MergeOptions options) {
+        requireInputs(inputs);
         requireSupported(options.encryptionPropagation());
         requireAbsent(output);
 
@@ -193,6 +194,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
     @Override
     public Path assemble(Sources inputs, List<PageSelection> pages, Path output) {
+        requireInputs(inputs);
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
@@ -223,6 +225,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
     @Override
     public List<Path> assembleEach(Sources inputs, List<List<PageSelection>> segments, Path outputDir) {
+        requireInputs(inputs);
         if (segments == null || segments.isEmpty()) {
             throw new PdfjigException(ErrorCode.EMPTY_RESULT);
         }
@@ -824,6 +827,19 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 包みの中に在り、<b>そこで {@code NullPointerException} になると
      * {@link ErrorCode#NOT_A_PDF} に畳まれて、正しい入力のせいにされる</b>（#178 の門の 2 段目）。
      */
+    /**
+     * 入力が渡されているか。
+     *
+     * <p><b>★ 包みの外で弾く。</b>{@link Sources} 自身は中身の空を見るが、<b>参照そのものの
+     * {@code null} は見られない</b>——中で {@code NullPointerException} になると
+     * {@link ErrorCode#NOT_A_PDF} に畳まれて、<b>正しい入力のせいにされる</b>（#193 の門の 1 段目）。
+     */
+    private static void requireInputs(Sources inputs) {
+        if (inputs == null) {
+            throw new PdfjigException(ErrorCode.NO_INPUT);
+        }
+    }
+
     private static void requireRange(PageRange range) {
         if (range == null) {
             throw new IllegalArgumentException("range は null にできません。");

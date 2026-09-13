@@ -18,8 +18,15 @@ import java.nio.file.Path;
  * 開き直すたびに呼ぶ側のコードを走らせることになり、<b>それは包みの中で起きる</b>
  * ——#178 で塞いだ穴を、自分で開ける形である。<b>値なら包みの中で走るものが無い。</b>
  *
+ * <p><b>★ 枠は 1 本とは限らない。</b>{@link Sources} は入力ごとに違う鍵を運ぶので、
+ * <b>{@code BackgroundTasks#run(Password, …)} のように 1 本を預ける形では足りない</b>
+ * ——<b>N 本すべてが、書き出しが終わるまで開いていなければならない。</b>
+ * <b>閉じた鍵で開こうとすると {@link Password#value()} が投げる</b>ので、
+ * <b>誤りに名前が付く</b>（#193。符号は変わらないが、原因の型が変わる）。
+ *
  * @param path     入力ファイル
- * @param password 開くための鍵。要らないなら {@code null}
+ * @param password 開くための鍵。<b>{@code null} は「鍵が要らない」を意味する</b>
+ *                 ——{@link #of(Path)} が作るのがその形である
  */
 public record Source(Path path, Password password) {
 
@@ -47,6 +54,8 @@ public record Source(Path path, Password password) {
      * @return 入力
      */
     public static Source of(Path path, Password password) {
+        // ★ ここだけ null を拒む。正準コンストラクタは「鍵が要らない」を表すために通す
+        //   ——2 引数で呼びながら null を渡すのは、鍵を取り違えている形である。
         if (password == null) {
             throw new IllegalArgumentException("password は null にできません。鍵が無いなら of(Path) を使うこと。");
         }

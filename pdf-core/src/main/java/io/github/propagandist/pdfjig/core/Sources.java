@@ -45,7 +45,9 @@ public record Sources(List<Source> all) {
      * @return 入力の並び
      */
     public static Sources ofPaths(List<Path> paths) {
-        if (paths == null || paths.isEmpty()) {
+        // ★ 空は下の正準コンストラクタが同じ符号で弾く。重ねない
+        //   ——ここで検めるのは null だけである（stream() が NullPointerException を投げる）。
+        if (paths == null) {
             throw new PdfjigException(ErrorCode.NO_INPUT);
         }
         return new Sources(paths.stream().map(Source::of).toList());
@@ -68,14 +70,5 @@ public record Sources(List<Source> all) {
      */
     public Source get(int index) {
         return all.get(index);
-    }
-
-    /**
-     * 入力ファイルだけを並びの順に取り出す。
-     *
-     * @return 入力ファイル
-     */
-    public List<Path> paths() {
-        return all.stream().map(Source::path).toList();
     }
 }

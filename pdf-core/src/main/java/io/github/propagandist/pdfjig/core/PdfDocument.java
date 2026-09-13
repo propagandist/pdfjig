@@ -75,9 +75,13 @@ public final class PdfDocument implements AutoCloseable {
      * <b>片づけが 2 か所になり、どちらが持ち主かを註でしか書けなくなる。</b>
      *
      * <p><b>既知の限界:</b> PDFBox 3 の {@code Loader.loadPDF} は {@code String} しか受け付けない。
-     * そのため境界で一度だけ {@code String} が生成され、これは GC されるまでヒープに残り、
+     * そのため境界で {@code String} が生成され、これは GC されるまでヒープに残り、
      * 明示的なゼロ埋めができない。pdfjig 側でこれを回避する手段はない。
-     * 生成箇所をこの 1 か所に限定することで影響範囲を最小化している。
+     * 生成する場所はここと {@code PdfBoxEncryption} の 2 か所だけである。
+     *
+     * <p><b>★★ ただし「1 回」ではない。</b>{@code PageOperations} は<b>書き出しの都合で
+     * 同じ入力を何度も開き直す</b>ので、<b>鍵の要る入力では回数が出力の数に比例する</b>
+     * ——200 ページを 1 ページずつ分割すると、<b>消せない文字列が約 201 本できる</b>（#195）。
      *
      * @param path     入力ファイル
      * @param password パスワード。ここでは消さない
