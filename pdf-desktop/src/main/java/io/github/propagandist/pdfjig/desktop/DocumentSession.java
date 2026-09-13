@@ -31,15 +31,30 @@ public final class DocumentSession implements AutoCloseable {
     /** 出どころのファイル。並びの添字が {@code sourceIndex} になる。 */
     private final List<Path> paths = new ArrayList<>();
 
+    /**
+     * 出どころごとに、開くとき鍵が要ったか。
+     *
+     * <p><b>★★ 覚えるのは「要った」という事実だけである。鍵そのものは持たない</b>（#193）。
+     * 抱えると<b>文書を開いている間ずっと平文の鍵がヒープに残る</b>——
+     * {@code docs/RELEASE_NOTES.md}「パスワードが手元のメモリに平文で残っていた」は
+     * まさにその形であり、<b>今度は意図して作ることになる。</b>
+     * <b>書き出しに要る鍵は、そのたびに訊く。</b>
+     *
+     * <p><b>★ 文書の側には訊けない。</b>{@code PdfDocument#encryption()} は
+     * パッケージプライベートであり、<b>公開するのは #180 が正しい形を決めてからである。</b>
+     * <b>ここは「こちらが鍵を渡して開いた」ことを知っている</b>ので、それで足りる。
+     */
+    private final List<Boolean> keyed = new ArrayList<>();
+
     private final List<PdfDocument> documents = new ArrayList<>();
 
     private final PageOrder order;
 
     private final ThumbnailSource thumbnails = new ThumbnailSource(THUMBNAIL_EDGE_PIXELS);
 
-    private DocumentSession(Path path, PdfDocument document) {
+    private DocumentSession(Path path, PdfDocument document, boolean needsKey) {
         this.order = PageOrder.of(document.pageCount());
-        register(path, document);
+        register(path, document, needsKey);
     }
 
     /**
@@ -49,7 +64,7 @@ public final class DocumentSession implements AutoCloseable {
      * @return 開かれたセッション
      */
     public static DocumentSession open(Path path) {
-        return wrap(path, PdfDocument.open(path));
+        return wrap(path, PdfDocument.open(path), false);
     }
 
     /**
@@ -63,7 +78,7 @@ public final class DocumentSession implements AutoCloseable {
      * @return 開かれたセッション
      */
     public static DocumentSession open(Path path, Password password) {
-        return wrap(path, PdfDocument.open(path, password));
+        return wrap(path, PdfDocument.open(path, password), true);
     }
 
     /**
@@ -72,7 +87,7 @@ public final class DocumentSession implements AutoCloseable {
      * @param path 足すファイル
      */
     public void add(Path path) {
-        adopt(path, PdfDocument.open(path));
+        adopt(path, PdfDocument.open(path), false);
     }
 
     /**
@@ -82,7 +97,7 @@ public final class DocumentSession implements AutoCloseable {
      * @param password パスワード。ここでは消さない（{@link PdfDocument#open(Path, Password)}）
      */
     public void add(Path path, Password password) {
-        adopt(path, PdfDocument.open(path, password));
+        adopt(path, PdfDocument.open(path, password), true);
     }
 
     /**
@@ -106,6 +121,7 @@ public final class DocumentSession implements AutoCloseable {
         order.removeSource(sourceIndex);
 
         paths.remove(sourceIndex);
+        keyed.remove(sourceIndex);
         PdfDocument removed = documents.remove(sourceIndex);
         // 描画が文書を触っている間に閉じると壊れる。removeSource も走っている描画を待つので、
         // この順で閉じてよい（ThumbnailSource の契約）。上で待っているため、ここでは待たされない。
@@ -166,6 +182,24 @@ public final class DocumentSession implements AutoCloseable {
         return documents.stream().mapToInt(PdfDocument::pageCount).sum();
     }
 
+    /**
+     * その出どころは、開くとき鍵が要ったか。
+     *
+     * <p><b>書き出すときも同じ鍵が要る</b>——{@code pdf-core} は書き出しの都合で
+     * <b>同じ入力を開き直す</b>ので、鍵なしでは {@code PASSWORD_REQUIRED} で落ちる（#193）。
+     *
+     * @param sourceIndex 出どころ番号
+     * @return 鍵が要ったなら {@code true}
+     */
+    public boolean keyed(int sourceIndex) {
+        return keyed.get(sourceIndex);
+    }
+
+    /** 鍵の要る出どころが 1 つでもあるか。 */
+    public boolean anyKeyed() {
+        return keyed.contains(Boolean.TRUE);
+    }
+
     /** 含んでいるファイルのいずれかが暗号化されているか。 */
     public boolean encrypted() {
         return documents.stream().anyMatch(PdfDocument::encrypted);
@@ -204,10 +238,10 @@ public final class DocumentSession implements AutoCloseable {
     }
 
     /** 開いた文書を受け持ち、そのページを並びの末尾に足す。 */
-    private void adopt(Path path, PdfDocument document) {
+    private void adopt(Path path, PdfDocument document, boolean needsKey) {
         int sourceIndex;
         try {
-            sourceIndex = register(path, document);
+            sourceIndex = register(path, document, needsKey);
         } catch (RuntimeException e) {
             document.close();
             throw e;
@@ -215,16 +249,17 @@ public final class DocumentSession implements AutoCloseable {
         order.append(sourceIndex, document.pageCount());
     }
 
-    private int register(Path path, PdfDocument document) {
+    private int register(Path path, PdfDocument document, boolean needsKey) {
         int sourceIndex = thumbnails.addSource(document);
         paths.add(path);
+        keyed.add(needsKey);
         documents.add(document);
         return sourceIndex;
     }
 
-    private static DocumentSession wrap(Path path, PdfDocument document) {
+    private static DocumentSession wrap(Path path, PdfDocument document, boolean needsKey) {
         try {
-            return new DocumentSession(path, document);
+            return new DocumentSession(path, document, needsKey);
         } catch (RuntimeException e) {
             document.close();
             throw e;

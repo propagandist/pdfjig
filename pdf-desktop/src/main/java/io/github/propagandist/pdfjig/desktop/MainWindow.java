@@ -6,9 +6,12 @@ import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
+import io.github.propagandist.pdfjig.core.Source;
+import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -510,6 +513,14 @@ public final class MainWindow {
         }
 
         DocumentSession saving = session;
+        // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
+        //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
+        Optional<KeyedSources> keyed = askKeys(saving);
+        if (keyed.isEmpty()) {
+            return;
+        }
+        Sources inputs = keyed.get().sources();
+
         List<Path> sources = saving.paths();
         List<PageSelection> pages = saving.order().toPageSelections();
         // 区切りと選択位置は書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
@@ -517,10 +528,11 @@ public final class MainWindow {
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
         boolean started = run(
+                keyed.get().keys(),
                 () -> {
                     // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
                     boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
-                    return new SaveOutcome(replaced, DocumentWriter.assemble(sources, pages, output));
+                    return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output));
                 },
                 outcome -> {
                     markSaved(saving, sources, pages);
@@ -892,10 +904,17 @@ public final class MainWindow {
             return;
         }
 
-        List<Path> sources = session.paths();
+        Optional<KeyedSources> keyed = askKeys(session);
+        if (keyed.isEmpty()) {
+            return;
+        }
+        Sources sources = keyed.get().sources();
         Path outputDir = directory.get();
 
-        if (run(() -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
+        if (run(
+                keyed.get().keys(),
+                () -> DocumentWriter.splitInto(sources, segments, outputDir),
+                this::showSplitResult)) {
             folders.rememberWrittenFolder(outputDir);
         }
     }
@@ -1006,6 +1025,63 @@ public final class MainWindow {
      */
     private <T> boolean run(Supplier<T> work, Consumer<T> onSucceeded) {
         return tasks.run(work, onSucceeded, messages::failure);
+    }
+
+    /**
+     * 鍵を抱えた仕事を頼む。
+     *
+     * <p><b>★★ 持ち主ごと渡す。</b>走り出したら仕事の枠が閉じ、走り出さなかったら向こうが閉じる
+     * ——<b>ここには片づけを書く場所が無い</b>（{@link BackgroundTasks#run(List, Supplier,
+     * Consumer, Consumer)}。#146 / #193）。
+     */
+    private <T> boolean run(List<Password> keys, Supplier<T> work, Consumer<T> onSucceeded) {
+        return tasks.run(keys, work, onSucceeded, messages::failure);
+    }
+
+    /**
+     * 書き出しに使う入力と、そのために訊いた鍵。
+     *
+     * <p><b>鍵の持ち主は {@link BackgroundTasks} へ渡す。</b>{@code sources} のほうは
+     * <b>読むだけで持つ</b>（{@code Source} の契約）。
+     */
+    private record KeyedSources(Sources sources, List<Password> keys) {}
+
+    /**
+     * 書き出しに要る鍵を訊く。
+     *
+     * <p><b>★★ 保存のたびに訊く。</b>セッションは鍵を抱えない（{@link DocumentSession}。#193）
+     * ——抱えると<b>文書を開いている間ずっと平文の鍵がヒープに残る。</b>
+     * <b>少し不便だが正直な側を選ぶ</b>（{@code CLAUDE.md} の優先順位）。
+     *
+     * <p><b>★ 訊くのは、開くとき鍵が要った出どころだけである。</b>
+     * オーナーパスワードだけが掛かった文書は<b>鍵なしで開けており、書き出しも鍵なしで通る。</b>
+     *
+     * <p><b>★★ 途中で取り消されたら、そこまでに入力された鍵をここで閉じる。</b>
+     * <b>まだ仕事へ渡していないので、持ち主はここである</b>——渡した後の片づけは
+     * {@link BackgroundTasks} が持つ。
+     *
+     * @param saving 書き出すセッション
+     * @return 入力と鍵。取り消されたら空
+     */
+    private Optional<KeyedSources> askKeys(DocumentSession saving) {
+        List<Path> paths = saving.paths();
+        List<Source> inputs = new ArrayList<>(paths.size());
+        List<Password> keys = new ArrayList<>();
+        for (int sourceIndex = 0; sourceIndex < paths.size(); sourceIndex++) {
+            Path path = paths.get(sourceIndex);
+            if (!saving.keyed(sourceIndex)) {
+                inputs.add(Source.of(path));
+                continue;
+            }
+            Optional<Password> entered = PasswordPrompt.ask(stage, path, false);
+            if (entered.isEmpty()) {
+                keys.forEach(Password::close);
+                return Optional.empty();
+            }
+            keys.add(entered.get());
+            inputs.add(Source.of(path, entered.get()));
+        }
+        return Optional.of(new KeyedSources(new Sources(inputs), List.copyOf(keys)));
     }
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */

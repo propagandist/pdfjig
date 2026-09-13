@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.PageSelection;
+import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -70,7 +71,8 @@ class KeptCopyReportTest {
         try {
             ReplacedFileKeptException kept = assertThrows(
                     ReplacedFileKeptException.class,
-                    () -> DocumentWriter.assemble(List.of(source), List.of(PageSelection.of(1)), output));
+                    () -> DocumentWriter.assemble(
+                            Sources.ofPaths(List.of(source)), List.of(PageSelection.of(1)), output));
 
             assertTrue(Files.notExists(output), "入れ替えに失敗したのに出力先に何かある。前提が変わっている");
             assertTrue(Files.exists(kept.kept()), "在り処として載せたパスに何も無い。利用者は探しに行って見つけられない（#124）");

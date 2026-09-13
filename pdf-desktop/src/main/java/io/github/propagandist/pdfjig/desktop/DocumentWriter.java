@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -71,12 +72,12 @@ final class DocumentWriter {
      * ここで印を見て包む形にすると、<b>2 つ目の {@link OutputWorkspace#nextTo} が足された日に
      * 黙って素通りする。</b>
      *
-     * @param sources 元のファイル
+     * @param sources 元のファイルと、鍵の要るものについてはその鍵
      * @param pages   書き出すページの指定
      * @param output  書き出し先
      * @return 途中で出た警告
      */
-    static List<Warning> assemble(List<Path> sources, List<PageSelection> pages, Path output) {
+    static List<Warning> assemble(Sources sources, List<PageSelection> pages, Path output) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
@@ -152,12 +153,12 @@ final class DocumentWriter {
      * （{@link PageOperations#assembleEach}）。ここに写すと、同じ「分割」という操作の
      * 挙動が 2 か所に分かれ、しかも違いは失敗したときにしか出ない。
      *
-     * @param sources   元のファイル
+     * @param sources   元のファイルと、鍵の要るものについてはその鍵
      * @param segments  かたまりごとのページ指定。先頭から順に連番で書き出す
      * @param outputDir 書き出し先のフォルダ
      * @return 書き出した数と、途中で出た警告
      */
-    static SplitResult splitInto(List<Path> sources, List<List<PageSelection>> segments, Path outputDir) {
+    static SplitResult splitInto(Sources sources, List<List<PageSelection>> segments, Path outputDir) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 

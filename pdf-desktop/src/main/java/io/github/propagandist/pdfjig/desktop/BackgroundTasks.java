@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.core.Password;
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -218,12 +219,37 @@ final class BackgroundTasks {
      *                          <b>投げる前に {@code owned} を閉じてある</b>
      */
     <T> boolean run(Password owned, Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
+        return run(List.of(owned), work, onSucceeded, onFailed);
+    }
+
+    /**
+     * 片づけるものを何本か抱えた仕事を走らせる。
+     *
+     * <p><b>★★ 鍵は 1 本とは限らない。</b>書き出しは<b>入力ごとに違う鍵</b>を要りうる
+     * （{@code Sources}。#193）——<b>1 本を預ける形では足りない。</b>
+     * 契約は {@link #run(Password, Supplier, Consumer, Consumer)} と同じで、
+     * <b>走り出したら仕事の枠が、走り出さなかったらここが、全部を閉じる。</b>
+     *
+     * <p><b>★ 1 本が閉じ損ねても残りを閉じる形にはしていない。</b>
+     * {@link Password#close()} は {@code Arrays.fill} だけであり、<b>投げる場所が無い</b>
+     * ——受けているのが {@link AutoCloseable} ではなく {@link Password} なのはそのためである。
+     *
+     * @param owned       仕事に渡すもの。<b>どちらかが必ず全部を閉じる</b>
+     * @param work        バックグラウンドで行う仕事
+     * @param onSucceeded 成功したときに JavaFX スレッドで呼ばれる
+     * @param onFailed    失敗したときに JavaFX スレッドで呼ばれる
+     * @param <T>         仕事の結果
+     * @return 走り出したなら {@code true}。断ったなら {@code false}
+     */
+    <T> boolean run(List<Password> owned, Supplier<T> work, Consumer<T> onSucceeded, Consumer<Throwable> onFailed) {
         boolean started = false;
         try {
             started = run(
                     () -> {
-                        try (owned) {
+                        try {
                             return work.get();
+                        } finally {
+                            closeAll(owned);
                         }
                     },
                     onSucceeded,
@@ -235,8 +261,15 @@ final class BackgroundTasks {
             //   ★ ここで閉じてよい根拠は、投げた時点で仕事が 1 行も走っていないことである
             //   （上の @throws）。★ 二重に閉じても害は無い。
             if (!started) {
-                owned.close();
+                closeAll(owned);
             }
+        }
+    }
+
+    /** 抱えたものを全部閉じる。{@link Password#close()} は投げないので、順に消すだけでよい。 */
+    private static void closeAll(List<Password> owned) {
+        for (Password password : owned) {
+            password.close();
         }
     }
 
