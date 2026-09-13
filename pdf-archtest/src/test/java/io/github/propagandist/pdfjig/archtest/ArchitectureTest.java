@@ -11,12 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.base.DescribedPredicate;
-import com.tngtech.archunit.core.domain.JavaCall;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaModifier;
-import com.tngtech.archunit.core.domain.TryCatchBlock;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.nio.file.Files;
@@ -69,6 +68,15 @@ class ArchitectureTest {
 
     /** パスワードの持ち主。素の {@code char[]} を持ってよい唯一の型である。 */
     private static final String PASSWORD = "io.github.propagandist.pdfjig.core.Password";
+
+    /** PDFBox を走らせる仕事を包む、ただ 1 つの場所。 */
+    private static final String PDFBOX_GUARD = "io.github.propagandist.pdfjig.core.PdfBoxGuard";
+
+    /** 警告の受け口。動かしてよいのは {@code Warnings} だけである。 */
+    private static final String WARNING_LISTENER = "io.github.propagandist.pdfjig.core.WarningListener";
+
+    /** 警告を溜めて、包みを抜けてから流す型。 */
+    private static final String WARNINGS = "io.github.propagandist.pdfjig.core.Warnings";
 
     private static JavaClasses classes;
 
@@ -633,75 +641,134 @@ class ArchitectureTest {
     }
 
     /**
-     * PDFBox を直に呼ぶ公開の入口は、未検査例外を捕まえる {@code try} の中に置く。
+     * PDFBox に触れる公開クラスの公開メソッドは、自分たちの包みを通る。
      *
      * <p><b>★★ pdf-core の外へ出るのは {@code PdfjigException} だけである</b>——
-     * それを機械で見る（#150）。<b>#144 で分かったのは「どの型が外へ出るか」を縛る仕組みが
-     * どこにも無いことだった</b>。{@code pdfboxMustNotLeakOutOfCore} は<b>型の見え方</b>を
+     * それを機械で見る（#150 / #178）。{@code pdfboxMustNotLeakOutOfCore} は<b>型の見え方</b>を
      * 見ており、軸が違う——<b>PDFBox の例外が {@code Throwable} として飛び抜けるのは止められない。</b>
      *
-     * <p><b>★★ #150 の本文は「ArchUnit は呼び出しを見るが、例外表は見ない」と書いていたが、
-     * それは誤りである</b>（2026-09-12 実測）。{@code JavaCodeUnit#getTryCatchBlocks()} は
-     * <b>捕まえる型と、{@code try} の中に在るアクセスの両方を持つ。</b>
+     * <p><b>★★ 以前は「{@code try} の形」を見ていた。2 通りに外れた</b>（#178）。
      *
-     * <p><b>★ 縛るのは公開の入口が直に呼ぶところだけである。</b>内側まで 1 つずつ包むと、
-     * 実測 128 か所が {@code try} だらけになる。<b>入口で包めば、そこから先で投げても外へは出ない</b>
-     * ——ただし<b>入口の {@code catch} が未検査も捕まえていればである</b>。
-     * <b>そこは縛れていない</b>（内側の呼び出しは「PDFBox への直の呼び出し」ではないので、
-     * この規則からは見えない）。
+     * <ul>
+     *   <li><b>開く側（偽の緑）</b>——<b>javac は try-with-resources のために
+     *       {@code catch java/lang/Throwable} を自分で吐く</b>ので、資源を開ける公開メソッドは
+     *       <b>人が 1 行も書かなくても通った</b>（<b>2026-09-12 実測</b>）。
+     *       <b>深さを 1 段下げても直らない</b>——「本体全体が {@code try} の中にある」に替えても、
+     *       合成ハンドラが本体をほぼ覆うので無改修で緑になった</li>
+     *   <li><b>閉じる側（偽の赤）</b>——ArchUnit は<b>ラムダの本体を、囲む {@code try} の中とは
+     *       見ない</b>。そのために {@code rotate} は {@code forEach} を {@code for} へ
+     *       書き換えていた</li>
+     * </ul>
      *
-     * <p><b>★ 禁止の形では書かない。</b>集合そのものを突き合わせる——
-     * <b>PDFBox を呼ぶ公開の入口が 1 つも無くなれば、下の対の検査が落ちる。</b>
+     * <p><b>いまは「{@link #PDFBOX_GUARD} を呼んだか」を見る。</b>
+     * <b>javac は自分たちのヘルパへの呼び出しを合成しない</b>ので、<b>偽の緑が原理的に出ない。</b>
+     * <b>ラムダも数えられる</b>——ArchUnit は<b>呼び出しについては</b>ラムダの本体を
+     * 囲むコード単位のものとして返す（<b>2026-09-13 実測</b>。
+     * 見ないのは {@code try} との対応だけである）。
+     *
+     * <p><b>★★ これが #150 の ① を守る。</b>{@code PdfBoxPageRendering#renderScaled} は
+     * <b>private なので、公開の入口を見る旧規則の対象外だった</b>——
+     * <b>あそこの {@code catch} を {@code IOException} だけに戻しても、旧規則は 0 件のまま緑だった</b>
+     * （同日実測）。<b>包みが入口に在れば、そこから先は誰が投げても外へ出ない</b>ので、
+     * <b>あの {@code catch} は不要になり、いまは {@code render} から {@code guarded} を外せば
+     * ここが赤くなる。</b>同じ理由で、規則から見えなかった直の呼び出し 109 件
+     * （{@code PageReferences} の 60 件を含む）も<b>包みの内側に入った。</b>
+     *
+     * <p><b>★ ここが見ないもの。</b>「その入口の PDFBox の仕事が<b>すべて</b>包みの中にあるか」は
+     * <b>見ていない</b>——包みを呼びつつ、その外でも PDFBox を呼ぶ形は通る。
+     * <b>ラムダの中と外を、呼び出しの一覧からは区別できない</b>（上の「閉じる側」と同じ限界である）。
+     * <b>書き方の側で揃えてある</b>（{@code PdfBoxPageOperations} の冒頭の枠）。
+     *
+     * <p><b>★ 禁止の形では書かない。</b>違反の集合そのものを突き合わせる——
+     * <b>対象が 1 つも無くなれば、下の対の検査が落ちる。</b>
      */
     @Test
-    @DisplayName("PDFBox を直に呼ぶ公開の入口は、未検査例外を捕まえる try の中にある")
-    void publicEntryPointsWrapPdfBox() {
+    @DisplayName("PDFBox に触れる公開クラスの公開メソッドは、自分たちの包みを通る")
+    void publicEntryPointsGoThroughTheGuard() {
         assertEquals(
                 Set.of(),
-                publicPdfBoxCalls()
-                        .filter(call -> !isGuarded(call))
+                publicEntryPointsTouchingPdfBox()
+                        .filter(method -> !callsGuard(method))
                         .map(ArchitectureTest::describe)
                         .collect(Collectors.toSet()),
-                "公開の入口が PDFBox を裸で呼んでいる。細工 PDF は IOException ではない例外を投げるので、"
+                "公開の入口が包みを通っていない。細工 PDF は IOException ではない例外を投げるので、"
                         + "そこから素の未検査例外が pdf-core の外へ出る——呼ぶ側の分岐はどれも当たらない"
-                        + "（#144 / #150）");
+                        + "（#144 / #150 / #178）");
     }
 
     @Test
-    @DisplayName("包みの規則が空振りしていない（公開の入口が実際に PDFBox を呼んでいる）")
-    void wrappingRuleHasSubject() {
+    @DisplayName("包みの規則が空振りしていない（PDFBox に触れる公開クラスが実際にある）")
+    void guardRuleHasSubject() {
         assertTrue(
-                publicPdfBoxCalls().findAny().isPresent(),
-                "公開の入口から PDFBox への呼び出しが 1 つも無い。publicEntryPointsWrapPdfBox は" + "緑でも何も守っていない");
+                publicEntryPointsTouchingPdfBox().findAny().isPresent(),
+                "PDFBox に触れる公開クラスの公開メソッドが 1 つも無い。" + "publicEntryPointsGoThroughTheGuard は緑でも何も守っていない");
     }
 
     /**
-     * 公開クラスの公開メソッドとコンストラクタから、PDFBox を走らせる呼び出し。
+     * 警告の受け口を動かすのは {@code Warnings} だけである。
      *
-     * <p><b>★ フィールドの読み書きは数えない。</b>{@code PositionCollector} のような
-     * 継承した型では<b>自前のフィールドまで拾ってしまい</b>、あれは向こうのコードを走らせない
-     * ——{@code getCallsFromSelf} はメソッドとコンストラクタの呼び出しだけを返す。
+     * <p><b>★★ {@code WarningListener} を動かすのは呼ぶ側のコードである。</b>
+     * 包みの中で走らせると、<b>そこで投げた失敗を包みが飲む</b>——
+     * 「ファイルの読み書きに失敗しました」に化け、<b>呼ぶ側の失敗が入力のせいにされる</b>
+     * （#178。{@code CLAUDE.md} 優先順位 2）。<b>型では区別が付かない</b>ので、
+     * <b>走らせる場所で分けるしかない。</b>
+     *
+     * <p><b>★★ 呼び出し場所の集合では縛れなかった</b>（<b>2026-09-13 実測</b>）。
+     * 「{@code onWarning} を呼ぶのは {@code PdfBoxPageOperations.report} だけ」を置いたところ、
+     * <b>違反 5 件のうち 4 件は直してはならないものだった</b>——
+     * <b>受け口を引数で受け取って流すメソッドは、包みの外から呼ばれるときは正しく動く。</b>
+     * <b>問われているのは「どこで呼ぶか」ではなく「どの受け口へ流すか」である。</b>
+     * <b>受け口を握る型を 1 つにすれば、そのまま集合になる。</b>
+     *
+     * <p><b>★ クラスを数え上げない。</b>境界が増えても規則を直さずに効く——
+     * {@code PdfBoxTextExtraction} に警告の口が付く日（#180）も、{@code pdf-mcp} が来る日（#103）も、
+     * <b>受け口を握るのが {@code Warnings} である限りここが見る。</b>
      */
-    private static Stream<JavaCall<?>> publicPdfBoxCalls() {
+    @Test
+    @DisplayName("警告の受け口を動かすのは Warnings だけである")
+    void onlyWarningsNotifiesTheListener() {
+        assertEquals(
+                Set.of(WARNINGS + ".report()"),
+                unitsNotifyingWarningListener(),
+                "警告の受け口が Warnings の外から動かされている。包みの中でそれが走ると、" + "呼ぶ側が投げた失敗を包みが飲み、入力のせいに化ける（#178）");
+    }
+
+    /**
+     * PDFBox に触れる公開クラスの、公開メソッド。
+     *
+     * <p><b>★ コンストラクタは数えない。</b>{@code PdfBoxPageOperations} の公開コンストラクタは
+     * 受け口を控えるだけであり、<b>PDFBox へは降りない</b>——数えると、
+     * <b>守れているのに赤が出る検査になる。</b>
+     */
+    private static Stream<JavaMethod> publicEntryPointsTouchingPdfBox() {
         return classes.stream()
                 .filter(javaClass -> javaClass.getModifiers().contains(JavaModifier.PUBLIC))
-                .flatMap(javaClass -> javaClass.getCodeUnits().stream())
-                .filter(unit -> unit.getModifiers().contains(JavaModifier.PUBLIC))
+                .filter(ArchitectureTest::touchesPdfBox)
+                .flatMap(javaClass -> javaClass.getMethods().stream())
+                .filter(method -> method.getModifiers().contains(JavaModifier.PUBLIC));
+    }
+
+    /**
+     * そのクラスのどこかが PDFBox を走らせるか。
+     *
+     * <p><b>★ 型の持ち方では見ない。</b>{@code EncryptionInfo} のような値の型は
+     * PDFBox から読んだ値を運ぶが、<b>向こうのコードは走らせない。</b>
+     */
+    private static boolean touchesPdfBox(JavaClass javaClass) {
+        return javaClass.getCodeUnits().stream()
                 .flatMap(unit -> unit.getCallsFromSelf().stream())
-                .filter(call -> isPdfBoxOwned(call.getTargetOwner()));
+                .anyMatch(call -> isPdfBoxOwned(call.getTargetOwner()));
     }
 
-    /** その呼び出しが、未検査例外を捕まえる {@code try} の中に在るか。 */
-    private static boolean isGuarded(JavaCall<?> call) {
-        return call.getOrigin().getTryCatchBlocks().stream()
-                .anyMatch(block -> catchesUnchecked(block)
-                        && block.getAccessesContainedInTryBlock().contains(call));
+    /** そのコード単位が、自分たちの包みを呼ぶか。 */
+    private static boolean callsGuard(JavaCodeUnit unit) {
+        return unit.getCallsFromSelf().stream()
+                .anyMatch(call -> call.getTargetOwner().getName().equals(PDFBOX_GUARD));
     }
 
-    /** 表記は {@code 型.名前() -> PDFBox の型.名前}。 */
-    private static String describe(JavaCall<?> call) {
-        return call.getOriginOwner().getName() + "." + call.getOrigin().getName() + "() -> "
-                + call.getTargetOwner().getSimpleName() + "." + call.getName();
+    /** 表記は {@code 型.名前()}。 */
+    private static String describe(JavaCodeUnit unit) {
+        return unit.getOwner().getName() + "." + unit.getName() + "()";
     }
 
     /**
@@ -721,24 +788,14 @@ class ArchitectureTest {
         return type.getPackageName().startsWith(PDFBOX);
     }
 
-    /**
-     * その {@code catch} が未検査例外まで捕まえるか。
-     *
-     * <p><b>{@code IOException} だけでは足りない</b>——PDFBox は細工 PDF に対して
-     * {@code IllegalArgumentException} / {@code NegativeArraySizeException} /
-     * {@code ArrayIndexOutOfBoundsException} を投げる（#144 / #150）。
-     *
-     * <p><b>★★ {@code Throwable} を認めない。</b>認めると<b>人が 1 行も書いていない包みで
-     * 緑になる</b>——<b>javac は try-with-resources のために {@code catch java/lang/Throwable} を
-     * 自分で吐く</b>ので、資源を開ける公開メソッドはそれだけで通ってしまう
-     * （<b>2026-09-12 実測</b>。{@code PdfBoxPageOperations#merge} は人の手では
-     * {@code IOException} しか捕まえていないのに、合成された表で緑になっていた）。
-     * <b>見たいのは「書いた包み」であって「例外表の形」ではない。</b>
-     *
-     * <p><b>★ {@code Error} は見ない。</b>あちらを包むかは別の判断であり、#151 が持つ。
-     */
-    private static boolean catchesUnchecked(TryCatchBlock block) {
-        return block.getCaughtThrowables().stream().anyMatch(caught -> caught.isEquivalentTo(RuntimeException.class));
+    /** {@code WarningListener#onWarning} を呼んでいる本番のコード単位。 */
+    private static Set<String> unitsNotifyingWarningListener() {
+        return classes.stream()
+                .flatMap(javaClass -> javaClass.getMethodCallsFromSelf().stream())
+                .filter(call -> call.getTargetOwner().getName().equals(WARNING_LISTENER))
+                .filter(call -> call.getTarget().getName().equals("onWarning"))
+                .map(call -> describe(call.getOrigin()))
+                .collect(Collectors.toSet());
     }
 
     /**
