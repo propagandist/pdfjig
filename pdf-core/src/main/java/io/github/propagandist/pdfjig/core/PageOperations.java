@@ -19,9 +19,13 @@ import java.util.Map;
  *       （{@link Warning#ENCRYPTION_NOT_PROPAGATED}）。出力は平文になる</li>
  * </ul>
  *
- * <p><b>M0 の制約:</b> パスワードが必要な入力は開けない
- * （{@link ErrorCode#PASSWORD_REQUIRED} で失敗する）。パスワードを受け取る経路は
- * 暗号化機能一式とあわせて M1 で追加する。
+ * <p><b>鍵の要る入力は {@link Source} で渡す。</b>{@link Path} を取る形は
+ * <b>鍵の要らない入力の省略形</b>であり、ユーザーパスワードの要る文書に当てると
+ * {@link ErrorCode#PASSWORD_REQUIRED} で失敗する（#193）。
+ *
+ * <p><b>★★ 複数の入力を取る 3 本は {@link Sources} を通す。</b>
+ * {@code List<Path>} と {@code List<Source>} は<b>消去後に同じ綴りになり、
+ * 多重定義として置けない</b>——値型で包めば衝突しない。理由の正本は {@link Sources} にある。
  */
 public interface PageOperations {
 
@@ -34,7 +38,19 @@ public interface PageOperations {
      * @return {@code output}
      * @throws PdfjigException 入力が空、出力が既存、読み書きに失敗した場合
      */
-    Path merge(List<Path> inputs, Path output, MergeOptions options);
+    Path merge(Sources inputs, Path output, MergeOptions options);
+
+    /**
+     * 鍵の要らない入力を結合する。
+     *
+     * @param inputs  入力ファイル。この順に連結される
+     * @param output  出力ファイル。既存であってはならない
+     * @param options 結合の指定
+     * @return {@code output}
+     */
+    default Path merge(List<Path> inputs, Path output, MergeOptions options) {
+        return merge(Sources.ofPaths(inputs), output, options);
+    }
 
     /**
      * 1 つの PDF を複数に分割する。
@@ -48,7 +64,19 @@ public interface PageOperations {
      * @return 生成されたファイル。区切りの順
      * @throws PdfjigException 出力先に同名のファイルが既にある、読み書きに失敗した場合
      */
-    List<Path> split(Path input, SplitStrategy strategy, Path outputDir);
+    List<Path> split(Source input, SplitStrategy strategy, Path outputDir);
+
+    /**
+     * 鍵の要らない入力を分割する。
+     *
+     * @param input     入力ファイル
+     * @param strategy  切り方
+     * @param outputDir 出力先ディレクトリ
+     * @return 生成されたファイル。区切りの順
+     */
+    default List<Path> split(Path input, SplitStrategy strategy, Path outputDir) {
+        return split(Source.of(input), strategy, outputDir);
+    }
 
     /**
      * ページを並べ替える。
@@ -60,7 +88,19 @@ public interface PageOperations {
      * @return {@code output}
      * @throws PdfjigException 並べ替えが不正な場合は {@link ErrorCode#INVALID_PAGE_ORDER}
      */
-    Path reorder(Path input, List<Integer> newOrder, Path output);
+    Path reorder(Source input, List<Integer> newOrder, Path output);
+
+    /**
+     * 鍵の要らない入力のページを並べ替える。
+     *
+     * @param input    入力ファイル
+     * @param newOrder 新しい順序
+     * @param output   出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path reorder(Path input, List<Integer> newOrder, Path output) {
+        return reorder(Source.of(input), newOrder, output);
+    }
 
     /**
      * 指定したページを、指定した順と向きで並べた文書を書き出す。
@@ -80,7 +120,21 @@ public interface PageOperations {
      * @throws PdfjigException 指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
      *                         範囲外のページを含む場合は {@link ErrorCode#PAGE_OUT_OF_RANGE}
      */
-    Path assemble(Path input, List<PageSelection> pages, Path output);
+    default Path assemble(Source input, List<PageSelection> pages, Path output) {
+        return assemble(Sources.of(input), pages, output);
+    }
+
+    /**
+     * 鍵の要らない入力から組み立てる。
+     *
+     * @param input  入力ファイル
+     * @param pages  出力に含めるページ。この順に並ぶ
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path assemble(Path input, List<PageSelection> pages, Path output) {
+        return assemble(Sources.of(Source.of(input)), pages, output);
+    }
 
     /**
      * 複数の入力にまたがってページを集め、指定した順と向きで並べた文書を書き出す。
@@ -102,7 +156,19 @@ public interface PageOperations {
      *                         範囲外の出どころやページを含む場合は
      *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}
      */
-    Path assemble(List<Path> inputs, List<PageSelection> pages, Path output);
+    Path assemble(Sources inputs, List<PageSelection> pages, Path output);
+
+    /**
+     * 鍵の要らない入力にまたがって組み立てる。
+     *
+     * @param inputs 入力ファイル
+     * @param pages  出力に含めるページ。この順に並ぶ
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path assemble(List<Path> inputs, List<PageSelection> pages, Path output) {
+        return assemble(Sources.ofPaths(inputs), pages, output);
+    }
 
     /**
      * 組み立てた並びを、かたまりごとに連番のファイルとして書き出す。
@@ -131,7 +197,19 @@ public interface PageOperations {
      *                                  読み書きに失敗した場合
      * @throws IllegalArgumentException {@code outputDir} が {@code null} の場合
      */
-    List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir);
+    List<Path> assembleEach(Sources inputs, List<List<PageSelection>> segments, Path outputDir);
+
+    /**
+     * 鍵の要らない入力を、かたまりごとに書き出す。
+     *
+     * @param inputs    入力ファイル
+     * @param segments  かたまりごとのページ指定
+     * @param outputDir 出力先ディレクトリ
+     * @return 生成されたファイル。かたまりの順
+     */
+    default List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir) {
+        return assembleEach(Sources.ofPaths(inputs), segments, outputDir);
+    }
 
     /**
      * ページを回転する。
@@ -151,7 +229,19 @@ public interface PageOperations {
      *
      * @throws PdfjigException ページが範囲外の場合
      */
-    Path rotate(Path input, Map<Integer, Rotation> rotations, Path output);
+    Path rotate(Source input, Map<Integer, Rotation> rotations, Path output);
+
+    /**
+     * 鍵の要らない入力のページを回転する。
+     *
+     * @param input     入力ファイル
+     * @param rotations ページ番号から追加回転への対応
+     * @param output    出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path rotate(Path input, Map<Integer, Rotation> rotations, Path output) {
+        return rotate(Source.of(input), rotations, output);
+    }
 
     /**
      * 指定範囲のページだけを取り出す。
@@ -162,7 +252,19 @@ public interface PageOperations {
      * @return {@code output}
      * @throws PdfjigException 範囲が文書に収まらない場合
      */
-    Path extractPages(Path input, PageRange range, Path output);
+    Path extractPages(Source input, PageRange range, Path output);
+
+    /**
+     * 鍵の要らない入力から、指定範囲のページだけを取り出す。
+     *
+     * @param input  入力ファイル
+     * @param range  取り出す範囲
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path extractPages(Path input, PageRange range, Path output) {
+        return extractPages(Source.of(input), range, output);
+    }
 
     /**
      * 指定範囲のページを取り除く。
@@ -173,5 +275,17 @@ public interface PageOperations {
      * @return {@code output}
      * @throws PdfjigException 全ページが対象になる場合は {@link ErrorCode#EMPTY_RESULT}
      */
-    Path deletePages(Path input, PageRange range, Path output);
+    Path deletePages(Source input, PageRange range, Path output);
+
+    /**
+     * 鍵の要らない入力から、指定範囲のページを取り除く。
+     *
+     * @param input  入力ファイル
+     * @param range  取り除く範囲
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path deletePages(Path input, PageRange range, Path output) {
+        return deletePages(Source.of(input), range, output);
+    }
 }

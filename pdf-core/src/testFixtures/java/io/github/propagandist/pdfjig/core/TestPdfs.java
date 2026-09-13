@@ -145,8 +145,15 @@ public final class TestPdfs {
 
     /** AES-256 で暗号化した 1 ページの PDF を作る。 */
     public static Path encrypted(Path target, String userPassword) throws IOException {
+        return encrypted(target, userPassword, 1);
+    }
+
+    /** AES-256 で暗号化した PDF を、指定のページ数で作る。 */
+    public static Path encrypted(Path target, String userPassword, int pageCount) throws IOException {
         try (PDDocument document = new PDDocument()) {
-            document.addPage(new PDPage());
+            for (int i = 0; i < pageCount; i++) {
+                document.addPage(new PDPage());
+            }
 
             AccessPermission permissions = new AccessPermission();
             StandardProtectionPolicy policy = new StandardProtectionPolicy(userPassword, userPassword, permissions);

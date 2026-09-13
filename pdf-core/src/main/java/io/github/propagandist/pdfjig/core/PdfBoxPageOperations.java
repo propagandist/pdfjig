@@ -101,10 +101,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path merge(List<Path> inputs, Path output, MergeOptions options) {
-        if (inputs == null || inputs.isEmpty()) {
-            throw new PdfjigException(ErrorCode.NO_INPUT);
-        }
+    public Path merge(Sources inputs, Path output, MergeOptions options) {
         requireSupported(options.encryptionPropagation());
         requireAbsent(output);
 
@@ -114,12 +111,12 @@ public final class PdfBoxPageOperations implements PageOperations {
         return output;
     }
 
-    private void mergeInto(List<Path> inputs, Path output, Warnings warnings) throws IOException {
+    private void mergeInto(Sources inputs, Path output, Warnings warnings) throws IOException {
         try (OpenDocuments sources = new OpenDocuments();
                 PDDocument merged = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
             PDDocumentInformation information = null;
-            for (Path input : inputs) {
+            for (Source input : inputs.all()) {
                 // appendDocument は入力のページを参照でつなぐ。保存が終わるまで
                 // 入力を閉じられないため、まとめて開いたまま保持する。
                 PdfDocument source = sources.open(input, warnings);
@@ -134,7 +131,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public List<Path> split(Path input, SplitStrategy strategy, Path outputDir) {
+    public List<Path> split(Source input, SplitStrategy strategy, Path outputDir) {
         requireSupported(strategy.encryptionPropagation());
         if (outputDir == null) {
             throw new IllegalArgumentException("outputDir は null にできません。");
@@ -146,12 +143,12 @@ public final class PdfBoxPageOperations implements PageOperations {
         return outputs;
     }
 
-    private List<Path> splitInto(Path input, SplitStrategy strategy, Path outputDir, Warnings warnings) {
+    private List<Path> splitInto(Source input, SplitStrategy strategy, Path outputDir, Warnings warnings) {
         List<PageRange> ranges;
         try (PdfDocument source = open(input, warnings)) {
             ranges = resolveRanges(strategy, source.pageCount());
         }
-        List<Path> outputs = splitOutputPaths(input, outputDir, ranges.size());
+        List<Path> outputs = splitOutputPaths(input.path(), outputDir, ranges.size());
         // 1 つでも書けないなら、何も書かずに失敗させる。
         outputs.forEach(PdfBoxPageOperations::requireAbsent);
 
@@ -178,7 +175,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path reorder(Path input, List<Integer> newOrder, Path output) {
+    public Path reorder(Source input, List<Integer> newOrder, Path output) {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
@@ -187,7 +184,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         return output;
     }
 
-    private void reorderInto(Path input, List<Integer> newOrder, Path output, Warnings warnings) {
+    private void reorderInto(Source input, List<Integer> newOrder, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             requirePermutation(newOrder, source.pageCount());
             writeFromSingleSource(source, selectionsOf(newOrder), output, warnings);
@@ -195,20 +192,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path assemble(Path input, List<PageSelection> pages, Path output) {
-        requireAbsent(output);
-
-        Warnings warnings = new Warnings(listener);
-        guardedRun(ErrorCode.NOT_A_PDF, () -> assembleInto(List.of(input), pages, output, warnings));
-        warnings.report();
-        return output;
-    }
-
-    @Override
-    public Path assemble(List<Path> inputs, List<PageSelection> pages, Path output) {
-        if (inputs == null || inputs.isEmpty()) {
-            throw new PdfjigException(ErrorCode.NO_INPUT);
-        }
+    public Path assemble(Sources inputs, List<PageSelection> pages, Path output) {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
@@ -224,11 +208,11 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 呼び合うと、<b>内側の {@code report} が外側の包みの中で走る</b>——
      * まさに {@link Warnings} が避けている形である。
      */
-    private void assembleInto(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings) {
+    private void assembleInto(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings) {
         // 結合では保存が終わるまで入力を閉じられない。まとめて開いたまま保持する。
         try (OpenDocuments sources = new OpenDocuments()) {
             List<PdfDocument> documents = new ArrayList<>(inputs.size());
-            for (Path input : inputs) {
+            for (Source input : inputs.all()) {
                 documents.add(sources.openQuietly(input));
             }
             requireSelectable(pages, documents);
@@ -238,10 +222,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public List<Path> assembleEach(List<Path> inputs, List<List<PageSelection>> segments, Path outputDir) {
-        if (inputs == null || inputs.isEmpty()) {
-            throw new PdfjigException(ErrorCode.NO_INPUT);
-        }
+    public List<Path> assembleEach(Sources inputs, List<List<PageSelection>> segments, Path outputDir) {
         if (segments == null || segments.isEmpty()) {
             throw new PdfjigException(ErrorCode.EMPTY_RESULT);
         }
@@ -257,9 +238,9 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     private List<Path> assembleEachInto(
-            List<Path> inputs, List<List<PageSelection>> segments, Path outputDir, Warnings warnings) {
+            Sources inputs, List<List<PageSelection>> segments, Path outputDir, Warnings warnings) {
         // 名前は最初の入力から作る。split と同じ規則を使う。
-        List<Path> outputs = splitOutputPaths(inputs.get(0), outputDir, segments.size());
+        List<Path> outputs = splitOutputPaths(inputs.get(0).path(), outputDir, segments.size());
         // 1 つでも書けないなら、何も書かずに失敗させる。
         outputs.forEach(PdfBoxPageOperations::requireAbsent);
 
@@ -281,7 +262,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path rotate(Path input, Map<Integer, Rotation> rotations, Path output) {
+    public Path rotate(Source input, Map<Integer, Rotation> rotations, Path output) {
         if (rotations == null) {
             throw new IllegalArgumentException("rotations は null にできません。");
         }
@@ -293,7 +274,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         return output;
     }
 
-    private void rotateInto(Path input, Map<Integer, Rotation> rotations, Path output, Warnings warnings) {
+    private void rotateInto(Source input, Map<Integer, Rotation> rotations, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             int pageCount = source.pageCount();
             rotations
@@ -316,7 +297,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path extractPages(Path input, PageRange range, Path output) {
+    public Path extractPages(Source input, PageRange range, Path output) {
         requireRange(range);
         requireAbsent(output);
 
@@ -326,7 +307,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         return output;
     }
 
-    private void extractPagesInto(Path input, PageRange range, Path output, Warnings warnings) {
+    private void extractPagesInto(Source input, PageRange range, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             range.validateAgainst(source.pageCount());
             writeRange(source, range, output, warnings);
@@ -334,7 +315,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path deletePages(Path input, PageRange range, Path output) {
+    public Path deletePages(Source input, PageRange range, Path output) {
         requireRange(range);
         requireAbsent(output);
 
@@ -344,7 +325,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         return output;
     }
 
-    private void deletePagesInto(Path input, PageRange range, Path output, Warnings warnings) {
+    private void deletePagesInto(Source input, PageRange range, Path output, Warnings warnings) {
         try (PdfDocument source = open(input, warnings)) {
             int pageCount = source.pageCount();
             range.validateAgainst(pageCount);
@@ -380,7 +361,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 取り除いたはずのページが参照から辿れて出力に残る。
      */
     private void write(
-            List<Path> inputs, List<PdfDocument> sources, List<PageSelection> pages, Path output, Warnings warnings) {
+            Sources inputs, List<PdfDocument> sources, List<PageSelection> pages, Path output, Warnings warnings) {
         int single = singleSourceIndexOf(pages);
         if (single >= 0) {
             writeFromSingleSource(sources.get(single), pages, output, warnings);
@@ -494,11 +475,11 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <b>この差分では揃えていない</b>——{@code merge} の符号ごと動かすことになり、
      * <b>利用者へ届く値が変わる</b>。#191 が持つ。
      */
-    private void writeByMerging(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings) {
+    private void writeByMerging(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings) {
         guardedRun(ErrorCode.IO_FAILURE, () -> mergeCopiesInto(inputs, pages, output, warnings));
     }
 
-    private void mergeCopiesInto(List<Path> inputs, List<PageSelection> pages, Path output, Warnings warnings)
+    private void mergeCopiesInto(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings)
             throws IOException {
         try (OpenDocuments copies = new OpenDocuments();
                 PDDocument target = new PDDocument()) {
@@ -693,8 +674,8 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * <p><b>{@code pdf-desktop} の {@code DocumentSession#wrap} が同じ形を持っている。</b>
      */
-    private static PdfDocument open(Path input, Warnings warnings) {
-        PdfDocument document = PdfDocument.open(input);
+    private static PdfDocument open(Source input, Warnings warnings) {
+        PdfDocument document = openQuietly(input);
         try {
             if (document.encrypted()) {
                 warnings.add(Warning.ENCRYPTION_NOT_PROPAGATED);
@@ -723,8 +704,10 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <p>同じ入力を書き出しの都合で開き直す場合に使う。開いた回数だけ警告が出ると、
      * 利用者には何件の問題があるのか分からなくなる。警告は入力ごとに 1 度でよい。
      */
-    private static PdfDocument openQuietly(Path input) {
-        return PdfDocument.open(input);
+    private static PdfDocument openQuietly(Source input) {
+        return input.password() == null
+                ? PdfDocument.open(input.path())
+                : PdfDocument.open(input.path(), input.password());
     }
 
     /** ページ番号の並びを、向きを変えない指定に直す。 */
@@ -919,12 +902,12 @@ public final class PdfBoxPageOperations implements PageOperations {
 
         private final List<PdfDocument> documents = new ArrayList<>();
 
-        PdfDocument open(Path path, Warnings warnings) {
-            return keep(PdfBoxPageOperations.open(path, warnings));
+        PdfDocument open(Source source, Warnings warnings) {
+            return keep(PdfBoxPageOperations.open(source, warnings));
         }
 
-        PdfDocument openQuietly(Path path) {
-            return keep(PdfBoxPageOperations.openQuietly(path));
+        PdfDocument openQuietly(Source source) {
+            return keep(PdfBoxPageOperations.openQuietly(source));
         }
 
         private PdfDocument keep(PdfDocument document) {
