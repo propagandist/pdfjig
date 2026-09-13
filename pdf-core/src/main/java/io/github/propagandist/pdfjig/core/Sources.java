@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -23,8 +24,15 @@ public record Sources(List<Source> all) {
         if (all == null || all.isEmpty()) {
             throw new PdfjigException(ErrorCode.NO_INPUT);
         }
-        // ★ null の要素は List.copyOf が弾く。重ねて contains(null) を書かないこと
-        //   ——不変リストはあれ自体が NullPointerException を投げる（2026-09-13 実測）。
+        // ★★ 先に数え上げる。List.copyOf も null を弾くが、投げるのは素の
+        //   NullPointerException であり、呼ぶ側には何が悪いのか分からない
+        //   （pdf-core の他の検めはどれも理由の付いた IllegalArgumentException である）。
+        //   ★ contains(null) では書けない——不変リストはあれ自体が投げる（2026-09-13 実測）。
+        for (Source source : all) {
+            if (source == null) {
+                throw new IllegalArgumentException("入力に null は混ぜられません。");
+            }
+        }
         all = List.copyOf(all);
     }
 
@@ -35,7 +43,9 @@ public record Sources(List<Source> all) {
      * @return 入力の並び
      */
     public static Sources of(Source... sources) {
-        return new Sources(List.of(sources));
+        // ★ List.of ではなく Arrays.asList を通す。あちらは null の要素を素の
+        //   NullPointerException で弾くので、下の検めが理由を付ける機会を失う。
+        return new Sources(sources == null ? null : Arrays.asList(sources));
     }
 
     /**

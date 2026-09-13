@@ -963,6 +963,31 @@ class PdfBoxPageOperationsTest {
             assertEquals(IllegalStateException.class.getName(), failure.causeType(), "閉じた鍵が PDFBox まで届いている。誤りに名前が付かない");
         }
 
+        @Test
+        @DisplayName("★★ 書き終えた後に落ちても、復号した平文を置き去りにしない")
+        void doesNotLeaveDecryptedOutputBehind() throws Exception {
+            // ★★ 鍵の要る入力を扱えるようになって、初めて重くなった経路である（#193 の門の 2 段目）。
+            //   差分の前にここへ届いたのはオーナーパスワードだけの文書で、中身はもともと誰でも
+            //   開けた。いまは「ユーザーパスワードで守られた文書を、完全に復号した写し」が残りうる。
+            //   ★ PdfDocument#close は閉じるときに初めて投げることがある（#150）ので、
+            //   書き終えた後の失敗がいちばん危ない——継ぎ目で、書けた後に落とす。
+            Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
+            Path output = out("leaked");
+            PdfBoxPageOperations.DocumentSaver writesThenFails = (document, target) -> {
+                PdfBoxPageOperations.saveDocument(document, target);
+                throw new PdfjigException(ErrorCode.IO_FAILURE);
+            };
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFails);
+
+            try (Password password = Password.copyOf("user")) {
+                assertThrows(
+                        PdfjigException.class,
+                        () -> failing.assemble(Source.of(input, password), List.of(PageSelection.of(0, 1)), output));
+            }
+
+            assertFalse(Files.exists(output), "復号した平文が、失敗したと告げたまま残っている");
+        }
+
         private Path out(String name) {
             return tempDir.resolve(name + ".pdf");
         }

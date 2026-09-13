@@ -43,8 +43,13 @@ public final class Password implements AutoCloseable {
      *
      * <p><b>それでも置くのは、誤りに名前を付けるためである。</b>
      * 「文書かパスワードのどちらかが悪い」ではなく、<b>「閉じた鍵を使った」と言える。</b>
+     *
+     * <p><b>★★ {@code volatile} である。</b>閉じるのと読むのは<b>別のスレッドになりうる</b>
+     * ——{@link Source} が書き出しの間ずっと鍵を持ち、その書き出しは画面の裏で走る
+     * （{@code BackgroundTasks}）。<b>印が見えなければ、この検査は静かに素通りする</b>
+     * ——<b>防ごうとした形がそのまま起きる。</b>
      */
-    private boolean closed;
+    private volatile boolean closed;
 
     private Password(char[] value) {
         this.value = value;
