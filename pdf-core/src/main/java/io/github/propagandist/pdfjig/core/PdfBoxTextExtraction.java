@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
-import java.io.IOException;
+import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guarded;
+
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -26,25 +27,22 @@ public final class PdfBoxTextExtraction implements TextExtraction {
 
     @Override
     public String extractAll(PdfDocument document) {
-        PDFTextStripper stripper = newStripper();
-        try {
-            return stripper.getText(document.delegate());
-        } catch (IOException | RuntimeException e) {
-            // ★★ PDFBox は IOException ではない例外も投げる（#144 / #150）。フォント・色空間・
-            //   内容ストリームはどれも細工 PDF が決められるところであり、包まないと素の
-            //   未検査例外が pdf-core の外へ出る——呼ぶ側の分岐はどれも当たらない。
-            throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
-        }
+        // ★★ PDFBox は IOException ではない例外も投げる（#144 / #150）。フォント・色空間・
+        //   内容ストリームはどれも細工 PDF が決められるところであり、包まないと素の
+        //   未検査例外が pdf-core の外へ出る——呼ぶ側の分岐はどれも当たらない。
+        //   ★★ 組み立ても包みの中に置く。newStripper は PDFBox を走らせるので、
+        //   外に置くと、そこで投げたものが素のまま出る（#178 で移した）。
+        return guarded(ErrorCode.TEXT_EXTRACTION_FAILED, () -> newStripper().getText(document.delegate()));
     }
 
     @Override
     public List<PageText> extractByPage(PdfDocument document) {
         int pageCount = document.pageCount();
-        PDFTextStripper stripper = newStripper();
-        // ★★ 入れ物を作るところも try の中である。pageCount が返すのは PDFBox が読んだ /Count
+        // ★★ 入れ物を作るところも包みの中である。pageCount が返すのは PDFBox が読んだ /Count
         //   そのものなので、細工 PDF では負にも巨大にもなる——外に置くと、そこで投げる
         //   IllegalArgumentException が素のまま出る（#150）。
-        try {
+        return guarded(ErrorCode.TEXT_EXTRACTION_FAILED, () -> {
+            PDFTextStripper stripper = newStripper();
             List<PageText> pages = new ArrayList<>(pageCount);
             for (int pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
                 stripper.setStartPage(pageNumber);
@@ -52,26 +50,22 @@ public final class PdfBoxTextExtraction implements TextExtraction {
                 pages.add(new PageText(pageNumber, stripper.getText(document.delegate())));
             }
             return List.copyOf(pages);
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
-        }
+        });
     }
 
     @Override
     public List<PositionedText> extractWithPositions(PdfDocument document, int pageNumber) {
         PageRange.singlePage(pageNumber).validateAgainst(document.pageCount());
 
-        // ★ 組み立ても try の中に置く。PositionCollector は PDFTextStripper を継承しており、
+        // ★ 組み立ても包みの中に置く。PositionCollector は PDFTextStripper を継承しており、
         //   作るところでも設定するところでも向こうのコードが走る。
-        try {
+        return guarded(ErrorCode.TEXT_EXTRACTION_FAILED, () -> {
             PositionCollector collector = configure(new PositionCollector());
             collector.setStartPage(pageNumber);
             collector.setEndPage(pageNumber);
             collector.getText(document.delegate());
             return List.copyOf(collector.collected);
-        } catch (IOException | RuntimeException e) {
-            throw PdfjigException.wrapping(ErrorCode.TEXT_EXTRACTION_FAILED, e);
-        }
+        });
     }
 
     private static PDFTextStripper newStripper() {
