@@ -321,7 +321,7 @@ UI の編集（並べ替え・削除・回転）は 1 ファイルを扱う限�
 
 ★★ **口を `WarningListener` に足すには、契約を先に変えることになる**——**あの Javadoc は「実装は例外を投げてはならない」と定めている。**
 
-★ **もう 1 つの障害だった「包みが中止を飲む」は、#178 の一部として塞いだ**（2026-09-13）。`merge` と `writeByMerging` は**包みの中では溜めるだけにし、抜けてから流す。** ★★ **ただし `writeFromSingleSource` は直に呼んだままである**——`reorder` / `extractPages` / `deletePages` / `assemble` / `split` の 6 経路が通る側であり、**あそこを包む日には同じ問題が戻る**（#178）。
+★ **もう 1 つの障害だった「包みが中止を飲む」は、#178 で塞ぎ切った**（2026-09-13）。**受け口を握るのは `Warnings` だけ**になり、**公開の入口はすべて `PdfBoxGuard#guarded` を通る**——`pdf-core` は**包みの中では溜めるだけにし、抜けてから流す。** ★★ **残っていた `writeFromSingleSource` の直呼びも消えた**（`reorder` / `extractPages` / `deletePages` / `assemble` / `split` が通る側）。**縛るのは `pdf-archtest` の 2 本である**（「公開メソッドは包みを通る」「`onWarning` を呼ぶのは `Warnings` だけ」）。
 
 ★★ **伝播の指定は `assemble` と `assembleEach` にも要る。** いま `EncryptionPropagation` を持つのは `MergeOptions` と `SplitStrategy` だけだが、**画面が通るのはその 2 つではない**——「名前を付けて保存」は `assemble`、「分割」は `assembleEach` である。**`merge` と `split` は画面から呼ばれない。** 上の「既定は `PROMPT`（UI）」は、**指定を受け取る口がそちらにも無ければ表現できない。**
 
