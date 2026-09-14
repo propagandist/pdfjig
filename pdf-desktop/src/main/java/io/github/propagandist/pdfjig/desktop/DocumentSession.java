@@ -131,7 +131,12 @@ public final class DocumentSession implements AutoCloseable {
         return extension > 0 ? fileName.substring(0, extension) : fileName;
     }
 
-    /** 出どころのファイル。書き出しのとき入力一覧としてそのまま渡す。 */
+    /**
+     * 出どころのファイル。
+     *
+     * <p><b>★ これだけでは書き出せない。</b>鍵の要る出どころがあれば
+     * {@code Sources} へ組み直す必要がある（{@link #keyed}。#193）。
+     */
     public List<Path> paths() {
         return List.copyOf(paths);
     }
@@ -164,6 +169,28 @@ public final class DocumentSession implements AutoCloseable {
     /** 含んでいる全ファイルのページ数の合計。編集中の枚数とは異なりうる。 */
     public int sourcePageCount() {
         return documents.stream().mapToInt(PdfDocument::pageCount).sum();
+    }
+
+    /**
+     * その出どころは、鍵を渡して開いたか。
+     *
+     * <p><b>書き出すときも同じ鍵が要る</b>——{@code pdf-core} は書き出しの都合で
+     * <b>同じ入力を開き直す</b>ので、鍵なしでは {@code PASSWORD_REQUIRED} で落ちる（#193）。
+     *
+     * <p><b>★★ ここは覚えない。開いた文書に訊く</b>（{@link PdfDocument#openedWithPassword()}）。
+     * <b>並びをもう 1 本増やすと、出どころを外すたびに 3 本を同じだけずらすことになる</b>
+     * ——1 本でも書き忘れると、<b>別のファイルの鍵を訊く形で静かに壊れる。</b>
+     *
+     * <p><b>★ 鍵そのものは誰も持たない</b>（#193）。抱えると<b>文書を開いている間ずっと
+     * 平文の鍵がヒープに残る</b>——{@code docs/RELEASE_NOTES.md}
+     * 「パスワードが手元のメモリに平文で残っていた」は<b>まさにその形</b>であり、
+     * <b>今度は意図して作ることになる。</b>
+     *
+     * @param sourceIndex 出どころ番号
+     * @return 鍵を渡して開いたなら {@code true}
+     */
+    public boolean keyed(int sourceIndex) {
+        return documents.get(sourceIndex).openedWithPassword();
     }
 
     /** 含んでいるファイルのいずれかが暗号化されているか。 */

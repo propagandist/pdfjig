@@ -22,7 +22,10 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -683,6 +686,22 @@ class ArchitectureTest {
      * ここが赤くなる。</b>同じ理由で、規則から見えなかった直の呼び出し 109 件
      * （{@code PageReferences} の 60 件を含む）も<b>包みの内側に入った。</b>
      *
+     * <p><b>★★ 対象はメソッド単位である。</b>以前は「PDFBox に触れる<b>クラス</b>の公開メソッド」
+     * を見ていたが、<b>PDFBox へ 1 歩も降りない公開メソッドを足した日に赤くなる</b>
+     * ——{@code PdfDocument#openedWithPassword()} は<b>控えた真偽を返すだけ</b>である。
+     * <b>意味のない {@code guarded} を書かせるか、除外を 1 つ増やすかになる</b>
+     * （#189 の門が予告し、#193 で現に踏んだ）。<b>いまは自分のクラスの中をたどって、
+     * ほんとうに PDFBox へ届くものだけを対象にする。</b>
+     *
+     * <p><b>★★ たどるのは「自分で包む責任がまだ移っていない先」だけである。</b>
+     * <b>別の公開メソッドに当たったらそこで止める</b>——あちらはこの規則の対象であり、
+     * <b>自分で包む。</b>それ以外（private・パッケージプライベート・同じクラスの中）は<b>たどる。</b>
+     *
+     * <p><b>★★ 「同じクラスの中だけ」では弱かった</b>（2026-09-13 実測。#196 の門の 2 段目）。
+     * {@code PdfBoxEncryption#inspect} は {@code PdfDocument#encryption()} を経由して
+     * PDFBox へ届くが、<b>あれはパッケージプライベートなので入口ではない</b>
+     * ——<b>対象が 24 から 21 へ減り、あの 2 本から包みを外しても緑になる状態だった。</b>
+     *
      * <p><b>★ ここが見ないもの。</b>「その入口の PDFBox の仕事が<b>すべて</b>包みの中にあるか」は
      * <b>見ていない</b>——包みを呼びつつ、その外でも PDFBox を呼ぶ形は通る。
      * <b>ラムダの中と外を、呼び出しの一覧からは区別できない</b>（上の「閉じる側」と同じ限界である）。
@@ -775,7 +794,7 @@ class ArchitectureTest {
     }
 
     /**
-     * PDFBox に触れる公開クラスの、公開メソッド。
+     * PDFBox へ届く公開メソッド。
      *
      * <p><b>★ コンストラクタは数えない。</b>{@code PdfBoxPageOperations} の公開コンストラクタは
      * 受け口を控えるだけであり、<b>PDFBox へは降りない</b>——数えると、
@@ -784,21 +803,61 @@ class ArchitectureTest {
     private static Stream<JavaMethod> publicEntryPointsTouchingPdfBox() {
         return classes.stream()
                 .filter(javaClass -> javaClass.getModifiers().contains(JavaModifier.PUBLIC))
-                .filter(ArchitectureTest::touchesPdfBox)
                 .flatMap(javaClass -> javaClass.getMethods().stream())
-                .filter(method -> method.getModifiers().contains(JavaModifier.PUBLIC));
+                .filter(method -> method.getModifiers().contains(JavaModifier.PUBLIC))
+                .filter(ArchitectureTest::reachesPdfBox);
     }
 
     /**
-     * そのクラスのどこかが PDFBox を走らせるか。
+     * そのコード単位から、PDFBox へ届くか。
      *
      * <p><b>★ 型の持ち方では見ない。</b>{@code EncryptionInfo} のような値の型は
      * PDFBox から読んだ値を運ぶが、<b>向こうのコードは走らせない。</b>
+     *
+     * <p><b>★ 別の公開メソッドで止める理由は {@link #publicEntryPointsGoThroughTheGuard()}
+     * にある。</b>
      */
-    private static boolean touchesPdfBox(JavaClass javaClass) {
-        return javaClass.getCodeUnits().stream()
-                .flatMap(ArchitectureTest::accessesFromSelf)
-                .anyMatch(access -> isPdfBoxOwned(access.getTargetOwner()));
+    private static boolean reachesPdfBox(JavaCodeUnit from) {
+        Set<JavaCodeUnit> seen = new HashSet<>();
+        Deque<JavaCodeUnit> pending = new ArrayDeque<>();
+        pending.add(from);
+        while (!pending.isEmpty()) {
+            JavaCodeUnit unit = pending.poll();
+            if (!seen.add(unit)) {
+                continue;
+            }
+            for (JavaCodeUnitAccess<?> access : accessesFromSelf(unit).toList()) {
+                if (isPdfBoxOwned(access.getTargetOwner())) {
+                    return true;
+                }
+                access.getTarget()
+                        .resolveMember()
+                        .filter(target -> isInternalTo(from, target))
+                        .ifPresent(pending::add);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * その先を、入口の責任のうちと見るか。
+     *
+     * <p><b>止めるのは 2 つ。</b>
+     *
+     * <ul>
+     *   <li><b>別の公開メソッド</b>——あちらはこの規則の対象であり、<b>自分で包む</b></li>
+     *   <li><b>別のパッケージ</b>——{@code pdf-desktop} から {@code pdf-core} を呼ぶ類である。
+     *       <b>あそこは口の向こう側であり、包むのはあちらの仕事である</b>
+     *       （止めないと {@code MainWindow#build} まで対象になる。<b>2026-09-13 実測</b>）</li>
+     * </ul>
+     */
+    private static boolean isInternalTo(JavaCodeUnit from, JavaCodeUnit target) {
+        if (!target.getOwner().getPackageName().equals(from.getOwner().getPackageName())) {
+            return false;
+        }
+        return !(target instanceof JavaMethod
+                && target.getModifiers().contains(JavaModifier.PUBLIC)
+                && target.getOwner().getModifiers().contains(JavaModifier.PUBLIC));
     }
 
     /** そのコード単位が、自分たちの包みを呼ぶか。 */

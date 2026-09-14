@@ -3,7 +3,9 @@ package io.github.propagandist.pdfjig.desktop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.PasswordField;
@@ -52,14 +54,7 @@ class PasswordUiTest extends DesktopUiTest {
 
     @Test
     void 正しいパスワードを入れれば開ける(@TempDir Path dir, FxRobot robot) throws Exception {
-        askFor(dir, robot);
-
-        clickWhenReady(robot, "#password-field");
-        robot.write(CORRECT);
-        clickWhenReady(robot, "#password-unlock");
-
-        waitForNode(robot, "#thumbnail-tile-0");
-        WaitForAsyncUtils.waitForFxEvents();
+        openWithKey(dir, robot);
 
         // 開けたことと、保護されている文書であることの両方を出す。
         assertEquals("1 / 1 ページ（暗号化されています）", statusText(robot));
@@ -121,7 +116,60 @@ class PasswordUiTest extends DesktopUiTest {
         WaitForAsyncUtils.waitForFxEvents();
     }
 
+    @Test
+    void 保存のたびに鍵を訊く(@TempDir Path dir, FxRobot robot) throws Exception {
+        openWithKey(dir, robot);
+
+        Path output = dir.resolve("saved.pdf");
+        dialogs.willSaveTo(output);
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+
+        // ★★ ここでもう一度訊かれる。セッションは鍵を抱えないので、書き出しに要る鍵は
+        //   そのたびに打つ（#193）。抱えると、文書を開いている間ずっと平文の鍵が
+        //   ヒープに残る——docs/RELEASE_NOTES.md がその形の破れを 1 本配っている。
+        waitForNode(robot, "#password-field");
+        clickWhenReady(robot, "#password-field");
+        robot.write(CORRECT);
+        clickWhenReady(robot, "#password-unlock");
+
+        waitFor(() -> Files.exists(output) && Files.size(output) > 0);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        // ★ 中身まで見る。画面が変わったことは、ファイルが正しい保証にならない（ui-tests.md）。
+        //   ★★ 書き出したものは平文である（EncryptionPropagation.NONE）ので、鍵なしで開ける。
+        try (PdfDocument written = PdfDocument.open(output)) {
+            assertEquals(1, written.pageCount());
+        }
+    }
+
+    @Test
+    void 保存のときに取り消せば何も書かれない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openWithKey(dir, robot);
+
+        Path output = dir.resolve("saved.pdf");
+        dialogs.willSaveTo(output);
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+
+        waitForNode(robot, "#password-field");
+        clickWhenReady(robot, "#password-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+
+        // ★ 書き出しに入る前に止まる。作業場所も作らない。
+        assertTrue(Files.notExists(output), "取り消したのに書き出されている");
+        waitFor(() -> !button(robot, "#tool-save").isDisabled());
+    }
+
     // ── 補助 ────────────────────────────────────────────────────────────────
+
+    /** 暗号化されたフィクスチャを、正しい鍵で開くところまで進める。 */
+    private void openWithKey(Path dir, FxRobot robot) throws Exception {
+        askFor(dir, robot);
+        clickWhenReady(robot, "#password-field");
+        robot.write(CORRECT);
+        clickWhenReady(robot, "#password-unlock");
+        waitForNode(robot, "#thumbnail-tile-0");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
 
     /** 暗号化されたフィクスチャを開こうとして、尋ねられるところまで進める。 */
     private void askFor(Path dir, FxRobot robot) throws Exception {

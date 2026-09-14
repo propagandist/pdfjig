@@ -274,6 +274,25 @@ public final class PdfDocument implements AutoCloseable {
     }
 
     /**
+     * この文書を、鍵を渡して開いたか。
+     *
+     * <p><b>★ 名前が意味そのものである。</b>「ユーザーパスワードが要る」ではない——
+     * <b>オーナーパスワードだけの文書へ鍵を渡して開いても真になる。</b>
+     * {@code EncryptionInfo#userPasswordRequired} としてこれを公開すると
+     * <b>口が嘘を返す</b>ので、そちらの形は #180 が決める。<b>ここはその判断に触れない</b>
+     * ——<b>「渡した」としか言っていない。</b>
+     *
+     * <p><b>★★ 書き出しにも同じ鍵が要る</b>（#193）。{@code PageOperations} は書き出しの都合で
+     * <b>同じ入力を開き直す</b>ので、鍵なしでは {@link ErrorCode#PASSWORD_REQUIRED} で落ちる。
+     * <b>画面はこれを見て、保存のときに訊く相手を決める。</b>
+     *
+     * @return 鍵を渡して開いたなら {@code true}
+     */
+    public boolean openedWithPassword() {
+        return userPasswordRequired;
+    }
+
+    /**
      * PDFBox の文書オブジェクト。
      *
      * <p>パッケージプライベート。pdf-core の内部実装のみが使う。

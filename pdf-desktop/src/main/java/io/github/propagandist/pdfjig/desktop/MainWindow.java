@@ -6,11 +6,15 @@ import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Rotation;
+import io.github.propagandist.pdfjig.core.Source;
+import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -464,7 +468,7 @@ public final class MainWindow {
      * 起きるものであり、開き直しからやらせる理由がない。取り消せば終わる。
      */
     private void askPasswordAndOpen(Path path, boolean retry) {
-        Optional<Password> entered = PasswordPrompt.ask(stage, path, retry);
+        Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -516,11 +520,22 @@ public final class MainWindow {
         List<Boolean> breaks = saving.order().breaks();
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
+
+        // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
+        //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
+        //   持ち主の決まっていない平文の鍵がそこに残る（INV-5）——渡せば向こうが必ず閉じる。
+        //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
+        Optional<Sources> keyed = askKeys(saving);
+        if (keyed.isEmpty()) {
+            return;
+        }
+        Sources inputs = keyed.get();
         boolean started = run(
+                inputs,
                 () -> {
                     // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
                     boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
-                    return new SaveOutcome(replaced, DocumentWriter.assemble(sources, pages, output));
+                    return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output));
                 },
                 outcome -> {
                     markSaved(saving, sources, pages);
@@ -760,7 +775,7 @@ public final class MainWindow {
 
     /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
     private void addWithPassword(Path path, boolean retry) {
-        Optional<Password> entered = PasswordPrompt.ask(stage, path, retry);
+        Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -892,10 +907,20 @@ public final class MainWindow {
             return;
         }
 
-        List<Path> sources = session.paths();
+        // ★★ 控えるのは、呼ぶ側が既に確定させた segments と対にする出どころである。
+        //   窓（フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
+        //   その間に文書が入れ替わりうる（#133）——入れ替わった後の出どころに
+        //   入れ替わる前の segments を当てると、別の文書のページを書き出す。
+        //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
+        DocumentSession writing = session;
+        Optional<Sources> keyed = askKeys(writing);
+        if (keyed.isEmpty()) {
+            return;
+        }
+        Sources sources = keyed.get();
         Path outputDir = directory.get();
 
-        if (run(() -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
+        if (run(sources, () -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
             folders.rememberWrittenFolder(outputDir);
         }
     }
@@ -1006,6 +1031,79 @@ public final class MainWindow {
      */
     private <T> boolean run(Supplier<T> work, Consumer<T> onSucceeded) {
         return tasks.run(work, onSucceeded, messages::failure);
+    }
+
+    /**
+     * 鍵を抱えた仕事を頼む。
+     *
+     * <p><b>★★ 持ち主ごと渡す。</b>走り出したら仕事の枠が閉じ、走り出さなかったら向こうが閉じる
+     * ——<b>ここには片づけを書く場所が無い</b>（{@link BackgroundTasks#run(List, Supplier,
+     * Consumer, Consumer)}。#146 / #193）。
+     */
+    private <T> boolean run(Sources owned, Supplier<T> work, Consumer<T> onSucceeded) {
+        return tasks.run(keysOf(owned.all()), work, onSucceeded, messages::failure);
+    }
+
+    /**
+     * その入力が抱えている鍵。
+     *
+     * <p><b>★★ 数え上げて別に持たない。</b>持つと<b>「入力に鍵を足したが、片づける一覧へは
+     * 足さなかった」形が書ける</b>——そこを通った平文の配列は<b>二度と消されない</b>
+     * （INV-5。#135 / #144 / #145 で 3 度破れたのと同じ類型である）。
+     * <b>1 つの正本から引けば、書き忘れる場所が無い。</b>
+     */
+    private static List<Password> keysOf(List<Source> inputs) {
+        return inputs.stream().map(Source::password).filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * 書き出しに要る鍵を訊く。
+     *
+     * <p><b>★★ 保存のたびに訊く。</b>セッションは鍵を抱えない（{@link DocumentSession}。#193）
+     * ——抱えると<b>文書を開いている間ずっと平文の鍵がヒープに残る。</b>
+     * <b>少し不便だが正直な側を選ぶ</b>（{@code CLAUDE.md} の優先順位）。
+     *
+     * <p><b>★ 訊くのは、開くとき鍵が要った出どころだけである。</b>
+     * オーナーパスワードだけが掛かった文書は<b>鍵なしで開けており、書き出しも鍵なしで通る。</b>
+     *
+     * <p><b>★★ 渡しきるまでの持ち主はここである。</b>取り消されても、途中で投げても、
+     * <b>そこまでに入力された鍵はここで閉じる</b>——渡した後の片づけは
+     * {@link BackgroundTasks} が持つ。
+     *
+     * <p><b>★ 取り消しだけを見る形では足りない</b>（#196 の門の 2 段目）。
+     * <b>窓の中で投げる経路は別に在り</b>、そこを通ると<b>持ち主の決まっていない平文が残る</b>
+     * ——{@code addWithPassword} が 1 本ぶんについて同じ形を持っている（INV-5。#145）。
+     * <b>渡しきったかどうかで分ける形は {@link BackgroundTasks#run(List, Supplier,
+     * Consumer, Consumer)} と同じである。</b>
+     *
+     * @param saving 書き出すセッション
+     * @return 書き出しに使う入力。取り消されたら空
+     */
+    private Optional<Sources> askKeys(DocumentSession saving) {
+        List<Path> paths = saving.paths();
+        List<Source> inputs = new ArrayList<>(paths.size());
+        boolean handedOver = false;
+        try {
+            for (int sourceIndex = 0; sourceIndex < paths.size(); sourceIndex++) {
+                Path path = paths.get(sourceIndex);
+                if (!saving.keyed(sourceIndex)) {
+                    inputs.add(Source.of(path));
+                    continue;
+                }
+                Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.WRITE, false);
+                if (entered.isEmpty()) {
+                    return Optional.empty();
+                }
+                inputs.add(Source.of(path, entered.get()));
+            }
+            Optional<Sources> asked = Optional.of(new Sources(inputs));
+            handedOver = true;
+            return asked;
+        } finally {
+            if (!handedOver) {
+                keysOf(inputs).forEach(Password::close);
+            }
+        }
     }
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
