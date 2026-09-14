@@ -151,14 +151,25 @@ public interface PageOperations {
      * 指定できる点にある。UI は開いている文書に他のファイルを足したうえで、
      * すべてを混ぜて並べ替えてから一度だけ書き出す（SPEC.md §7.1）。
      *
-     * @param inputs 入力ファイル。{@link PageSelection#sourceIndex()} がこの並びを指す
-     * @param pages  出力に含めるページ。この順に並ぶ
-     * @param output 出力ファイル。既存であってはならない
+     * <p><b>★★ 保護は組み立てと同じ書き出しで掛かる</b>（#199）——<b>平文の中間ファイルが
+     * 1 つも現れない。</b><b>既にある文書へ後から掛けるのは {@link Encryption#protect} である</b>
+     * が、あちらを画面から通すと<b>保護しようとしている文書の平文が一度ディスクに現れる。</b>
+     *
+     * @param inputs     入力ファイル。{@link PageSelection#sourceIndex()} がこの並びを指す
+     * @param pages      出力に含めるページ。この順に並ぶ
+     * @param output     出力ファイル。既存であってはならない
+     * @param protection 出力に掛ける保護。<b>{@code null} なら掛けない</b>——
+     *                   入力が暗号化されていても<b>出力は平文になる</b>（{@code docs/SPEC.md} §4.3）。
+     *                   <b>鍵は読むだけである</b>——消すのは作った場所であり、
+     *                   <b>書き出しが終わるまで枠が生きていなければならない</b>（INV-5）
      * @return {@code output}
      * @throws PdfjigException 入力が空の場合は {@link ErrorCode#NO_INPUT}、
      *                         指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
      *                         範囲外の出どころやページを含む場合は
-     *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}
+     *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}、
+     *                         書ける方式でない場合は {@link ErrorCode#UNSUPPORTED_ENCRYPTION}、
+     *                         保護を掛けられない場合は
+     *                         {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
      */
     Path assemble(Sources inputs, List<PageSelection> pages, Path output, Protection protection);
 

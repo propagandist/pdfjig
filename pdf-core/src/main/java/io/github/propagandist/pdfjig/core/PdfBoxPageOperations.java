@@ -195,7 +195,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         writingTo(output, () -> {
             try (PdfDocument source = open(input, warnings)) {
                 requirePermutation(newOrder, source.pageCount());
-                writeFromSingleSource(source, selectionsOf(newOrder), output, warnings);
+                writeFromSingleSource(source, selectionsOf(newOrder), output, warnings, null);
             }
         });
     }
@@ -313,10 +313,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                 PDPage page = delegate.getPage(entry.getKey() - 1);
                 page.setRotation(rotationOf(page).plus(entry.getValue()).degrees());
             }
-            // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
-            // M0 が扱うのは EncryptionPropagation.NONE のみであり、
-            // 保護は落ちる（警告は open で発している）。
-            delegate.setAllSecurityToBeRemoved(true);
+            applyProtection(delegate, null);
             saver.save(delegate, output);
         }
     }
@@ -370,7 +367,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             if (remaining.isEmpty()) {
                 throw new PdfjigException(ErrorCode.EMPTY_RESULT);
             }
-            writeFromSingleSource(source, selectionsOf(remaining), output, warnings);
+            writeFromSingleSource(source, selectionsOf(remaining), output, warnings, null);
         }
     }
 
@@ -466,16 +463,9 @@ public final class PdfBoxPageOperations implements PageOperations {
      * そこで呼ぶ側のコードが走り</b>、包むと<b>呼ぶ側が投げた失敗まで
      * 「PDF として読み取れません」に塗り替わった。</b><b>型では区別が付かない</b>ので、
      * 先に {@link Warnings} を通す形へ替えてある——<b>いま走るのは溜めることだけである。</b>
-     */
-    private void writeFromSingleSource(PdfDocument source, List<PageSelection> pages, Path output, Warnings warnings) {
-        writeFromSingleSource(source, pages, output, warnings, null);
-    }
-
-    /**
-     * 保護を掛けて書き出す。
      *
      * <p><b>★ 保護を受け取るのは {@code assemble} だけである</b>（#199）——
-     * <b>他の 4 つの呼ぶ側は掛けない</b>ので、上の 4 引数の形を通る。
+     * <b>他の 4 つの呼ぶ側は {@code null} を渡す。</b>
      */
     private void writeFromSingleSource(
             PdfDocument source, List<PageSelection> pages, Path output, Warnings warnings, Protection protection) {
@@ -764,7 +754,7 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     private void writeRange(PdfDocument source, PageRange range, Path output, Warnings warnings) {
-        writeFromSingleSource(source, selectionsOf(pageNumbersOf(range)), output, warnings);
+        writeFromSingleSource(source, selectionsOf(pageNumbersOf(range)), output, warnings, null);
     }
 
     private static List<PageRange> resolveRanges(SplitStrategy strategy, int pageCount) {
@@ -978,14 +968,22 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <p><b>★ ここで包むのは、チェック例外をここで止めるためである。</b>通すと
      * <b>書き出しの私有メソッド 5 本が {@code throws IOException} を背負う</b>——
      * {@code saveDocument} が同じ理由で同じ形をしている。
-     * <b>符号は「そのとき何をしていたか」を名指す</b>（{@code PdfBoxGuard}）。
+     *
+     * <p><b>★★ 符号は {@link ErrorCode#IO_FAILURE} である。</b>
+     * {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE} は<b>「パスワード付きで開こうとして
+     * 失敗した」</b>を指す符号であり（あの文言は「開けませんでした」で終わる）、
+     * <b>ここは開き終わって組み立ても済んだ後である。</b>
+     * ★★ <b>パスワードらしい失敗は、ここではなく {@code save} で起きる</b>
+     * ——SASLprep が走るのはあちらだからである（#28 の申し送り）。
+     * <b>ここを「パスワードか文書」にすると、同じ操作が内側の分岐で違う符号を返す</b>
+     * （{@code PdfBoxGuard} の「符号の選び方」。#191 と同じ形）。
      */
     private static void applyProtection(PDDocument document, Protection protection) {
         if (protection == null) {
             document.setAllSecurityToBeRemoved(true);
             return;
         }
-        guardedRun(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> StandardProtection.apply(document, protection));
+        guardedRun(ErrorCode.IO_FAILURE, () -> StandardProtection.apply(document, protection));
     }
 
     /**

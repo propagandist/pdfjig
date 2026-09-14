@@ -74,6 +74,12 @@ class ArchitectureTest {
     /** パスワードの持ち主。素の {@code char[]} を持ってよい唯一の型である。 */
     private static final String PASSWORD = "io.github.propagandist.pdfjig.core.Password";
 
+    /** 開くときの {@code String} 境界。PDFBox の {@code Loader} が {@code String} しか受けない。 */
+    private static final String PDF_DOCUMENT = "io.github.propagandist.pdfjig.core.PdfDocument";
+
+    /** 掛けるときの {@code String} 境界。PDFBox の {@code StandardProtectionPolicy} も同じである。 */
+    private static final String STANDARD_PROTECTION = "io.github.propagandist.pdfjig.core.StandardProtection";
+
     /** PDFBox を走らせる仕事を包む、ただ 1 つの場所。 */
     private static final String PDFBOX_GUARD = "io.github.propagandist.pdfjig.core.PdfBoxGuard";
 
@@ -633,6 +639,35 @@ class ArchitectureTest {
     }
 
     /**
+     * 秘密が {@code String} になる場所を数え上げる。
+     *
+     * <p><b>★★ ここは INV-5 が「回避できない」と認めた限界である。</b>PDFBox の
+     * {@code Loader.loadPDF} も {@code StandardProtectionPolicy} も <b>{@code String} しか
+     * 受け付けない</b>ので、<b>境界で一度 {@code String} が生まれ、GC されるまでヒープに残る</b>
+     * ——<b>明示的なゼロ埋めができない。</b>
+     *
+     * <p><b>★★ だから「何か所あるか」を註で書いていた。それが腐った</b>
+     * （<b>2026-09-14 実測</b>。#199 で方針の組み立てを {@code PdfBoxEncryption} から
+     * {@code StandardProtection} へ移したとき、<b>{@code PdfDocument} の Javadoc が
+     * 移る前の場所を指したまま残った</b>）。<b>数えるのは機械の仕事である。</b>
+     *
+     * <p><b>★ 見るのは {@code new String(char[])} だけである。</b>
+     * {@code String.valueOf(char[])} も同じことをするが、<b>いま呼んでいる場所は無く</b>、
+     * <b>両方を数えると「どちらで書くか」という別の話が混ざる。</b>
+     * ★ <b>増やすなら、この註ごと直すこと。</b>
+     */
+    @Test
+    @DisplayName("秘密が String になるのは、PDFBox の口が String しか受けない 2 か所だけである")
+    void secretsBecomeStringsOnlyAtPdfBoxBoundaries() {
+        assertEquals(
+                Set.of(PDF_DOCUMENT + ".open(Path, Password)", STANDARD_PROTECTION + ".apply(PDDocument, Protection)"),
+                unitsBuildingStringsFromCharArrays(),
+                "秘密を String にする場所が増減している。増えたなら、そこは消せない写しが"
+                        + "ヒープに残る場所である——PDFBox の口が String しか受けないとき以外に作らない"
+                        + "（#199。CLAUDE.md INV-5）");
+    }
+
+    /**
      * ゼロ埋めそのものも 1 か所に閉じる。
      *
      * <p><b>★★ 上のルールだけでは足りない。</b>{@code char[]} を引数に取らなくても、
@@ -977,6 +1012,18 @@ class ArchitectureTest {
      */
     private static boolean isCharArray(JavaClass type) {
         return type.isEquivalentTo(char[].class);
+    }
+
+    /** {@code new String(char[])} を呼んでいる本番のコード単位。 */
+    private static Set<String> unitsBuildingStringsFromCharArrays() {
+        return classes.stream()
+                .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                .filter(access -> access.getTargetOwner().isEquivalentTo(String.class))
+                .filter(access -> access.getTarget().getName().equals(JavaConstructor.CONSTRUCTOR_NAME))
+                .filter(access ->
+                        access.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
+                .map(access -> describe(access.getOrigin()))
+                .collect(Collectors.toSet());
     }
 
     /** {@code Arrays.fill(char[], char)} を呼んでいる本番のコード単位。 */

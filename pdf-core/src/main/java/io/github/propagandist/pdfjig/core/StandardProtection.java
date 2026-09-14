@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.core;
 
+import java.io.IOException;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
@@ -32,9 +33,9 @@ final class StandardProtection {
      *
      * @param document   対象の文書
      * @param protection 掛ける保護
-     * @throws java.io.IOException PDFBox が投げる。<b>包むのは呼ぶ側である</b>（{@code PdfBoxGuard}）
+     * @throws IOException PDFBox が投げる。<b>包むのは呼ぶ側である</b>（{@code PdfBoxGuard}）
      */
-    static void apply(PDDocument document, Protection protection) throws java.io.IOException {
+    static void apply(PDDocument document, Protection protection) throws IOException {
         StandardProtectionPolicy policy = new StandardProtectionPolicy(
                 new String(protection.ownerPassword().value()),
                 new String(protection.userPassword().value()),

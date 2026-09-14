@@ -19,7 +19,9 @@ package io.github.propagandist.pdfjig.core;
  * @param userPassword  文書を開くための鍵。<b>空でない鍵を渡すと、本文が暗号化される</b>
  * @param ownerPassword 権限を変更するための鍵
  * @param permissions   権限フラグ。<b>暗号学的には強制されない</b>（{@code docs/SPEC.md} §6.1）
- * @param algorithm     暗号方式。既定は {@link EncryptionAlgorithm#AES_256}（同 §6.2）
+ * @param algorithm     暗号方式。既定は {@link EncryptionAlgorithm#AES_256}（同 §6.2）。
+ *                      <b>{@link EncryptionAlgorithm#NONE} と {@link EncryptionAlgorithm#UNKNOWN} は
+ *                      書けないので、ここで拒む</b>
  */
 public record Protection(
         Password userPassword, Password ownerPassword, AccessPermissions permissions, EncryptionAlgorithm algorithm) {
@@ -33,6 +35,12 @@ public record Protection(
         }
         if (algorithm == null) {
             throw new IllegalArgumentException("algorithm は null にできません。");
+        }
+        // ★★ 書けない方式は値の段で拒む。奥で拒むと、そこへ届くまでに
+        //   秘密が String 化され（StandardProtection）、入力も全部開かれている
+        //   ——断ると分かっている要求のために、消せない文字列が 2 本残る（#199 の門）。
+        if (algorithm == EncryptionAlgorithm.NONE || algorithm == EncryptionAlgorithm.UNKNOWN) {
+            throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
         }
     }
 }

@@ -1009,31 +1009,27 @@ class PdfBoxPageOperationsTest {
     @Nested
     class ProtectedOutput {
 
+        private static final String USER = "user";
+
         @Test
         @DisplayName("指定した鍵で開ける文書ができる")
         void writesADocumentThatOpensWithTheGivenKey() throws Exception {
             Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
             Path output = tempDir.resolve("protected.pdf");
 
-            try (Password user = Password.copyOf("user");
-                    Password owner = Password.copyOf("owner")) {
-                operations.assemble(
-                        Sources.ofPaths(List.of(input)),
-                        List.of(PageSelection.of(0, 2), PageSelection.of(0, 1)),
-                        output,
-                        new Protection(user, owner, AccessPermissions.none(), EncryptionAlgorithm.AES_256));
-            }
-
             // ★ 並べ替えも効いている。組み立てと保護が 1 回の書き出しで済んでいる。
-            try (Password user = Password.copyOf("user");
-                    PdfDocument written = PdfDocument.open(output, user)) {
-                assertEquals(2, written.pageCount());
-                assertTrue(written.encrypted(), "保護が掛かっていない");
-            }
+            protect(
+                    List.of(input),
+                    List.of(PageSelection.of(0, 2), PageSelection.of(0, 1)),
+                    output,
+                    AccessPermissions.none(),
+                    EncryptionAlgorithm.AES_256);
+
+            assertOpensWithKey(output, 2);
 
             // ★ 鍵を渡して読む。inspect(Path) は鍵の要る文書では置き値を返す（#187）。
             EncryptionInfo info;
-            try (Password user = Password.copyOf("user")) {
+            try (Password user = Password.copyOf(USER)) {
                 info = new PdfBoxEncryption().inspect(output, user);
             }
             assertEquals(EncryptionAlgorithm.AES_256, info.algorithm());
@@ -1047,14 +1043,7 @@ class PdfBoxPageOperationsTest {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
             Path output = tempDir.resolve("protected.pdf");
 
-            try (Password user = Password.copyOf("user");
-                    Password owner = Password.copyOf("owner")) {
-                operations.assemble(
-                        Sources.ofPaths(List.of(input)),
-                        List.of(PageSelection.of(0, 1)),
-                        output,
-                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
-            }
+            protect(List.of(input), List.of(PageSelection.of(0, 1)), output);
 
             assertEquals(
                     ErrorCode.PASSWORD_REQUIRED,
@@ -1069,20 +1058,9 @@ class PdfBoxPageOperationsTest {
             Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B");
             Path output = tempDir.resolve("protected.pdf");
 
-            try (Password user = Password.copyOf("user");
-                    Password owner = Password.copyOf("owner")) {
-                operations.assemble(
-                        Sources.ofPaths(List.of(first, second)),
-                        List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
-                        output,
-                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
-            }
+            protect(List.of(first, second), List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)), output);
 
-            try (Password user = Password.copyOf("user");
-                    PdfDocument written = PdfDocument.open(output, user)) {
-                assertEquals(2, written.pageCount());
-                assertTrue(written.encrypted(), "保護が掛かっていない");
-            }
+            assertOpensWithKey(output, 2);
         }
 
         @Test
@@ -1093,43 +1071,108 @@ class PdfBoxPageOperationsTest {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
             Path output = tempDir.resolve("protected.pdf");
 
-            try (Password user = Password.copyOf("user");
-                    Password owner = Password.copyOf("owner")) {
-                operations.assemble(
-                        Sources.ofPaths(List.of(input)),
-                        List.of(PageSelection.of(0, 1)),
-                        output,
-                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
-            }
+            protect(List.of(input), List.of(PageSelection.of(0, 1)), output);
 
             assertEquals(List.of("doc.pdf", "protected.pdf"), listFilesIn(tempDir), "書き出しが中間ファイルを残している");
         }
 
         @Test
-        @DisplayName("方式が NONE なら UNSUPPORTED_ENCRYPTION で、出力は残らない")
-        void refusesAnUnsupportedAlgorithm() throws Exception {
-            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
-            Path output = tempDir.resolve("protected.pdf");
-
-            try (Password user = Password.copyOf("user");
+        @DisplayName("★★ 書けない方式は、値を作るところで断る")
+        void refusesAnUnsupportedAlgorithmBeforeTheSecretIsUsed() {
+            // ★★ 奥で断ると、そこへ届くまでに秘密が String 化され（StandardProtection）、
+            //   入力も全部開かれている——断ると分かっている要求のために、消せない写しが
+            //   2 本ヒープに残る（#199 の門の 2 段目）。PdfDocument#open が
+            //   requireReadable を String 化より前に置いているのと同じ規律である。
+            try (Password user = Password.copyOf(USER);
                     Password owner = Password.copyOf("owner")) {
                 assertEquals(
                         ErrorCode.UNSUPPORTED_ENCRYPTION,
                         assertThrows(
                                         PdfjigException.class,
-                                        () -> operations.assemble(
-                                                Sources.ofPaths(List.of(input)),
-                                                List.of(PageSelection.of(0, 1)),
-                                                output,
-                                                new Protection(
-                                                        user,
-                                                        owner,
-                                                        AccessPermissions.all(),
-                                                        EncryptionAlgorithm.NONE)))
+                                        () -> new Protection(
+                                                user, owner, AccessPermissions.all(), EncryptionAlgorithm.NONE))
                                 .errorCode());
             }
+        }
+
+        @Test
+        @DisplayName("書けない方式では、出力も残らない")
+        void leavesNoOutputForAnUnsupportedAlgorithm() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("protected.pdf");
+
+            assertThrows(
+                    PdfjigException.class,
+                    () -> protect(
+                            List.of(input),
+                            List.of(PageSelection.of(0, 1)),
+                            output,
+                            AccessPermissions.all(),
+                            EncryptionAlgorithm.NONE));
 
             assertFalse(Files.exists(output), "掛けられなかったのに出力が残っている");
+        }
+
+        @Test
+        @DisplayName("★★ 掛けるところで落ちても、鍵は例外に出ない")
+        void prohibitedCharacterMustNotEscapeUnwrapped() throws Exception {
+            // ★★ 落ちるのは protect ではなく save である（#28 の申し送り）。SASLprep が走るのは
+            //   あちらで、禁じられた文字に当たると PDFBox は本物のパスワードの文字と位置を
+            //   メッセージに載せた IllegalArgumentException を投げる——IOException ではない。
+            //   ★ 註だけがこれを主張していた（#199 の門の 2 段目）。
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("protected.pdf");
+
+            PdfjigException thrown;
+            try (Password user = Password.copyOf(Secrets.PROHIBITED);
+                    Password owner = Password.copyOf("owner")) {
+                thrown = assertThrows(
+                        PdfjigException.class,
+                        () -> operations.assemble(
+                                Sources.ofPaths(List.of(input)),
+                                List.of(PageSelection.of(0, 1)),
+                                output,
+                                new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256)));
+            }
+
+            String rendered = Secrets.renderFully(thrown);
+            assertFalse(rendered.contains("org.apache.pdfbox"), "PDFBox のフレームが残っている");
+            assertFalse(rendered.contains("LEFT-TO-RIGHT MARK"), "パスワードの文字が露出している");
+            assertFalse(rendered.contains("owner"), "オーナーパスワードが露出している");
+            assertFalse(Files.exists(output), "書きかけの出力が残っている");
+        }
+
+        /** 既定の権限と方式で保護して書き出す。 */
+        private void protect(List<Path> inputs, List<PageSelection> pages, Path output) {
+            protect(inputs, pages, output, AccessPermissions.all(), EncryptionAlgorithm.AES_256);
+        }
+
+        /**
+         * 保護して書き出す。
+         *
+         * <p><b>★ 鍵は 2 本とも、この枠が持ち主である</b>——{@code Protection} は読むだけで、
+         * <b>書き出しが終わるまで開いていなければならない</b>（INV-5）。
+         */
+        private void protect(
+                List<Path> inputs,
+                List<PageSelection> pages,
+                Path output,
+                AccessPermissions permissions,
+                EncryptionAlgorithm algorithm) {
+            try (Password user = Password.copyOf(USER);
+                    Password owner = Password.copyOf("owner")) {
+                operations.assemble(
+                        Sources.ofPaths(inputs), pages, output, new Protection(user, owner, permissions, algorithm));
+            }
+        }
+
+        /** 鍵で開いて、ページ数と保護が掛かっていることを見る。 */
+        private void assertOpensWithKey(Path output, int pageCount) {
+            try (Password user = Password.copyOf(USER);
+                    PdfDocument written = PdfDocument.open(output, user)) {
+                assertEquals(pageCount, written.pageCount());
+                assertTrue(written.encrypted(), "保護が掛かっていない");
+            }
         }
     }
 

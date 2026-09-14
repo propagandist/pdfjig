@@ -69,9 +69,13 @@ public final class PdfBoxEncryption implements Encryption {
 
         // ★★ この包みは消さない。入力を閉じ損ねただけで書けた出力が消えるのを避けるため、
         //   消す判断は protectInto の中だけに置いてある（下）。ここは符号を畳むだけである。
+        // ★ 値をまとめるのは包みの外である。Protection の検めは引数だけで決まるので、
+        //   中でやると IllegalArgumentException が PdfjigException に畳まれる
+        //   （PdfBoxPageOperations の冒頭の枠と同じ規律）。
+        Protection protection = new Protection(userPassword, ownerPassword, permissions, algorithm);
         return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
             try (PdfDocument source = PdfDocument.open(input)) {
-                protectInto(source.delegate(), userPassword, ownerPassword, permissions, algorithm, output);
+                protectInto(source.delegate(), protection, output);
             }
             return output;
         });
@@ -85,17 +89,11 @@ public final class PdfBoxEncryption implements Encryption {
      * ——細工 PDF は閉じるときに投げる（#150）。<b>完全に書けた保護付きの出力が、
      * 入力を閉じ損ねただけで消えることになる。</b>
      */
-    private static void protectInto(
-            PDDocument document,
-            Password userPassword,
-            Password ownerPassword,
-            AccessPermissions permissions,
-            EncryptionAlgorithm algorithm,
-            Path output) {
+    private static void protectInto(PDDocument document, Protection protection, Path output) {
         try {
             // ★ 方針の組み立ては StandardProtection が持つ。組み立てながら掛ける側（#199）と
             //   同じものを使う——写すと、片方だけ直した設定で書けるようになる。
-            StandardProtection.apply(document, new Protection(userPassword, ownerPassword, permissions, algorithm));
+            StandardProtection.apply(document, protection);
 
             // ★★ ここが漏えいの関門である（#28 の申し送り）。SASLprep が走るのは protect ではなく
             //   save のほうであり、禁じられた文字に当たると PDFBox は本物のパスワードの文字と
