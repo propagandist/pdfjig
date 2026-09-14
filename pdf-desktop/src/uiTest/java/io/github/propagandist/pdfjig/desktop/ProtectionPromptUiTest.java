@@ -21,7 +21,21 @@ import org.testfx.util.WaitForAsyncUtils;
  *
  * <p><b>★★ 最低条件はどれか 1 つ崩れると、窓を出したまま経路が開く</b>
  * （{@code docs/SPEC.md} §4.3.1）——<b>同意が成立したかどうかが、{@code SECURITY.md}
- * 「対象範囲」2 番目に当たるかを決める。</b>ここで縛るのはその 4 点である。
+ * 「対象範囲」2 番目に当たるかを決める。</b>
+ *
+ * <p><b>★ ここが縛るのは 4 点のうち 2 つである。</b>
+ *
+ * <ul>
+ *   <li><b>既定のボタンと初期フォーカスが中止側であること</b> ✓</li>
+ *   <li><b>分割で操作ごとに 1 回だけ問うこと</b> ✓</li>
+ *   <li><b>×・Esc・窓の外が中止であること</b>——<b>縛っていない。</b>TestFX から
+ *       {@code Alert} の × と Esc を安定して打てない。<b>{@code ButtonData#CANCEL_CLOSE} が
+ *       付いていることは型で決まる</b>ので、<b>崩すには意図して外す必要がある</b></li>
+ *   <li><b>「次回から表示しない」を置かないこと</b>——<b>縛っていない。</b>
+ *       <b>無いものは掴めない。</b>置いた日に赤くする形が書けない</li>
+ * </ul>
+ *
+ * <p><b>何を選ぶと何が起きるかが伝わるかは、人が見る</b>（{@code docs/HANDOVER.md} 4-4 の 17 番）。
  */
 class ProtectionPromptUiTest extends DesktopUiTest {
 
@@ -105,28 +119,59 @@ class ProtectionPromptUiTest extends DesktopUiTest {
     void 鍵の要らない文書では問わない(@TempDir Path dir, FxRobot robot) throws Exception {
         // ★★ オーナーパスワードだけの文書は、鍵を打たずに開けている。ここで止める窓を出すと、
         //   本物の機密文書に当たる前に「読まずに続行を押す」習慣ができる（SPEC.md §4.3.1）。
-        dialogs.willOpen(TestPdfs.ownerProtected(dir.resolve("owner.pdf"), "owner", 1));
-        robot.clickOn("#tool-open");
+        openFixture(robot, TestPdfs.ownerProtected(dir.resolve("owner.pdf"), "owner", 1));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        // ★★ 先に「出ていないこと」を見る。saveAs はファイルができるのを待つので、
+        //   もし窓が出ていれば showAndWait が FX スレッドを握ったまま 20 秒で落ち、
+        //   下の assert には一度も届かない——読めない落ち方になる（ui-tests.md）。
+        Path output = dir.resolve("saved.pdf");
+        dialogs.willSaveTo(output);
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertTrue(robot.lookup("#protection-dialog").tryQuery().isEmpty(), "鍵の要らない文書で窓が出ている");
+
+        waitFor(() -> Files.exists(output) && Files.size(output) > 0);
+    }
+
+    @Test
+    void 分割では出力の数によらず一度だけ問う(@TempDir Path dir, FxRobot robot) throws Exception {
+        // ★★ N 回出ると「読まずに続行を押す」習慣ができる（SPEC.md §4.3.1）。
+        //   3 ページを 1 枚ずつに分けるので、出力は 3 個である。
+        dialogs.willOpen(TestPdfs.encrypted(dir.resolve("locked.pdf"), KEY, 3));
+        clickUntilAccepted(robot, "#tool-open", dialogs::openPending);
+        waitForNode(robot, "#password-field");
+        clickWhenReady(robot, "#password-field");
+        robot.write(KEY);
+        clickWhenReady(robot, "#password-unlock");
         waitForNode(robot, "#thumbnail-tile-0");
         WaitForAsyncUtils.waitForFxEvents();
 
-        Path output = saveAs(robot, dir.resolve("saved.pdf"));
+        Path outputDir = dir.resolve("out");
+        dialogs.willChooseFolder(outputDir);
+        robot.clickOn("#tool-split-pages");
 
-        assertTrue(Files.exists(output), "書き出されていない");
-        assertTrue(robot.lookup("#protection-dialog").tryQuery().isEmpty(), "鍵の要らない文書で窓が出ている");
+        waitForNode(robot, "#protection-dialog");
+        clickWhenReady(robot, "#protection-proceed");
+
+        // 続行のあと、鍵は出どころごとに 1 回だけ訊かれる（出どころは 1 つ）。
+        waitForNode(robot, "#password-field");
+        clickWhenReady(robot, "#password-field");
+        robot.write(KEY);
+        clickWhenReady(robot, "#password-unlock");
+
+        waitFor(() -> Files.isDirectory(outputDir) && namesIn(outputDir).size() == 3);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        // ★ 2 度目は出ていない。出ていれば書き出しが止まり、上の待ちが落ちている。
+        assertTrue(robot.lookup("#protection-dialog").tryQuery().isEmpty(), "分割で窓が 2 度出ている");
     }
 
     // ── 補助 ────────────────────────────────────────────────────────────────
 
     /** 鍵の要る文書を、正しい鍵で開くところまで進める。 */
     private void openProtected(Path dir, FxRobot robot) throws Exception {
-        dialogs.willOpen(TestPdfs.encrypted(dir.resolve("locked.pdf"), KEY));
-        robot.clickOn("#tool-open");
-        waitForNode(robot, "#password-field");
-        clickWhenReady(robot, "#password-field");
-        robot.write(KEY);
-        clickWhenReady(robot, "#password-unlock");
-        waitForNode(robot, "#thumbnail-tile-0");
+        openProtectedFixture(robot, TestPdfs.encrypted(dir.resolve("locked.pdf"), KEY), KEY);
         WaitForAsyncUtils.waitForFxEvents();
     }
 }

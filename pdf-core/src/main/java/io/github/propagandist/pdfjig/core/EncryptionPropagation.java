@@ -39,21 +39,18 @@ public enum EncryptionPropagation {
     /**
      * 利用者に問い合わせる。
      *
-     * <p>UI 層の既定であり、問い合わせの結果として {@link #NONE} または {@link #INHERIT} に
-     * 解決してから pdf-core に渡す。pdf-core はこの値を解決できないため、
-     * そのまま渡された場合は失敗する。
+     * <p>pdf-core はこの値を解決できないため、渡された場合は失敗する。
      *
-     * <p><b>★★ 問うのは画面である</b>（{@code docs/SPEC.md} §4.3.1。#29）。
-     * <b>寄与する出どころは {@link PageSelection#sourceIndex()} そのもの</b>であり、
-     * <b>鍵が要ったかどうかは {@link PdfDocument#openedWithPassword()} で読める</b>
-     * ——<b>画面は開き直さずに答えを出せる。</b>
+     * <p><b>★★ 画面はこの値を渡さない。</b>画面が通るのは {@code PageOperations#assemble} と
+     * {@code #assembleEach} であり、<b>あちらはこの列挙を受け取らない</b>——
+     * <b>画面は問い、答えが「続行」なら普通に呼ぶ。</b>渡す先があるのは
+     * {@code MergeOptions} と {@code SplitStrategy} だけで、<b>そちらは画面から呼ばれない。</b>
      *
-     * <p><b>★ だから pdf-core には問い返す口が無い。</b>問うことは<b>呼ぶ側のコードを
-     * 走らせること</b>であり、<b>包みの中では飲まれる</b>（#178）——<b>包みの外で問うには
-     * 入力を 2 回開くことになる。</b>
+     * <p><b>★★ 問うのは画面である</b>（#29）。<b>だから pdf-core には問い返す口が無い</b>
+     * ——問うことは<b>呼ぶ側のコードを走らせること</b>であり、<b>包みの中では飲まれる</b>（#178）。
+     * <b>理由の正本は {@code docs/SPEC.md} §4.3.1 にある。</b>
      *
-     * <p><b>★★ 引き継ぐ道は出さない</b>ので、解決先は実際には {@link #NONE} だけである
-     * （{@link #INHERIT} を見ること）。<b>訊くのは「中止か、続行か」である。</b>
+     * <p><b>★ 解決先は実際には {@link #NONE} だけである</b>（{@link #INHERIT} を見ること）。
      */
     PROMPT
 }

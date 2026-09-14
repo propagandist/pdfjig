@@ -523,6 +523,7 @@ public final class MainWindow {
 
         // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
         //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
+        boolean asked = !saving.keyedContributors(pages).isEmpty();
         if (!consentsToDroppingProtection(saving, pages)) {
             return;
         }
@@ -558,7 +559,7 @@ public final class MainWindow {
                         // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
                         //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
                         //   必ず出る警告であり、例外的な経路ではない。
-                        messages.warnings(outcome.warnings());
+                        messages.warnings(exceptWhatWasAsked(outcome.warnings(), asked));
                     }
                 });
         // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
@@ -921,8 +922,9 @@ public final class MainWindow {
         DocumentSession writing = session;
         // ★★ 分割は操作ごとに 1 回だけ問う（docs/SPEC.md §4.3.1。#29）。
         //   N 回出すと「読まずに続行を押す」習慣ができる。
-        if (!consentsToDroppingProtection(
-                writing, segments.stream().flatMap(List::stream).toList())) {
+        List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
+        boolean asked = !writing.keyedContributors(allPages).isEmpty();
+        if (!consentsToDroppingProtection(writing, allPages)) {
             return;
         }
 
@@ -933,7 +935,10 @@ public final class MainWindow {
         Sources sources = keyed.get();
         Path outputDir = directory.get();
 
-        if (run(sources, () -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
+        if (run(
+                sources,
+                () -> DocumentWriter.splitInto(sources, segments, outputDir),
+                result -> showSplitResult(result, asked))) {
             folders.rememberWrittenFolder(outputDir);
         }
     }
@@ -1000,9 +1005,32 @@ public final class MainWindow {
         onOrderChanged();
     }
 
-    private void showSplitResult(DocumentWriter.SplitResult result) {
+    private void showSplitResult(DocumentWriter.SplitResult result, boolean asked) {
         messages.information(result.fileCount() + " 個のファイルを書き出しました。");
-        messages.warnings(result.warnings());
+        messages.warnings(exceptWhatWasAsked(result.warnings(), asked));
+    }
+
+    /**
+     * 書き出す前に同意を取ったぶんを、後からもう一度出さない。
+     *
+     * <p><b>★★ {@code pdf-core} は書き出しの後に必ず警告を発する</b>
+     * （{@code docs/SPEC.md} §4.3。{@code Warning#ENCRYPTION_NOT_PROPAGATED}）。
+     * <b>そこは変えない</b>——{@code pdf-core} は<b>誰が呼んでいるかを知らない。</b>
+     *
+     * <p><b>★★ 落とすのは、画面が既に問うて同意を得た場合だけである。</b>
+     * <b>「保護を外して書き出す」を押した直後に「保護されていません」と出すのは、
+     * いま選ばせたことをもう一度言っているだけであり</b>、<b>窓が 2 枚続く</b>
+     * ——<b>読まずに閉じる習慣を作る側である</b>（{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>★ 問わなかった場合は落とさない。</b>オーナーパスワードだけが掛かった文書は
+     * <b>窓を出さずに書き出す</b>ので、<b>保護が落ちたことを伝える口はこれしか無い。</b>
+     */
+    private static List<Warning> exceptWhatWasAsked(List<Warning> warnings, boolean asked) {
+        return asked
+                ? warnings.stream()
+                        .filter(warning -> warning != Warning.ENCRYPTION_NOT_PROPAGATED)
+                        .toList()
+                : warnings;
     }
 
     private String suggestedFileName() {
@@ -1072,34 +1100,16 @@ public final class MainWindow {
     /**
      * 保護が落ちるなら、書き出す前に伝えて選ばせる。
      *
-     * <p><b>★★ 訊くのは「出力に寄与する入力が保護されているか」である</b>
-     * （{@code docs/SPEC.md} §4.3.1）。<b>開いているものが保護されているか、ではない</b>
-     * ——暗号化された文書を足してから<b>そのページを全部消して保存すると、
-     * 出力に 1 バイトも入らないのに問われる。</b>中身と食い違う窓は、
-     * <b>次に本物を扱ったときに読まずに押される</b>（優先順位 2）。
-     *
-     * <p><b>★★ 見るのは「鍵が要ったか」であって「暗号化されているか」ではない</b>（同）。
-     * <b>オーナーパスワードだけが掛かった文書は、鍵を打たずに開けている</b>——
-     * <b>そこで書き出しを止める窓を出すと、本物の機密文書に当たる前に
-     * 「読まずに続行を押す」習慣ができる。</b>
-     *
-     * <p><b>★ ここで答えが出せるので、{@code pdf-core} には問い返す口を作っていない</b>
-     * （#29）。<b>寄与する出どころは {@link PageSelection#sourceIndex()} そのもの</b>であり、
-     * <b>鍵の要否は {@link DocumentSession#keyed(int)} が知っている</b>
-     * ——<b>開き直さずに済む。</b>
+     * <p><b>何を訊くのかは {@link DocumentSession#keyedContributors} が持つ</b>
+     * ——<b>あれは画面を出さないので、素の {@code test} から縛れる。</b>
+     * <b>ここが持つのは「出すか出さないか」だけである。</b>
      *
      * @param saving 書き出すセッション
      * @param pages  出力に含めるページ
      * @return 続けてよいなら {@code true}
      */
     private boolean consentsToDroppingProtection(DocumentSession saving, List<PageSelection> pages) {
-        List<String> dropping = pages.stream()
-                .map(PageSelection::sourceIndex)
-                .distinct()
-                .sorted()
-                .filter(saving::keyed)
-                .map(saving::sourceName)
-                .toList();
+        List<String> dropping = saving.keyedContributors(pages);
         return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping);
     }
 

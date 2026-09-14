@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.PdfjigException;
@@ -191,6 +192,38 @@ public final class DocumentSession implements AutoCloseable {
      */
     public boolean keyed(int sourceIndex) {
         return documents.get(sourceIndex).openedWithPassword();
+    }
+
+    /**
+     * 出力に寄与する出どころのうち、鍵を渡して開いたもののファイル名。
+     *
+     * <p><b>★★ 「出力に寄与する入力が保護されているか」を答える</b>
+     * （{@code docs/SPEC.md} §4.3.1。#29）。<b>開いているものが保護されているか、ではない</b>
+     * ——暗号化された文書を足してから<b>そのページを全部消して保存すると、
+     * 出力に 1 バイトも入らないのに問われる。</b>中身と食い違う窓は、
+     * <b>次に本物を扱ったときに読まずに押される</b>（優先順位 2）。
+     * {@code PdfBoxPageOperations#warnAboutContributing} が既に同じ粗さを却下している。
+     *
+     * <p><b>★★ 見るのは「鍵を渡して開いたか」であって「暗号化されているか」ではない</b>（同）。
+     * <b>オーナーパスワードだけが掛かった文書は、鍵を打たずに開けている</b>——
+     * <b>そこで書き出しを止める窓を出すと、本物の機密文書に当たる前に
+     * 「読まずに続行を押す」習慣ができる。</b>
+     *
+     * <p><b>★ 画面がここで答えを出せるので、{@code pdf-core} には問い返す口が無い</b>（#29）。
+     * <b>寄与する出どころは {@link PageSelection#sourceIndex()} そのもの</b>であり、
+     * <b>開き直さずに済む。</b>
+     *
+     * @param pages 出力に含めるページ
+     * @return 保護が落ちる出どころのファイル名。出どころ番号の順
+     */
+    public List<String> keyedContributors(List<PageSelection> pages) {
+        return pages.stream()
+                .map(PageSelection::sourceIndex)
+                .distinct()
+                .sorted()
+                .filter(this::keyed)
+                .map(this::sourceName)
+                .toList();
     }
 
     /** 含んでいるファイルのいずれかが暗号化されているか。 */
