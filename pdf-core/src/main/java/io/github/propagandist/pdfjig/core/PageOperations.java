@@ -16,12 +16,18 @@ import java.util.Map;
  *       上書きの判断は利用者のものであり、暗黙に行わない。この規約により、
  *       入力と同じパスを出力に指定して入力を壊す事故も同時に防がれる</li>
  *   <li><b>暗号化された入力を扱った場合、必ず警告を発する</b>
- *       （{@link Warning#ENCRYPTION_NOT_PROPAGATED}）。出力は平文になる</li>
+ *       （{@link Warning#ENCRYPTION_NOT_PROPAGATED}）。出力は平文になる——
+ *       <b>ただし {@link #assemble(Sources, List, Path, Protection)} に保護を渡した場合を除く</b>
+ *       （#199。<b>そのときは掛かるので、警告も出さない</b>）</li>
  * </ul>
  *
  * <p><b>鍵の要る入力は {@link Source} で渡す。</b>{@link Path} を取る形は
  * <b>鍵の要らない入力の省略形</b>であり、ユーザーパスワードの要る文書に当てると
  * {@link ErrorCode#PASSWORD_REQUIRED} で失敗する（#193）。
+ *
+ * <p><b>★★ 組み立てながら保護を掛けられるのは {@code assemble} だけである</b>（#199）。
+ * <b>画面が「保護して保存」で通るのはそこだからである</b>——
+ * <b>既にある文書へ後から掛けるのは {@link Encryption#protect} が持つ。</b>
  *
  * <p><b>★★ 複数の入力を取る 3 本は {@link Sources} を通す。</b>
  * {@code List<Path>} と {@code List<Source>} は<b>消去後に同じ綴りになり、
@@ -147,16 +153,39 @@ public interface PageOperations {
      * 指定できる点にある。UI は開いている文書に他のファイルを足したうえで、
      * すべてを混ぜて並べ替えてから一度だけ書き出す（SPEC.md §7.1）。
      *
-     * @param inputs 入力ファイル。{@link PageSelection#sourceIndex()} がこの並びを指す
-     * @param pages  出力に含めるページ。この順に並ぶ
-     * @param output 出力ファイル。既存であってはならない
+     * <p><b>★★ 保護は組み立てと同じ書き出しで掛かる</b>（#199）——<b>平文の中間ファイルが
+     * 1 つも現れない。</b><b>既にある文書へ後から掛けるのは {@link Encryption#protect} である</b>
+     * が、あちらを画面から通すと<b>保護しようとしている文書の平文が一度ディスクに現れる。</b>
+     *
+     * @param inputs     入力ファイル。{@link PageSelection#sourceIndex()} がこの並びを指す
+     * @param pages      出力に含めるページ。この順に並ぶ
+     * @param output     出力ファイル。既存であってはならない
+     * @param protection 出力に掛ける保護。<b>{@code null} なら掛けない</b>——
+     *                   入力が暗号化されていても<b>出力は平文になる</b>（{@code docs/SPEC.md} §4.3）。
+     *                   <b>鍵は読むだけである</b>——消すのは作った場所であり、
+     *                   <b>書き出しが終わるまで枠が生きていなければならない</b>（INV-5）
      * @return {@code output}
      * @throws PdfjigException 入力が空の場合は {@link ErrorCode#NO_INPUT}、
      *                         指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
      *                         範囲外の出どころやページを含む場合は
-     *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}
+     *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}、
+     *                         保護を掛けられない場合は {@link ErrorCode#IO_FAILURE}。
+     *                         ★★ <b>書ける方式かどうかは {@link Protection} を作るところで
+     *                         決まる</b>——ここまで来ない
      */
-    Path assemble(Sources inputs, List<PageSelection> pages, Path output);
+    Path assemble(Sources inputs, List<PageSelection> pages, Path output, Protection protection);
+
+    /**
+     * 保護を掛けずに組み立てる。
+     *
+     * @param inputs 入力
+     * @param pages  出力に含めるページ。この順に並ぶ
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path assemble(Sources inputs, List<PageSelection> pages, Path output) {
+        return assemble(inputs, pages, output, null);
+    }
 
     /**
      * 鍵の要らない入力にまたがって組み立てる。

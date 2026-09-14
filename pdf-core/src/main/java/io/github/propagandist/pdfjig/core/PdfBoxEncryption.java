@@ -6,8 +6,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
-import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
 /**
  * PDFBox による {@link Encryption} の実装。
@@ -71,9 +69,13 @@ public final class PdfBoxEncryption implements Encryption {
 
         // ★★ この包みは消さない。入力を閉じ損ねただけで書けた出力が消えるのを避けるため、
         //   消す判断は protectInto の中だけに置いてある（下）。ここは符号を畳むだけである。
+        // ★ 値をまとめるのは包みの外である。Protection の検めは引数だけで決まるので、
+        //   中でやると IllegalArgumentException が PdfjigException に畳まれる
+        //   （PdfBoxPageOperations の冒頭の枠と同じ規律）。
+        Protection protection = new Protection(userPassword, ownerPassword, permissions, algorithm);
         return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
             try (PdfDocument source = PdfDocument.open(input)) {
-                protectInto(source.delegate(), userPassword, ownerPassword, permissions, algorithm, output);
+                protectInto(source.delegate(), protection, output);
             }
             return output;
         });
@@ -87,21 +89,11 @@ public final class PdfBoxEncryption implements Encryption {
      * ——細工 PDF は閉じるときに投げる（#150）。<b>完全に書けた保護付きの出力が、
      * 入力を閉じ損ねただけで消えることになる。</b>
      */
-    private static void protectInto(
-            PDDocument document,
-            Password userPassword,
-            Password ownerPassword,
-            AccessPermissions permissions,
-            EncryptionAlgorithm algorithm,
-            Path output) {
+    private static void protectInto(PDDocument document, Protection protection, Path output) {
         try {
-            // ★★ String 化はここでも避けられない。PDFBox の StandardProtectionPolicy は
-            //   String しか受け付けない（PdfDocument#open と同じ既知の限界。INV-5）。
-            //   ★ pdf-core で String 化が起きるのは、あちらとここの 2 か所だけである。
-            StandardProtectionPolicy policy = new StandardProtectionPolicy(
-                    new String(ownerPassword.value()), new String(userPassword.value()), permissionOf(permissions));
-            configure(policy, algorithm);
-            document.protect(policy);
+            // ★ 方針の組み立ては StandardProtection が持つ。組み立てながら掛ける側（#199）と
+            //   同じものを使う——写すと、片方だけ直した設定で書けるようになる。
+            StandardProtection.apply(document, protection);
 
             // ★★ ここが漏えいの関門である（#28 の申し送り）。SASLprep が走るのは protect ではなく
             //   save のほうであり、禁じられた文字に当たると PDFBox は本物のパスワードの文字と
@@ -145,49 +137,6 @@ public final class PdfBoxEncryption implements Encryption {
             //   付けていれば、wrapping がそれを素通しする。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
-    }
-
-    /**
-     * 方式を方針に当てる。
-     *
-     * <p><b>★ 網羅的な {@code switch} にする。</b>書ける方式が増えた日に
-     * <b>コンパイラが知らせる</b>——列挙の側に鍵の長さを持たせると、
-     * <b>{@link EncryptionAlgorithm#NONE} と {@link EncryptionAlgorithm#UNKNOWN} が
-     * 同じ値を返す</b>形になり、<b>混ぜるなと書いた隣で 2 つが同値になる。</b>
-     */
-    private static void configure(StandardProtectionPolicy policy, EncryptionAlgorithm algorithm) {
-        switch (algorithm) {
-            case RC4_40 -> {
-                policy.setEncryptionKeyLength(40);
-                policy.setPreferAES(false);
-            }
-            case RC4_128 -> {
-                policy.setEncryptionKeyLength(128);
-                policy.setPreferAES(false);
-            }
-            case AES_128 -> {
-                policy.setEncryptionKeyLength(128);
-                policy.setPreferAES(true);
-            }
-            case AES_256 -> {
-                policy.setEncryptionKeyLength(256);
-                policy.setPreferAES(true);
-            }
-            case NONE, UNKNOWN -> throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
-        }
-    }
-
-    private static AccessPermission permissionOf(AccessPermissions permissions) {
-        AccessPermission permission = new AccessPermission();
-        permission.setCanPrint(permissions.print());
-        permission.setCanModify(permissions.modify());
-        permission.setCanExtractContent(permissions.extractContent());
-        permission.setCanModifyAnnotations(permissions.modifyAnnotations());
-        permission.setCanFillInForm(permissions.fillForms());
-        permission.setCanAssembleDocument(permissions.assembleDocument());
-        permission.setCanExtractForAccessibility(permissions.extractForAccessibility());
-        permission.setCanPrintFaithful(permissions.printHighQuality());
-        return permission;
     }
 
     /**

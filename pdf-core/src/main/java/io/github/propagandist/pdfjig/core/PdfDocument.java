@@ -77,7 +77,8 @@ public final class PdfDocument implements AutoCloseable {
      * <p><b>既知の限界:</b> PDFBox 3 の {@code Loader.loadPDF} は {@code String} しか受け付けない。
      * そのため境界で {@code String} が生成され、これは GC されるまでヒープに残り、
      * 明示的なゼロ埋めができない。pdfjig 側でこれを回避する手段はない。
-     * 生成する場所はここと {@code PdfBoxEncryption} の 2 か所だけである。
+     * <b>生成する場所はここと {@link StandardProtection} の 2 か所だけである</b>
+     * ——{@code pdf-archtest} が突き合わせているので、増えると落ちる。
      *
      * <p><b>★★ ただし「1 回」ではない。</b>{@code PageOperations} は<b>書き出しの都合で
      * 同じ入力を何度も開き直す</b>ので、<b>鍵の要る入力では回数が出力の数に比例する</b>

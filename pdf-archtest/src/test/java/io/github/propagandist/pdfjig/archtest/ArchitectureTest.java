@@ -74,6 +74,12 @@ class ArchitectureTest {
     /** パスワードの持ち主。素の {@code char[]} を持ってよい唯一の型である。 */
     private static final String PASSWORD = "io.github.propagandist.pdfjig.core.Password";
 
+    /** 開くときの {@code String} 境界。PDFBox の {@code Loader} が {@code String} しか受けない。 */
+    private static final String PDF_DOCUMENT = "io.github.propagandist.pdfjig.core.PdfDocument";
+
+    /** 掛けるときの {@code String} 境界。PDFBox の {@code StandardProtectionPolicy} も同じである。 */
+    private static final String STANDARD_PROTECTION = "io.github.propagandist.pdfjig.core.StandardProtection";
+
     /** PDFBox を走らせる仕事を包む、ただ 1 つの場所。 */
     private static final String PDFBOX_GUARD = "io.github.propagandist.pdfjig.core.PdfBoxGuard";
 
@@ -633,6 +639,36 @@ class ArchitectureTest {
     }
 
     /**
+     * 秘密が {@code String} になる場所を数え上げる。
+     *
+     * <p><b>★★ ここは INV-5 が「回避できない」と認めた限界である。</b>PDFBox の
+     * {@code Loader.loadPDF} も {@code StandardProtectionPolicy} も <b>{@code String} しか
+     * 受け付けない</b>ので、<b>境界で一度 {@code String} が生まれ、GC されるまでヒープに残る</b>
+     * ——<b>明示的なゼロ埋めができない。</b>
+     *
+     * <p><b>★★ だから「何か所あるか」を註で書いていた。それが腐った</b>
+     * （<b>2026-09-14 実測</b>。#199 で方針の組み立てを {@code PdfBoxEncryption} から
+     * {@code StandardProtection} へ移したとき、<b>{@code PdfDocument} の Javadoc が
+     * 移る前の場所を指したまま残った</b>）。<b>数えるのは機械の仕事である。</b>
+     *
+     * <p><b>★★ 綴りを 1 つに絞らない。</b>{@code new String(char[])} だけを見ると、
+     * <b>{@code String.valueOf(char[])} と書いた日に素通りする</b>——
+     * <b>同じ「消せない写し」ができるのに、規則も INV-5 の口の規則も緑のままになる</b>
+     * （後者は<b>成員の型</b>を見るので、局所の式は増やさない）。
+     * <b>{@code CharBuffer#wrap} と {@code StringBuilder#append} も同じ入口である。</b>
+     */
+    @Test
+    @DisplayName("秘密が String になるのは、PDFBox の口が String しか受けない 2 か所だけである")
+    void secretsBecomeStringsOnlyAtPdfBoxBoundaries() {
+        assertEquals(
+                Set.of(PDF_DOCUMENT + ".open(Path, Password)", STANDARD_PROTECTION + ".apply(PDDocument, Protection)"),
+                unitsBuildingStringsFromCharArrays(),
+                "秘密を String にする場所が増減している。増えたなら、そこは消せない写しが"
+                        + "ヒープに残る場所である——PDFBox の口が String しか受けないとき以外に作らない"
+                        + "（#199。CLAUDE.md INV-5）");
+    }
+
+    /**
      * ゼロ埋めそのものも 1 か所に閉じる。
      *
      * <p><b>★★ 上のルールだけでは足りない。</b>{@code char[]} を引数に取らなくても、
@@ -977,6 +1013,31 @@ class ArchitectureTest {
      */
     private static boolean isCharArray(JavaClass type) {
         return type.isEquivalentTo(char[].class);
+    }
+
+    /** {@code char[]} から文字列を作っている本番のコード単位。 */
+    private static Set<String> unitsBuildingStringsFromCharArrays() {
+        return classes.stream()
+                .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                .filter(ArchitectureTest::materializesText)
+                .filter(access ->
+                        access.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
+                .map(access -> describe(access.getOrigin()))
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * その呼び出しは、{@code char[]} を文字の入れ物へ写すか。
+     *
+     * <p><b>★ 型で挙げる。</b>{@code String} を作る綴りは 1 つではなく、
+     * <b>{@code StringBuilder} と {@code CharBuffer} を経由すれば同じものができる。</b>
+     */
+    private static boolean materializesText(JavaCodeUnitAccess<?> access) {
+        JavaClass owner = access.getTargetOwner();
+        return owner.isEquivalentTo(String.class)
+                || owner.isEquivalentTo(StringBuilder.class)
+                || owner.isEquivalentTo(StringBuffer.class)
+                || owner.isEquivalentTo(java.nio.CharBuffer.class);
     }
 
     /** {@code Arrays.fill(char[], char)} を呼んでいる本番のコード単位。 */
