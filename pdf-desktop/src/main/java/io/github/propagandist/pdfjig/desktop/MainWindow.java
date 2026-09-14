@@ -521,6 +521,12 @@ public final class MainWindow {
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
 
+        // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
+        //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
+        if (!consentsToDroppingProtection(saving, pages)) {
+            return;
+        }
+
         // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
         //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
         //   持ち主の決まっていない平文の鍵がそこに残る（INV-5）——渡せば向こうが必ず閉じる。
@@ -913,6 +919,13 @@ public final class MainWindow {
         //   入れ替わる前の segments を当てると、別の文書のページを書き出す。
         //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
         DocumentSession writing = session;
+        // ★★ 分割は操作ごとに 1 回だけ問う（docs/SPEC.md §4.3.1。#29）。
+        //   N 回出すと「読まずに続行を押す」習慣ができる。
+        if (!consentsToDroppingProtection(
+                writing, segments.stream().flatMap(List::stream).toList())) {
+            return;
+        }
+
         Optional<Sources> keyed = askKeys(writing);
         if (keyed.isEmpty()) {
             return;
@@ -1054,6 +1067,40 @@ public final class MainWindow {
      */
     private static List<Password> keysOf(List<Source> inputs) {
         return inputs.stream().map(Source::password).filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * 保護が落ちるなら、書き出す前に伝えて選ばせる。
+     *
+     * <p><b>★★ 訊くのは「出力に寄与する入力が保護されているか」である</b>
+     * （{@code docs/SPEC.md} §4.3.1）。<b>開いているものが保護されているか、ではない</b>
+     * ——暗号化された文書を足してから<b>そのページを全部消して保存すると、
+     * 出力に 1 バイトも入らないのに問われる。</b>中身と食い違う窓は、
+     * <b>次に本物を扱ったときに読まずに押される</b>（優先順位 2）。
+     *
+     * <p><b>★★ 見るのは「鍵が要ったか」であって「暗号化されているか」ではない</b>（同）。
+     * <b>オーナーパスワードだけが掛かった文書は、鍵を打たずに開けている</b>——
+     * <b>そこで書き出しを止める窓を出すと、本物の機密文書に当たる前に
+     * 「読まずに続行を押す」習慣ができる。</b>
+     *
+     * <p><b>★ ここで答えが出せるので、{@code pdf-core} には問い返す口を作っていない</b>
+     * （#29）。<b>寄与する出どころは {@link PageSelection#sourceIndex()} そのもの</b>であり、
+     * <b>鍵の要否は {@link DocumentSession#keyed(int)} が知っている</b>
+     * ——<b>開き直さずに済む。</b>
+     *
+     * @param saving 書き出すセッション
+     * @param pages  出力に含めるページ
+     * @return 続けてよいなら {@code true}
+     */
+    private boolean consentsToDroppingProtection(DocumentSession saving, List<PageSelection> pages) {
+        List<String> dropping = pages.stream()
+                .map(PageSelection::sourceIndex)
+                .distinct()
+                .sorted()
+                .filter(saving::keyed)
+                .map(saving::sourceName)
+                .toList();
+        return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping);
     }
 
     /**
