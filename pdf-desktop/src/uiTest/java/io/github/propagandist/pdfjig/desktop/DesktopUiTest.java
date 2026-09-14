@@ -138,6 +138,23 @@ abstract class DesktopUiTest {
     }
 
     /**
+     * 鍵の要るフィクスチャを、鍵を打って開く。
+     *
+     * <p><b>★ 押し直しを通すのは {@link #openFixture} と同じ理由である</b>
+     * （{@link #clickUntilAccepted}）——素のクリックにすると、Windows の cold run で
+     * <b>取りこぼしが「20 秒待っても出てこない」形で落ちる。</b>
+     */
+    void openProtectedFixture(FxRobot robot, Path fixture, String key) throws Exception {
+        dialogs.willOpen(fixture);
+        clickUntilAccepted(robot, "#tool-open", dialogs::openPending);
+        waitForNode(robot, "#password-field");
+        clickWhenReady(robot, "#password-field");
+        robot.write(key);
+        clickWhenReady(robot, "#password-unlock");
+        waitForNode(robot, "#thumbnail-tile-0");
+    }
+
+    /**
      * 「追加」ボタンでフィクスチャを足す。
      *
      * <p><b>出そろうのを待つのは呼ぶ側である</b>——何を待てばよいかは足した中身に依る

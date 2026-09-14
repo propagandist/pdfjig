@@ -45,7 +45,7 @@ public enum ErrorCode {
     UNSUPPORTED_ENCRYPTION("この暗号化方式には対応していません。"),
 
     /** 指定された暗号化の引き継ぎ方法に対応していない。 */
-    ENCRYPTION_PROPAGATION_UNSUPPORTED("この暗号化の引き継ぎ方法にはまだ対応していません。"),
+    ENCRYPTION_PROPAGATION_UNSUPPORTED("この暗号化の引き継ぎ方法には対応していません。"),
 
     /** テキストを抽出できない。 */
     TEXT_EXTRACTION_FAILED("テキストを抽出できませんでした。"),

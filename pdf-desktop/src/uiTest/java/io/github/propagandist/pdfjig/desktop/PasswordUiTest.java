@@ -124,6 +124,10 @@ class PasswordUiTest extends DesktopUiTest {
         dialogs.willSaveTo(output);
         clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
 
+        // ★ 先に保護の窓が出る（#29 / #192）。鍵を訊くより前である——中止されたら
+        //   1 文字も打たせずに済むため。あちらは ProtectionPromptUiTest が縛る。
+        clickWhenReady(robot, "#protection-proceed");
+
         // ★★ ここでもう一度訊かれる。セッションは鍵を抱えないので、書き出しに要る鍵は
         //   そのたびに打つ（#193）。抱えると、文書を開いている間ずっと平文の鍵が
         //   ヒープに残る——docs/RELEASE_NOTES.md がその形の破れを 1 本配っている。
@@ -149,6 +153,7 @@ class PasswordUiTest extends DesktopUiTest {
         Path output = dir.resolve("saved.pdf");
         dialogs.willSaveTo(output);
         clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        clickWhenReady(robot, "#protection-proceed");
 
         waitForNode(robot, "#password-field");
         clickWhenReady(robot, "#password-cancel");

@@ -521,6 +521,13 @@ public final class MainWindow {
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
 
+        // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
+        //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
+        int asked = saving.keyedContributors(pages).size();
+        if (!consentsToDroppingProtection(saving, pages)) {
+            return;
+        }
+
         // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
         //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
         //   持ち主の決まっていない平文の鍵がそこに残る（INV-5）——渡せば向こうが必ず閉じる。
@@ -552,7 +559,7 @@ public final class MainWindow {
                         // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
                         //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
                         //   必ず出る警告であり、例外的な経路ではない。
-                        messages.warnings(outcome.warnings());
+                        messages.warnings(exceptWhatWasAsked(outcome.warnings(), asked));
                     }
                 });
         // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
@@ -902,17 +909,33 @@ public final class MainWindow {
      * @param segments かたまりごとのページ指定。先頭から順に連番で書き出す
      */
     private void writeSegments(List<List<PageSelection>> segments) {
+        // ★★ 窓より先に控える。segments は呼ぶ側が既に確定させたものであり、
+        //   窓（フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
+        //   その間に文書が入れ替わりうる（#133）。★ 後で控えると、入れ替わった後の
+        //   出どころ一覧へ入れ替わる前の出どころ番号を当てることになる——
+        //   そこは素の IndexOutOfBoundsException になり、画面に何も出ない（#29 の門の 2 段目）。
+        //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
+        DocumentSession writing = session;
+
         Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
         if (directory.isEmpty()) {
             return;
         }
 
-        // ★★ 控えるのは、呼ぶ側が既に確定させた segments と対にする出どころである。
-        //   窓（フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
-        //   その間に文書が入れ替わりうる（#133）——入れ替わった後の出どころに
-        //   入れ替わる前の segments を当てると、別の文書のページを書き出す。
-        //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
-        DocumentSession writing = session;
+        // ★★ 分割は操作ごとに 1 回だけ問う（docs/SPEC.md §4.3.1。#29）。
+        //   N 回出すと「読まずに続行を押す」習慣ができる。
+        List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
+        if (!consentsToDroppingProtection(writing, allPages)) {
+            return;
+        }
+        // ★★ 数えるのはかたまりごとである。pdf-core は assembleEach でかたまりの数だけ
+        //   warnAboutContributing を通すので、同じ出どころについて N 回発する
+        //   （2026-09-14 実測。#29 の門の 2 段目）。問うたのは 1 回でも、落とす数はそこに合わせる
+        //   ——合わせないと、同意したことをもう一度伝える窓が続く。
+        int asked = segments.stream()
+                .mapToInt(segment -> writing.keyedContributors(segment).size())
+                .sum();
+
         Optional<Sources> keyed = askKeys(writing);
         if (keyed.isEmpty()) {
             return;
@@ -920,7 +943,10 @@ public final class MainWindow {
         Sources sources = keyed.get();
         Path outputDir = directory.get();
 
-        if (run(sources, () -> DocumentWriter.splitInto(sources, segments, outputDir), this::showSplitResult)) {
+        if (run(
+                sources,
+                () -> DocumentWriter.splitInto(sources, segments, outputDir),
+                result -> showSplitResult(result, asked))) {
             folders.rememberWrittenFolder(outputDir);
         }
     }
@@ -987,9 +1013,49 @@ public final class MainWindow {
         onOrderChanged();
     }
 
-    private void showSplitResult(DocumentWriter.SplitResult result) {
+    private void showSplitResult(DocumentWriter.SplitResult result, int asked) {
         messages.information(result.fileCount() + " 個のファイルを書き出しました。");
-        messages.warnings(result.warnings());
+        messages.warnings(exceptWhatWasAsked(result.warnings(), asked));
+    }
+
+    /**
+     * 書き出す前に同意を取ったぶんを、後からもう一度出さない。
+     *
+     * <p><b>★★ {@code pdf-core} は書き出しの後に必ず警告を発する</b>
+     * （{@code docs/SPEC.md} §4.3。{@code Warning#ENCRYPTION_NOT_PROPAGATED}）。
+     * <b>そこは変えない</b>——{@code pdf-core} は<b>誰が呼んでいるかを知らない。</b>
+     *
+     * <p><b>★★ 落とすのは、画面が既に問うて同意を得た場合だけである。</b>
+     * <b>「保護を外して書き出す」を押した直後に「保護されていません」と出すのは、
+     * いま選ばせたことをもう一度言っているだけであり</b>、<b>窓が 2 枚続く</b>
+     * ——<b>読まずに閉じる習慣を作る側である</b>（{@code CLAUDE.md} 優先順位 2）。
+     *
+     * <p><b>★★ 落とすのは、問うた数だけである。</b>全部落としてはならない
+     * ——{@code pdf-core} は<b>寄与する入力のうち暗号化されているものの数だけ</b>発するが
+     * （{@code PdfBoxPageOperations#warnAboutContributing}）、<b>問うたのはそのうち
+     * 鍵を渡して開いたものだけ</b>である。<b>オーナーパスワードだけの文書は
+     * 窓に名前が出ていない</b>ので、<b>あのぶんは残さなければ、保護が落ちたことを
+     * 伝える口が 1 つも無くなる</b>（2026-09-14 に実測して直した。#29 の門の 2 段目）。
+     *
+     * <p><b>★ どれを落とすかは選べない。</b>{@link Warning} は<b>どの出どころのものかを
+     * 持っていない</b>——同じ値が並ぶだけである。<b>だから数で引く。</b>
+     * 残った数が、<b>問わずに保護を落とした入力の数になる。</b>
+     *
+     * @param warnings 書き出しで出た警告
+     * @param asked    窓で名前を出して同意を得た出どころの数
+     * @return 残す警告
+     */
+    static List<Warning> exceptWhatWasAsked(List<Warning> warnings, int asked) {
+        List<Warning> remaining = new ArrayList<>(warnings.size());
+        int dropped = 0;
+        for (Warning warning : warnings) {
+            if (warning == Warning.ENCRYPTION_NOT_PROPAGATED && dropped < asked) {
+                dropped++;
+                continue;
+            }
+            remaining.add(warning);
+        }
+        return List.copyOf(remaining);
     }
 
     private String suggestedFileName() {
@@ -1054,6 +1120,22 @@ public final class MainWindow {
      */
     private static List<Password> keysOf(List<Source> inputs) {
         return inputs.stream().map(Source::password).filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * 保護が落ちるなら、書き出す前に伝えて選ばせる。
+     *
+     * <p><b>何を訊くのかは {@link DocumentSession#keyedContributors} が持つ</b>
+     * ——<b>あれは画面を出さないので、素の {@code test} から縛れる。</b>
+     * <b>ここが持つのは「出すか出さないか」だけである。</b>
+     *
+     * @param saving 書き出すセッション
+     * @param pages  出力に含めるページ
+     * @return 続けてよいなら {@code true}
+     */
+    private boolean consentsToDroppingProtection(DocumentSession saving, List<PageSelection> pages) {
+        List<String> dropping = saving.keyedContributors(pages);
+        return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping);
     }
 
     /**
