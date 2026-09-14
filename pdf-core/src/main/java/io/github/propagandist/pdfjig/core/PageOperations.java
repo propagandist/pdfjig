@@ -16,7 +16,9 @@ import java.util.Map;
  *       上書きの判断は利用者のものであり、暗黙に行わない。この規約により、
  *       入力と同じパスを出力に指定して入力を壊す事故も同時に防がれる</li>
  *   <li><b>暗号化された入力を扱った場合、必ず警告を発する</b>
- *       （{@link Warning#ENCRYPTION_NOT_PROPAGATED}）。出力は平文になる</li>
+ *       （{@link Warning#ENCRYPTION_NOT_PROPAGATED}）。出力は平文になる——
+ *       <b>ただし {@link #assemble(Sources, List, Path, Protection)} に保護を渡した場合を除く</b>
+ *       （#199。<b>そのときは掛かるので、警告も出さない</b>）</li>
  * </ul>
  *
  * <p><b>鍵の要る入力は {@link Source} で渡す。</b>{@link Path} を取る形は
@@ -167,9 +169,9 @@ public interface PageOperations {
      *                         指定が空の場合は {@link ErrorCode#EMPTY_RESULT}、
      *                         範囲外の出どころやページを含む場合は
      *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}、
-     *                         書ける方式でない場合は {@link ErrorCode#UNSUPPORTED_ENCRYPTION}、
-     *                         保護を掛けられない場合は
-     *                         {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
+     *                         保護を掛けられない場合は {@link ErrorCode#IO_FAILURE}。
+     *                         ★★ <b>書ける方式かどうかは {@link Protection} を作るところで
+     *                         決まる</b>——ここまで来ない
      */
     Path assemble(Sources inputs, List<PageSelection> pages, Path output, Protection protection);
 

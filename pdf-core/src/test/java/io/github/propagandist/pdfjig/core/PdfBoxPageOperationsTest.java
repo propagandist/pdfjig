@@ -1142,6 +1142,41 @@ class PdfBoxPageOperationsTest {
             assertFalse(Files.exists(output), "書きかけの出力が残っている");
         }
 
+        @Test
+        @DisplayName("★★ 保護を掛けるなら「保護されていません」と言わない")
+        void staysSilentAboutPropagationWhenProtecting() throws Exception {
+            // ★★ あの文言は「出力されたファイルは保護されていません」で終わる——掛けた出力に
+            //   ついてそれを言うと嘘になり、次に本当のときに読まれなくなる（#199 の門の 2 段目）。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+            Path output = tempDir.resolve("protected.pdf");
+
+            List<Warning> seen = new ArrayList<>();
+            PageOperations watching = new PdfBoxPageOperations(seen::add);
+            try (Password user = Password.copyOf(USER);
+                    Password owner = Password.copyOf("owner")) {
+                watching.assemble(
+                        Sources.ofPaths(List.of(encrypted)),
+                        List.of(PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertFalse(seen.contains(Warning.ENCRYPTION_NOT_PROPAGATED), "保護を掛けたのに「保護されていません」と言っている");
+        }
+
+        @Test
+        @DisplayName("保護を掛けないなら、従来どおり警告する")
+        void stillWarnsWhenNotProtecting() throws Exception {
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+            Path output = tempDir.resolve("plain.pdf");
+
+            List<Warning> seen = new ArrayList<>();
+            new PdfBoxPageOperations(seen::add)
+                    .assemble(Sources.ofPaths(List.of(encrypted)), List.of(PageSelection.of(0, 1)), output);
+
+            assertTrue(seen.contains(Warning.ENCRYPTION_NOT_PROPAGATED), "保護が落ちたことを伝えていない");
+        }
+
         /** 既定の権限と方式で保護して書き出す。 */
         private void protect(List<Path> inputs, List<PageSelection> pages, Path output) {
             protect(inputs, pages, output, AccessPermissions.all(), EncryptionAlgorithm.AES_256);

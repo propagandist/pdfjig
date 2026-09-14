@@ -234,7 +234,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                 documents.add(sources.openQuietly(input));
             }
             requireSelectable(pages, documents);
-            warnAboutContributing(documents, pages, warnings);
+            warnAboutContributing(documents, pages, warnings, protection);
             write(inputs, documents, pages, output, warnings, protection);
         }
     }
@@ -419,16 +419,25 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * <p>寄与する入力が複数あれば<b>その数だけ伝える</b>。1 つにまとめない——
      * どれが暗号化されていたのかは、数が合っていないと利用者から辿れない。
+     *
+     * <p><b>★★ 保護を掛けるなら、暗号化については黙る</b>（#199）。
+     * {@link Warning#ENCRYPTION_NOT_PROPAGATED} は<b>「出力されたファイルは
+     * 保護されていません」で終わる</b>——<b>掛けた出力についてそれを言うと嘘になる。</b>
+     * <b>署名のほうは黙らない</b>——<b>保護を掛けても、署名は無効のままである。</b>
      */
     private static void warnAboutContributing(
-            List<PdfDocument> documents, List<PageSelection> pages, Warnings warnings) {
+            List<PdfDocument> documents, List<PageSelection> pages, Warnings warnings, Protection protection) {
         Set<Integer> contributing = new TreeSet<>();
         for (PageSelection selection : pages) {
             contributing.add(selection.sourceIndex());
         }
         for (int index : contributing) {
             PdfDocument document = documents.get(index);
-            if (document.encrypted()) {
+            // ★★ 保護を掛けるなら言わない（#199 の門の 2 段目）。あの文言は
+            //   「出力されたファイルは保護されていません」で終わる——掛けた出力について
+            //   それを言うと嘘になり、次に本当のときに読まれなくなる（優先順位 2）。
+            //   ★ 引き継いでいないのは確かだが、利用者が受け取るのは保護された出力である。
+            if (protection == null && document.encrypted()) {
                 warnings.add(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {
@@ -910,7 +919,10 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <p><b>★★ 書き終えた後の失敗でも消す。</b>{@code PdfDocument#close} は<b>閉じるときに
      * 初めて投げることがある</b>（#150）ので、<b>完全に書けた平文が残る形がいちばん危ない。</b>
      * ★ <b>{@code PdfBoxEncryption#protectInto} が閉じる失敗を消す範囲から外しているのは、
-     * あちらの出力が保護されているからである</b>——<b>ここは逆で、残るものが平文である。</b>
+     * あちらの出力が保護されているからである</b>——<b>ここは既定では逆で、残るものが平文である。</b>
+     * ★★ <b>保護を掛けた呼び出しでも消す</b>（#199）。<b>残るのは保護された出力だが、
+     * 呼ぶ側は「失敗した」と受け取っており、もう一度書けば同じものができる</b>
+     * ——<b>失われるのは作り直せるものだけである。</b>
      *
      * <p><b>★ 消してよいのは、この呼び出しが作ったものだけである。</b>
      * どの経路も先に {@link #requireAbsent} を通っている。

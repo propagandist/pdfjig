@@ -651,10 +651,11 @@ class ArchitectureTest {
      * {@code StandardProtection} へ移したとき、<b>{@code PdfDocument} の Javadoc が
      * 移る前の場所を指したまま残った</b>）。<b>数えるのは機械の仕事である。</b>
      *
-     * <p><b>★ 見るのは {@code new String(char[])} だけである。</b>
-     * {@code String.valueOf(char[])} も同じことをするが、<b>いま呼んでいる場所は無く</b>、
-     * <b>両方を数えると「どちらで書くか」という別の話が混ざる。</b>
-     * ★ <b>増やすなら、この註ごと直すこと。</b>
+     * <p><b>★★ 綴りを 1 つに絞らない。</b>{@code new String(char[])} だけを見ると、
+     * <b>{@code String.valueOf(char[])} と書いた日に素通りする</b>——
+     * <b>同じ「消せない写し」ができるのに、規則も INV-5 の口の規則も緑のままになる</b>
+     * （後者は<b>成員の型</b>を見るので、局所の式は増やさない）。
+     * <b>{@code CharBuffer#wrap} と {@code StringBuilder#append} も同じ入口である。</b>
      */
     @Test
     @DisplayName("秘密が String になるのは、PDFBox の口が String しか受けない 2 か所だけである")
@@ -1014,16 +1015,29 @@ class ArchitectureTest {
         return type.isEquivalentTo(char[].class);
     }
 
-    /** {@code new String(char[])} を呼んでいる本番のコード単位。 */
+    /** {@code char[]} から文字列を作っている本番のコード単位。 */
     private static Set<String> unitsBuildingStringsFromCharArrays() {
         return classes.stream()
                 .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
-                .filter(access -> access.getTargetOwner().isEquivalentTo(String.class))
-                .filter(access -> access.getTarget().getName().equals(JavaConstructor.CONSTRUCTOR_NAME))
+                .filter(ArchitectureTest::materializesText)
                 .filter(access ->
                         access.getTarget().getRawParameterTypes().stream().anyMatch(ArchitectureTest::isCharArray))
                 .map(access -> describe(access.getOrigin()))
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * その呼び出しは、{@code char[]} を文字の入れ物へ写すか。
+     *
+     * <p><b>★ 型で挙げる。</b>{@code String} を作る綴りは 1 つではなく、
+     * <b>{@code StringBuilder} と {@code CharBuffer} を経由すれば同じものができる。</b>
+     */
+    private static boolean materializesText(JavaCodeUnitAccess<?> access) {
+        JavaClass owner = access.getTargetOwner();
+        return owner.isEquivalentTo(String.class)
+                || owner.isEquivalentTo(StringBuilder.class)
+                || owner.isEquivalentTo(StringBuffer.class)
+                || owner.isEquivalentTo(java.nio.CharBuffer.class);
     }
 
     /** {@code Arrays.fill(char[], char)} を呼んでいる本番のコード単位。 */
