@@ -109,6 +109,9 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         waitFor(() -> Files.exists(output) && Files.size(output) > 0);
         WaitForAsyncUtils.waitForFxEvents();
 
+        // ★★ 同意したことを、もう一度言わない。窓が 2 枚続くのは読まずに閉じる習慣を作る側である。
+        assertTrue(robot.lookup("#message-dialog").tryQuery().isEmpty(), "同意したことをもう一度伝えている");
+
         // ★ 中身まで見る。選んだとおり平文になっている。
         try (PdfDocument written = PdfDocument.open(output)) {
             assertEquals(1, written.pageCount());
@@ -132,6 +135,12 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         assertTrue(robot.lookup("#protection-dialog").tryQuery().isEmpty(), "鍵の要らない文書で窓が出ている");
 
         waitFor(() -> Files.exists(output) && Files.size(output) > 0);
+
+        // ★★ 問わなかったのだから、保護が落ちたことを伝える口はこれしか無い。
+        //   ★ 閉じずに終わると、次のテストのクリックがこのモーダルに飲まれる。
+        waitForNode(robot, "#message-dialog");
+        clickWhenReady(robot, "#message-ok");
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     @Test
@@ -165,6 +174,15 @@ class ProtectionPromptUiTest extends DesktopUiTest {
 
         // ★ 2 度目は出ていない。出ていれば書き出しが止まり、上の待ちが落ちている。
         assertTrue(robot.lookup("#protection-dialog").tryQuery().isEmpty(), "分割で窓が 2 度出ている");
+
+        // ★ 「N 個のファイルを書き出しました」を閉じる。開けたまま終わると、
+        //   次のテストのクリックがこのモーダルに飲まれる。
+        clickWhenReady(robot, "#message-ok");
+        WaitForAsyncUtils.waitForFxEvents();
+
+        // ★★ 同意したことを、もう一度言わない。pdf-core はかたまりの数だけ発するので、
+        //   落とす数をそこに合わせていないとここが赤くなる（#29 の門の 2 段目）。
+        assertTrue(robot.lookup("#message-dialog").tryQuery().isEmpty(), "同意したことをもう一度伝えている");
     }
 
     // ── 補助 ────────────────────────────────────────────────────────────────
