@@ -999,6 +999,140 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * 組み立てながら保護を掛ける（#199）。
+     *
+     * <p><b>★★ ここが無いと、画面から「保護して保存」を作るのに平文を一度ディスクへ落とすことになる</b>
+     * ——{@code assemble} で作業場所へ平文を書き、{@code Encryption#protect} でそこから出力へ、
+     * という 2 段になるためである（{@code SECURITY.md}「対象範囲」2 番目）。
+     */
+    @Nested
+    class ProtectedOutput {
+
+        @Test
+        @DisplayName("指定した鍵で開ける文書ができる")
+        void writesADocumentThatOpensWithTheGivenKey() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2");
+            Path output = tempDir.resolve("protected.pdf");
+
+            try (Password user = Password.copyOf("user");
+                    Password owner = Password.copyOf("owner")) {
+                operations.assemble(
+                        Sources.ofPaths(List.of(input)),
+                        List.of(PageSelection.of(0, 2), PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.none(), EncryptionAlgorithm.AES_256));
+            }
+
+            // ★ 並べ替えも効いている。組み立てと保護が 1 回の書き出しで済んでいる。
+            try (Password user = Password.copyOf("user");
+                    PdfDocument written = PdfDocument.open(output, user)) {
+                assertEquals(2, written.pageCount());
+                assertTrue(written.encrypted(), "保護が掛かっていない");
+            }
+
+            // ★ 鍵を渡して読む。inspect(Path) は鍵の要る文書では置き値を返す（#187）。
+            EncryptionInfo info;
+            try (Password user = Password.copyOf("user")) {
+                info = new PdfBoxEncryption().inspect(output, user);
+            }
+            assertEquals(EncryptionAlgorithm.AES_256, info.algorithm());
+            assertFalse(info.permissions().print(), "禁じた権限が立っている");
+            assertTrue(info.permissions().extractForAccessibility(), "支援技術のための複製まで塞いでいる");
+        }
+
+        @Test
+        @DisplayName("鍵なしでは開けない")
+        void refusesToOpenWithoutTheKey() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("protected.pdf");
+
+            try (Password user = Password.copyOf("user");
+                    Password owner = Password.copyOf("owner")) {
+                operations.assemble(
+                        Sources.ofPaths(List.of(input)),
+                        List.of(PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertEquals(
+                    ErrorCode.PASSWORD_REQUIRED,
+                    assertThrows(PdfjigException.class, () -> PdfDocument.open(output))
+                            .errorCode());
+        }
+
+        @Test
+        @DisplayName("複数の入力を混ぜても掛かる")
+        void protectsWhenMergingSeveralInputs() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B");
+            Path output = tempDir.resolve("protected.pdf");
+
+            try (Password user = Password.copyOf("user");
+                    Password owner = Password.copyOf("owner")) {
+                operations.assemble(
+                        Sources.ofPaths(List.of(first, second)),
+                        List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            try (Password user = Password.copyOf("user");
+                    PdfDocument written = PdfDocument.open(output, user)) {
+                assertEquals(2, written.pageCount());
+                assertTrue(written.encrypted(), "保護が掛かっていない");
+            }
+        }
+
+        @Test
+        @DisplayName("★★ 平文の中間ファイルを 1 つも作らない")
+        void neverWritesAPlaintextIntermediate() throws Exception {
+            // ★★ ここがこの口を足した理由である（#199）。Encryption#protect を通す形では、
+            //   assemble が書いた平文が一度ディスクに現れる。
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("protected.pdf");
+
+            try (Password user = Password.copyOf("user");
+                    Password owner = Password.copyOf("owner")) {
+                operations.assemble(
+                        Sources.ofPaths(List.of(input)),
+                        List.of(PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertEquals(List.of("doc.pdf", "protected.pdf"), listFilesIn(tempDir), "書き出しが中間ファイルを残している");
+        }
+
+        @Test
+        @DisplayName("方式が NONE なら UNSUPPORTED_ENCRYPTION で、出力は残らない")
+        void refusesAnUnsupportedAlgorithm() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("protected.pdf");
+
+            try (Password user = Password.copyOf("user");
+                    Password owner = Password.copyOf("owner")) {
+                assertEquals(
+                        ErrorCode.UNSUPPORTED_ENCRYPTION,
+                        assertThrows(
+                                        PdfjigException.class,
+                                        () -> operations.assemble(
+                                                Sources.ofPaths(List.of(input)),
+                                                List.of(PageSelection.of(0, 1)),
+                                                output,
+                                                new Protection(
+                                                        user,
+                                                        owner,
+                                                        AccessPermissions.all(),
+                                                        EncryptionAlgorithm.NONE)))
+                                .errorCode());
+            }
+
+            assertFalse(Files.exists(output), "掛けられなかったのに出力が残っている");
+        }
+    }
+
     @Nested
     class EncryptionPropagationWarning {
 

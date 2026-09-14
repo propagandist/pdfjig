@@ -201,12 +201,12 @@ public final class PdfBoxPageOperations implements PageOperations {
     }
 
     @Override
-    public Path assemble(Sources inputs, List<PageSelection> pages, Path output) {
+    public Path assemble(Sources inputs, List<PageSelection> pages, Path output, Protection protection) {
         requireInputs(inputs);
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guardedRun(ErrorCode.NOT_A_PDF, () -> assembleInto(inputs, pages, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> assembleInto(inputs, pages, output, warnings, protection));
         warnings.report();
         return output;
     }
@@ -218,12 +218,14 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 呼び合うと、<b>内側の {@code report} が外側の包みの中で走る</b>——
      * まさに {@link Warnings} が避けている形である。
      */
-    private void assembleInto(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings)
+    private void assembleInto(
+            Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection)
             throws IOException {
-        writingTo(output, () -> assembleAllInto(inputs, pages, output, warnings));
+        writingTo(output, () -> assembleAllInto(inputs, pages, output, warnings, protection));
     }
 
-    private void assembleAllInto(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings)
+    private void assembleAllInto(
+            Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection)
             throws IOException {
         // 結合では保存が終わるまで入力を閉じられない。まとめて開いたまま保持する。
         try (OpenDocuments sources = new OpenDocuments()) {
@@ -233,7 +235,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             requireSelectable(pages, documents);
             warnAboutContributing(documents, pages, warnings);
-            write(inputs, documents, pages, output, warnings);
+            write(inputs, documents, pages, output, warnings, protection);
         }
     }
 
@@ -269,7 +271,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             for (int i = 0; i < segments.size(); i++) {
                 // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
                 written.add(outputs.get(i));
-                assembleInto(inputs, segments.get(i), outputs.get(i), warnings);
+                assembleInto(inputs, segments.get(i), outputs.get(i), warnings, null);
             }
         } catch (RuntimeException e) {
             written.forEach(PdfBoxPageOperations::deleteQuietly);
@@ -392,12 +394,17 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 取り除いたはずのページが参照から辿れて出力に残る。
      */
     private void write(
-            Sources inputs, List<PdfDocument> sources, List<PageSelection> pages, Path output, Warnings warnings) {
+            Sources inputs,
+            List<PdfDocument> sources,
+            List<PageSelection> pages,
+            Path output,
+            Warnings warnings,
+            Protection protection) {
         int single = singleSourceIndexOf(pages);
         if (single >= 0) {
-            writeFromSingleSource(sources.get(single), pages, output, warnings);
+            writeFromSingleSource(sources.get(single), pages, output, warnings, protection);
         } else {
-            writeByMerging(inputs, pages, output, warnings);
+            writeByMerging(inputs, pages, output, warnings, protection);
         }
     }
 
@@ -461,6 +468,17 @@ public final class PdfBoxPageOperations implements PageOperations {
      * 先に {@link Warnings} を通す形へ替えてある——<b>いま走るのは溜めることだけである。</b>
      */
     private void writeFromSingleSource(PdfDocument source, List<PageSelection> pages, Path output, Warnings warnings) {
+        writeFromSingleSource(source, pages, output, warnings, null);
+    }
+
+    /**
+     * 保護を掛けて書き出す。
+     *
+     * <p><b>★ 保護を受け取るのは {@code assemble} だけである</b>（#199）——
+     * <b>他の 4 つの呼ぶ側は掛けない</b>ので、上の 4 引数の形を通る。
+     */
+    private void writeFromSingleSource(
+            PdfDocument source, List<PageSelection> pages, Path output, Warnings warnings, Protection protection) {
         PDDocument document = source.delegate();
 
         // 並べ替えでページツリーが 1 階層に均される。継承していた属性を先に固定する。
@@ -483,10 +501,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         // これは利用者に伝えることではない——警告は「しおりやリンクを落とした」ことを指す。
         PageReferences.discard(all, ordered);
 
-        // 入力が暗号化されていた場合、PDFBox は保護を保ったまま保存しようとする。
-        // M0 が扱うのは EncryptionPropagation.NONE のみであり、
-        // 保護は落ちる（警告は open で発している）。
-        document.setAllSecurityToBeRemoved(true);
+        applyProtection(document, protection);
         saver.save(document, output);
     }
 
@@ -506,11 +521,13 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <b>この差分では揃えていない</b>——{@code merge} の符号ごと動かすことになり、
      * <b>利用者へ届く値が変わる</b>。#191 が持つ。
      */
-    private void writeByMerging(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings) {
-        guardedRun(ErrorCode.IO_FAILURE, () -> mergeCopiesInto(inputs, pages, output, warnings));
+    private void writeByMerging(
+            Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection) {
+        guardedRun(ErrorCode.IO_FAILURE, () -> mergeCopiesInto(inputs, pages, output, warnings, protection));
     }
 
-    private void mergeCopiesInto(Sources inputs, List<PageSelection> pages, Path output, Warnings warnings)
+    private void mergeCopiesInto(
+            Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection)
             throws IOException {
         try (OpenDocuments copies = new OpenDocuments();
                 PDDocument target = new PDDocument()) {
@@ -551,7 +568,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                     > 1;
             applyInformation(target, information, mixed, warnings);
 
-            target.setAllSecurityToBeRemoved(true);
+            applyProtection(target, protection);
             saver.save(target, output);
         }
     }
@@ -941,6 +958,34 @@ public final class PdfBoxPageOperations implements PageOperations {
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
+    }
+
+    /**
+     * 書き出す直前に、保護を当てるか外すかを決める。
+     *
+     * <p><b>★★ 既定は「外す」である。</b>入力が暗号化されていた場合、PDFBox は
+     * <b>保護を保ったまま保存しようとする</b>——{@code EncryptionPropagation} は
+     * {@code NONE} しか受け付けないので、<b>保護は落とす</b>（警告は {@code open} で発している）。
+     *
+     * <p><b>★★ 掛けるときは、平文を一度も書かない</b>（#199）。
+     * <b>組み立てと保護が 1 回の書き出しで済む</b>ので、<b>作業場所に平文の中間が現れない</b>
+     * ——{@code Encryption#protect} を通すとそれが起きる（{@code SECURITY.md}「対象範囲」2 番目）。
+     *
+     * <p><b>★ 掛けるだけで、書き出さない。</b>SASLprep が走るのは {@code save} のほうであり、
+     * <b>そこが漏えいの関門である</b>（#28 の申し送り）——包むのは {@code saveDocument} と
+     * 公開の入口の {@code guarded} である。
+     *
+     * <p><b>★ ここで包むのは、チェック例外をここで止めるためである。</b>通すと
+     * <b>書き出しの私有メソッド 5 本が {@code throws IOException} を背負う</b>——
+     * {@code saveDocument} が同じ理由で同じ形をしている。
+     * <b>符号は「そのとき何をしていたか」を名指す</b>（{@code PdfBoxGuard}）。
+     */
+    private static void applyProtection(PDDocument document, Protection protection) {
+        if (protection == null) {
+            document.setAllSecurityToBeRemoved(true);
+            return;
+        }
+        guardedRun(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> StandardProtection.apply(document, protection));
     }
 
     /**

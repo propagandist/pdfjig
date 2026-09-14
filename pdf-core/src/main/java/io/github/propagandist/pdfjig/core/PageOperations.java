@@ -23,6 +23,10 @@ import java.util.Map;
  * <b>鍵の要らない入力の省略形</b>であり、ユーザーパスワードの要る文書に当てると
  * {@link ErrorCode#PASSWORD_REQUIRED} で失敗する（#193）。
  *
+ * <p><b>★★ 組み立てながら保護を掛けられるのは {@code assemble} だけである</b>（#199）。
+ * <b>画面が「保護して保存」で通るのはそこだからである</b>——
+ * <b>既にある文書へ後から掛けるのは {@link Encryption#protect} が持つ。</b>
+ *
  * <p><b>★★ 複数の入力を取る 3 本は {@link Sources} を通す。</b>
  * {@code List<Path>} と {@code List<Source>} は<b>消去後に同じ綴りになり、
  * 多重定義として置けない</b>——値型で包めば衝突しない。理由の正本は {@link Sources} にある。
@@ -156,7 +160,19 @@ public interface PageOperations {
      *                         範囲外の出どころやページを含む場合は
      *                         {@link ErrorCode#PAGE_OUT_OF_RANGE}
      */
-    Path assemble(Sources inputs, List<PageSelection> pages, Path output);
+    Path assemble(Sources inputs, List<PageSelection> pages, Path output, Protection protection);
+
+    /**
+     * 保護を掛けずに組み立てる。
+     *
+     * @param inputs 入力
+     * @param pages  出力に含めるページ。この順に並ぶ
+     * @param output 出力ファイル。既存であってはならない
+     * @return {@code output}
+     */
+    default Path assemble(Sources inputs, List<PageSelection> pages, Path output) {
+        return assemble(inputs, pages, output, null);
+    }
 
     /**
      * 鍵の要らない入力にまたがって組み立てる。
