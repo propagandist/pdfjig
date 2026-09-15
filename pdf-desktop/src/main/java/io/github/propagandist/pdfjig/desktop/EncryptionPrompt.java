@@ -6,7 +6,6 @@ import io.github.propagandist.pdfjig.core.Protection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
@@ -138,8 +137,16 @@ final class EncryptionPrompt {
                 details);
         content.setPadding(new Insets(12));
 
-        // ★★ 画面より高い窓を作らない。詳細を開いた高さが画面に収まらないと、ボタン列は
-        //   scene の外に置かれ、「保護して保存」が押せなくなる（下の sizeToScene の註）。
+        // ★★ 中身を流せるようにして、高さを画面の 6 割で止める。詳細を開いた高さが窓に
+        //   収まらないと、ボタン列は scene の外に置かれ、「保護して保存」が押せなくなる
+        //   ——2026-09-15 に CI（windows）で実測した：#encryption-apply が
+        //   「1 nodes, but no nodes were visible」で掴めない（TestFX が見るのは
+        //   節点が scene の矩形と重なるかである。NodeQueryUtils#isNodeWithinSceneBounds）。
+        //   ★★ 開閉のたびに窓を測り直す形は採らない。Dialog は一度出した後の大きさを
+        //   測り直さないので sizeToScene が要るが、TitledPane の皮は窓が出てから作られるため
+        //   受け口の順が定まらず、runLater で後ろへ回すと今度は測り直しが打鍵と重なる
+        //   （2026-09-16 実測。どちらの形でも CI が赤いままだった）。
+        //   窓を動かさなければ、開いた直後に触れる節点の位置も動かない。
         //   ★ 縦だけ流す。横に流すと、折り返す注意文が読めなくなる。
         ScrollPane scroller = new ScrollPane(content);
         scroller.setFitToWidth(true);
@@ -162,20 +169,6 @@ final class EncryptionPrompt {
         dialog.getDialogPane().lookupButton(apply).setId("encryption-apply");
         dialog.getDialogPane().lookupButton(ButtonType.CANCEL).setId("encryption-cancel");
         dialog.setOnShown(event -> userPassword.requestFocus());
-
-        // ★★ 詳細を開いたら窓を測り直す。Dialog は一度出した後の大きさを測り直さないので、
-        //   伸びたぶんは窓の外へ出る——「保護して保存」が画面から消えて、押せなくなる。
-        //   2026-09-15 に CI（windows）で実測した：#encryption-apply が
-        //   「1 nodes, but no nodes were visible」で掴めなかった——TestFX は
-        //   節点が scene の矩形と重なるかを見る（NodeQueryUtils#isNodeWithinSceneBounds）。
-        //   ★★ runLater で遅らせる。TitledPane の皮は窓が出てから作られるので、
-        //   ここで直に測ると皮より先に走り、畳んだままの高さで窓を決めてしまう
-        //   （2026-09-16 実測。直に呼ぶ形では同じ 2 本が同じ形で落ちた）。
-        //   ★ 畳むときも測り直す。開いたままの高さが残ると、下が空く。
-        //   ★ 上の maxHeight がここの上限である——測り直しが画面を超えることはない。
-        details.expandedProperty()
-                .addListener((property, was, now) -> Platform.runLater(
-                        () -> dialog.getDialogPane().getScene().getWindow().sizeToScene()));
 
         // ★★ 押せない条件は 2 つ。① 確認が一致しない ② どちらの鍵も空である。
         //   ★ ② を通すと「保護した」と思わせながら誰でも開ける文書ができる（優先順位 2）。

@@ -106,8 +106,7 @@ class EncryptionUiTest extends DesktopUiTest {
                 checkBox(robot, "#encryption-flag-extract-accessibility").isSelected(), "テキスト抽出を外したら支援技術のための複製まで落ちている");
 
         typeKeys(robot);
-        clickWhenReady(robot, "#encryption-apply");
-        waitForWritten(output);
+        applyAndWaitFor(robot, output);
 
         EncryptionInfo info;
         try (Password user = Password.copyOf(USER)) {
@@ -238,9 +237,22 @@ class EncryptionUiTest extends DesktopUiTest {
     private Path protectTo(FxRobot robot, Path fixture, Path output) throws Exception {
         openPrompt(robot, fixture, output);
         typeKeys(robot);
-        clickWhenReady(robot, "#encryption-apply");
-        waitForWritten(output);
+        applyAndWaitFor(robot, output);
         return output;
+    }
+
+    /**
+     * 「保護して保存」を押して、ファイルができるまで待つ。
+     *
+     * <p><b>★ 落ちる場所を 3 つに分けてある。</b>押せない状態のまま押しても何も起きないので、
+     * <b>「ファイルができない」だけでは、押せていないのか書けなかったのかが読めない</b>
+     * ——押す前に押せることを見て、押した後に窓が閉じたことを見てから、ファイルを待つ。
+     */
+    private void applyAndWaitFor(FxRobot robot, Path output) throws Exception {
+        assertFalse(button(robot, "#encryption-apply").isDisabled(), "鍵を打ったのに「保護して保存」が押せないままである");
+        clickWhenReady(robot, "#encryption-apply");
+        waitFor(() -> robot.lookup("#encryption-dialog").tryQuery().isEmpty());
+        waitForWritten(output);
     }
 
     /**
