@@ -56,10 +56,8 @@ class EncryptionUiTest extends DesktopUiTest {
 
     @Test
     void 保護して保存すると鍵の要るファイルができる(@TempDir Path dir, FxRobot robot) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2"));
-        WaitForAsyncUtils.waitForFxEvents();
-
-        Path output = protectTo(dir.resolve("protected.pdf"), robot);
+        Path output =
+                protectTo(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2"), dir.resolve("protected.pdf"));
 
         // ★ 鍵なしでは開けない。画面が何を出したかではなく、出来たファイルを見る。
         assertEquals(
@@ -76,10 +74,7 @@ class EncryptionUiTest extends DesktopUiTest {
 
     @Test
     void 既定は全部許可のAES256である(@TempDir Path dir, FxRobot robot) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
-        WaitForAsyncUtils.waitForFxEvents();
-
-        Path output = protectTo(dir.resolve("protected.pdf"), robot);
+        Path output = protectTo(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
 
         EncryptionInfo info;
         try (Password user = Password.copyOf(USER)) {
@@ -92,18 +87,14 @@ class EncryptionUiTest extends DesktopUiTest {
 
     @Test
     void 詳細を開いて権限を外すと出力に効く(@TempDir Path dir, FxRobot robot) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
-        WaitForAsyncUtils.waitForFxEvents();
-
         Path output = dir.resolve("protected.pdf");
-        dialogs.willSaveTo(output);
-        protectFromMenu(robot);
-        waitForNode(robot, "#encryption-dialog");
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), output);
 
         // ★★ プリセットを外すと、束の中身が全部外れる（SPEC.md §6.2 の 2 段構成）。
         clickWhenReady(robot, "#encryption-allow-print");
         clickWhenReady(robot, "#encryption-details");
-        waitFor(() -> titledPane(robot, "#encryption-details").isExpanded());
+        waitFor(() ->
+                robot.lookup("#encryption-details").queryAs(TitledPane.class).isExpanded());
         assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "束を外したのに中身が残っている");
         assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "束を外したのに中身が残っている");
 
@@ -114,26 +105,23 @@ class EncryptionUiTest extends DesktopUiTest {
 
         typeKeys(robot);
         clickWhenReady(robot, "#encryption-apply");
-        waitFor(() -> Files.exists(output) && Files.size(output) > 0);
-        WaitForAsyncUtils.waitForFxEvents();
+        waitForWritten(output);
 
         EncryptionInfo info;
         try (Password user = Password.copyOf(USER)) {
             info = new PdfBoxEncryption().inspect(output, user);
         }
-        assertFalse(info.permissions().print(), "外した権限が立っている");
-        assertFalse(info.permissions().extractContent(), "外した権限が立っている");
-        assertTrue(info.permissions().extractForAccessibility(), "支援技術のための複製まで塞いでいる");
+        // ★★ 8 つまとめて見る。1 つずつ見ると、並びを取り違えた実装が素通りする
+        //   （AccessPermissions は同じ型の boolean が 8 つ並んだ record である）。
+        assertEquals(
+                new AccessPermissions(false, true, false, true, true, true, true, false),
+                info.permissions(),
+                "外した権限と残した権限が食い違っている");
     }
 
     @Test
     void ユーザーパスワードが空なら申告制であることを出す(@TempDir Path dir, FxRobot robot) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
-        WaitForAsyncUtils.waitForFxEvents();
-
-        dialogs.willSaveTo(dir.resolve("protected.pdf"));
-        protectFromMenu(robot);
-        waitForNode(robot, "#encryption-dialog");
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
 
         // ★★ 空のまま出ている。利用者はほぼ確実に「コピー禁止にしたから安全」と誤解する
         //   （docs/SPEC.md §6.1）ので、何が起きるのかをそこに書く。
@@ -150,12 +138,7 @@ class EncryptionUiTest extends DesktopUiTest {
 
     @Test
     void 確認が一致しなければ押せない(@TempDir Path dir, FxRobot robot) throws Exception {
-        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
-        WaitForAsyncUtils.waitForFxEvents();
-
-        dialogs.willSaveTo(dir.resolve("protected.pdf"));
-        protectFromMenu(robot);
-        waitForNode(robot, "#encryption-dialog");
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
 
         // ★★ どちらの鍵も空なら押せない。通すと「保護した」と思わせながら誰でも開ける文書ができる。
         assertTrue(button(robot, "#encryption-apply").isDisabled(), "鍵が空なのに押せる");
@@ -173,16 +156,33 @@ class EncryptionUiTest extends DesktopUiTest {
 
     // ── 補助 ────────────────────────────────────────────────────────────────
 
-    /** 既定のまま保護して書き出し、ファイルができるまで待つ。 */
-    private Path protectTo(Path output, FxRobot robot) throws Exception {
+    /** 文書を開き、書き出し先を仕込んで、保護の窓を出す。 */
+    private void openPrompt(FxRobot robot, Path fixture, Path output) throws Exception {
+        openFixture(robot, fixture);
         dialogs.willSaveTo(output);
         protectFromMenu(robot);
         waitForNode(robot, "#encryption-dialog");
+    }
+
+    /** 開いて、既定のまま保護して書き出し、ファイルができるまで待つ。 */
+    private Path protectTo(FxRobot robot, Path fixture, Path output) throws Exception {
+        openPrompt(robot, fixture, output);
         typeKeys(robot);
         clickWhenReady(robot, "#encryption-apply");
+        waitForWritten(output);
+        return output;
+    }
+
+    /**
+     * 書き出しが終わるのを待つ。
+     *
+     * <p><b>★ 新しく作られる出力にしか使えない</b>（{@code DesktopUiTest#saveAs} と同じ限界）。
+     * <b>既にあるファイルを渡すと、書き出す前に条件が満たされる</b>——上書きを見たくなったら
+     * {@code saveOver} と同じく更新時刻で待つこと。
+     */
+    private static void waitForWritten(Path output) throws Exception {
         waitFor(() -> Files.exists(output) && Files.size(output) > 0);
         WaitForAsyncUtils.waitForFxEvents();
-        return output;
     }
 
     /**
@@ -218,10 +218,6 @@ class EncryptionUiTest extends DesktopUiTest {
 
     private static CheckBox checkBox(FxRobot robot, String id) {
         return robot.lookup(id).queryAs(CheckBox.class);
-    }
-
-    private static TitledPane titledPane(FxRobot robot, String id) {
-        return robot.lookup(id).queryAs(TitledPane.class);
     }
 
     private static Node node(FxRobot robot, String id) {

@@ -1,11 +1,8 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.core.AccessPermissions;
-import io.github.propagandist.pdfjig.core.EncryptionAlgorithm;
 import java.util.List;
-import javafx.geometry.Insets;
 import javafx.scene.control.CheckBox;
-import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.layout.VBox;
 
@@ -49,23 +46,14 @@ final class Flags {
     private final CheckBox allowModify =
             preset("encryption-allow-modify", "編集を許可", List.of(modify, modifyAnnotations, fillForms, assembleDocument));
 
-    /**
-     * 束と中身を結び直している最中か。
-     *
-     * <p><b>★ 無いと往復する。</b>束を押す → 中身が動く → 中身の変化が束を押し直す、
-     * という循環になる。
-     */
-    private boolean syncing;
-
     /** プリセットの並び。畳んだ状態で見えるのはここだけである。 */
     VBox presetBox() {
-        VBox box = new VBox(6, new Label("書き出したファイルで許可すること"), allowPrint, allowExtract, allowModify);
-        return box;
+        return new VBox(6, new Label("書き出したファイルで許可すること"), allowPrint, allowExtract, allowModify);
     }
 
-    /** 詳細の中身。8 つのフラグと、互換性のための方式の選択である。 */
-    VBox detailPane(ChoiceBox<EncryptionAlgorithm> algorithm) {
-        VBox box = new VBox(
+    /** 8 つのフラグの並び。<b>持つのはフラグだけである</b>——詳細に何を並べるかは呼ぶ側が決める。 */
+    VBox rows() {
+        return new VBox(
                 6,
                 print,
                 printHighQuality,
@@ -74,11 +62,7 @@ final class Flags {
                 modify,
                 modifyAnnotations,
                 fillForms,
-                assembleDocument,
-                new Label("暗号方式（互換性が要るときだけ変える）"),
-                algorithm);
-        box.setPadding(new Insets(8));
-        return box;
+                assembleDocument);
     }
 
     /** いま選ばれている権限。 */
@@ -107,27 +91,21 @@ final class Flags {
         return box;
     }
 
-    /** 束。押すと中身が全部動き、中身が変われば押された状態も変わる。 */
-    private CheckBox preset(String id, String text, List<CheckBox> members) {
+    /**
+     * 束。押すと中身が全部動き、中身が変われば押された状態も変わる。
+     *
+     * <p><b>★★ 押す側は {@code setOnAction} で受ける。</b>{@code selectedProperty} で受けると
+     * <b>中身から押し直したぶんにも反応して往復し</b>、それを止めるための旗が要る——
+     * <b>{@code setSelected} は {@code ActionEvent} を出さないので、戻りの道が初めから無い。</b>
+     */
+    private static CheckBox preset(String id, String text, List<CheckBox> members) {
         CheckBox box = new CheckBox(text);
         box.setId(id);
         box.setSelected(true);
-        box.selectedProperty().addListener((property, was, now) -> {
-            if (syncing) {
-                return;
-            }
-            syncing = true;
-            members.forEach(member -> member.setSelected(now));
-            syncing = false;
-        });
-        members.forEach(member -> member.selectedProperty().addListener((property, was, now) -> {
-            if (syncing) {
-                return;
-            }
-            syncing = true;
-            box.setSelected(members.stream().allMatch(CheckBox::isSelected));
-            syncing = false;
-        }));
+        box.setOnAction(event -> members.forEach(member -> member.setSelected(box.isSelected())));
+        members.forEach(member -> member.selectedProperty()
+                .addListener(
+                        (property, was, now) -> box.setSelected(members.stream().allMatch(CheckBox::isSelected))));
         return box;
     }
 }

@@ -3,9 +3,7 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.core.EncryptionAlgorithm;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.Protection;
-import java.util.List;
 import java.util.Optional;
-import javafx.beans.binding.Bindings;
 import javafx.geometry.Insets;
 import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
@@ -90,7 +88,12 @@ final class EncryptionPrompt {
         // 既定は AES-256（SPEC.md §6.2）。RC4 系と AES-128 は互換性が要るときだけの選択肢である。
         algorithm.getSelectionModel().select(EncryptionAlgorithm.AES_256);
 
-        TitledPane details = new TitledPane("詳細（8 つの権限）", flags.detailPane(algorithm));
+        // ★ 方式の選択は「8 つの権限」ではない。ここで組む——Flags へ渡すと、
+        //   詳細に何が入るのかが 2 つのファイルに分かれる。
+        VBox detailPane = new VBox(6, flags.rows(), new Label("暗号方式（互換性が要るときだけ変える）"), algorithm);
+        detailPane.setPadding(new Insets(8));
+
+        TitledPane details = new TitledPane("詳細（8 つの権限）", detailPane);
         details.setId("encryption-details");
         details.setExpanded(false);
 
@@ -120,40 +123,37 @@ final class EncryptionPrompt {
 
         // ★★ 押せない条件は 2 つ。① 確認が一致しない ② どちらの鍵も空である。
         //   ★ ② を通すと「保護した」と思わせながら誰でも開ける文書ができる（優先順位 2）。
+        //   ★ 依存を数え上げる形（Bindings#createBooleanBinding）にしない——欄を足して
+        //   引数を書き忘れると、ボタンが黙って測り直されなくなる（コンパイルは通る）。
         dialog.getDialogPane()
                 .lookupButton(apply)
                 .disableProperty()
-                .bind(Bindings.createBooleanBinding(
-                        () -> !userPassword.getText().equals(userConfirm.getText())
-                                || !ownerPassword.getText().equals(ownerConfirm.getText())
-                                || (userPassword.getText().isEmpty()
-                                        && ownerPassword.getText().isEmpty()),
-                        userPassword.textProperty(),
-                        userConfirm.textProperty(),
-                        ownerPassword.textProperty(),
-                        ownerConfirm.textProperty()));
+                .bind(userPassword
+                        .textProperty()
+                        .isNotEqualTo(userConfirm.textProperty())
+                        .or(ownerPassword.textProperty().isNotEqualTo(ownerConfirm.textProperty()))
+                        .or(userPassword
+                                .textProperty()
+                                .isEmpty()
+                                .and(ownerPassword.textProperty().isEmpty())));
 
         dialog.setResultConverter(button -> {
-            if (button != apply) {
+            try {
+                // ★ 写し取りは Password の中で行う。素の char[] がここに出ない（INV-5）。
+                return button != apply
+                        ? null
+                        : new Protection(
+                                Password.copyOf(userPassword.getCharacters()),
+                                Password.copyOf(ownerPassword.getCharacters()),
+                                flags.permissions(),
+                                algorithm.getValue());
+            } finally {
+                // ★★ どの道を通っても消す。投げて出る道（Protection が方式を拒む）もここを通る。
                 clear(userPassword, userConfirm, ownerPassword, ownerConfirm);
-                return null;
             }
-            // ★ 写し取りは Password の中で行う。素の char[] がここに出ない（INV-5）。
-            Protection protection = new Protection(
-                    Password.copyOf(userPassword.getCharacters()),
-                    Password.copyOf(ownerPassword.getCharacters()),
-                    flags.permissions(),
-                    algorithm.getValue());
-            clear(userPassword, userConfirm, ownerPassword, ownerConfirm);
-            return protection;
         });
 
         return dialog.showAndWait();
-    }
-
-    /** 保護が抱えている鍵。閉じるのは仕事へ渡す側である。 */
-    static List<Password> keysOf(Protection protection) {
-        return List.of(protection.userPassword(), protection.ownerPassword());
     }
 
     private static PasswordField passwordField(String id) {
@@ -162,6 +162,12 @@ final class EncryptionPrompt {
         return field;
     }
 
+    /**
+     * 4 つの欄を並べる。
+     *
+     * <p><b>★ 欄と見出しを 1 行ずつ組にする。</b>並びだけを渡す形にすると、
+     * <b>見出しと欄がずれても何も落ちない</b>——型が同じなので、入れ替えてもコンパイルは通る。
+     */
     private static GridPane passwordGrid(
             PasswordField userPassword,
             PasswordField userConfirm,
@@ -170,11 +176,15 @@ final class EncryptionPrompt {
         GridPane grid = new GridPane();
         grid.setHgap(8);
         grid.setVgap(6);
-        grid.addRow(0, new Label("ユーザーパスワード（開くとき）"), userPassword);
-        grid.addRow(1, new Label("　同じものをもう一度"), userConfirm);
-        grid.addRow(2, new Label("オーナーパスワード（権限を変えるとき）"), ownerPassword);
-        grid.addRow(3, new Label("　同じものをもう一度"), ownerConfirm);
+        row(grid, 0, "ユーザーパスワード（開くとき）", userPassword);
+        row(grid, 1, "　同じものをもう一度", userConfirm);
+        row(grid, 2, "オーナーパスワード（権限を変えるとき）", ownerPassword);
+        row(grid, 3, "　同じものをもう一度", ownerConfirm);
         return grid;
+    }
+
+    private static void row(GridPane grid, int index, String label, PasswordField field) {
+        grid.addRow(index, new Label(label), field);
     }
 
     private static void clear(PasswordField... fields) {
