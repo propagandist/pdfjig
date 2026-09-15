@@ -579,9 +579,8 @@ public final class MainWindow {
             //   「保護を掛けた」で分けると、ユーザーパスワードを空にした回に穴が開く——
             //   出力の中身は暗号化されず、残るのは申告制の権限フラグだけなのに、
             //   窓も出ず pdf-core の警告も出ない。鍵の要る入力が、誰でも開ける出力になる。
-            boolean hidden = protection != null && protection.encryptsContent();
-            int asked = hidden ? 0 : saving.keyedContributors(pages).size();
-            if (!hidden && !consentsToDroppingProtection(saving, pages)) {
+            int asked = protecting ? 0 : saving.keyedContributors(pages).size();
+            if (!protecting && !consentsToDroppingProtection(saving, pages)) {
                 return;
             }
 
