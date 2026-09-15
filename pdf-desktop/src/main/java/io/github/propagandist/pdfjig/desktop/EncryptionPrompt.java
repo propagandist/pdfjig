@@ -4,6 +4,7 @@ import io.github.propagandist.pdfjig.core.EncryptionAlgorithm;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.Protection;
 import java.util.Optional;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
@@ -11,10 +12,13 @@ import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ScrollPane.ScrollBarPolicy;
 import javafx.scene.control.TitledPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 /**
@@ -132,13 +136,23 @@ final class EncryptionPrompt {
                 details);
         content.setPadding(new Insets(12));
 
+        // ★★ 画面より高い窓を作らない。詳細を開いた高さが画面に収まらないと、ボタン列は
+        //   scene の外に置かれ、「保護して保存」が押せなくなる（下の sizeToScene の註）。
+        //   ★ 縦だけ流す。横に流すと、折り返す注意文が読めなくなる。
+        ScrollPane scroller = new ScrollPane(content);
+        scroller.setFitToWidth(true);
+        scroller.setHbarPolicy(ScrollBarPolicy.NEVER);
+        // 枠と地色を消す。中身は窓そのものの続きであって、囲まれた別の面ではない。
+        scroller.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        scroller.setMaxHeight(Screen.getPrimary().getVisualBounds().getHeight() * 0.6);
+
         ButtonType apply = new ButtonType("保護して保存", ButtonData.OK_DONE);
 
         Dialog<Protection> dialog = new Dialog<>();
         dialog.initOwner(owner);
         dialog.setTitle("パスワードで保護");
         dialog.getDialogPane().setId("encryption-dialog");
-        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().setContent(scroller);
         // ★ 折り返した本文の高さは窓の大きさが決まった後にしか分からない（#124。Messages#show）。
         dialog.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
         dialog.setResizable(true);
@@ -152,10 +166,14 @@ final class EncryptionPrompt {
         //   2026-09-15 に CI（windows）で実測した：#encryption-apply が
         //   「1 nodes, but no nodes were visible」で掴めなかった——TestFX は
         //   節点が scene の矩形と重なるかを見る（NodeQueryUtils#isNodeWithinSceneBounds）。
+        //   ★★ runLater で遅らせる。TitledPane の皮は窓が出てから作られるので、
+        //   ここで直に測ると皮より先に走り、畳んだままの高さで窓を決めてしまう
+        //   （2026-09-16 実測。直に呼ぶ形では同じ 2 本が同じ形で落ちた）。
         //   ★ 畳むときも測り直す。開いたままの高さが残ると、下が空く。
+        //   ★ 上の maxHeight がここの上限である——測り直しが画面を超えることはない。
         details.expandedProperty()
-                .addListener((property, was, now) ->
-                        dialog.getDialogPane().getScene().getWindow().sizeToScene());
+                .addListener((property, was, now) -> Platform.runLater(
+                        () -> dialog.getDialogPane().getScene().getWindow().sizeToScene()));
 
         // ★★ 押せない条件は 2 つ。① 確認が一致しない ② どちらの鍵も空である。
         //   ★ ② を通すと「保護した」と思わせながら誰でも開ける文書ができる（優先順位 2）。
