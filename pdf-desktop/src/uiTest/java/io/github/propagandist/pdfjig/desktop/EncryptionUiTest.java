@@ -139,6 +139,30 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     @Test
+    void 束を付け直すと中身が全部戻る(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        clickWhenReady(robot, "#encryption-details");
+        waitFor(() ->
+                robot.lookup("#encryption-details").queryAs(TitledPane.class).isExpanded());
+
+        // ★★ 外して、付け直す。中身が 2 つ以上ある束でしか出ない壊れ方である——
+        //   1 つ目を動かした時点で束が押し戻されると、2 つ目から先が逆の値になる。
+        clickWhenReady(robot, "#encryption-allow-modify");
+        clickWhenReady(robot, "#encryption-allow-modify");
+
+        assertTrue(checkBox(robot, "#encryption-flag-modify").isSelected(), "束を付け直したのに中身が戻っていない");
+        assertTrue(checkBox(robot, "#encryption-flag-modify-annotations").isSelected(), "束を付け直したのに中身が戻っていない");
+        assertTrue(checkBox(robot, "#encryption-flag-fill-forms").isSelected(), "束を付け直したのに中身が戻っていない");
+        assertTrue(checkBox(robot, "#encryption-flag-assemble").isSelected(), "束を付け直したのに中身が戻っていない");
+        // ★ 束の表示も揃っていること。ここがずれると、画面と出力が食い違う。
+        assertTrue(checkBox(robot, "#encryption-allow-modify").isSelected(), "中身は全部立っているのに束が外れている");
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
     void 確認が一致しなければ押せない(@TempDir Path dir, FxRobot robot) throws Exception {
         openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
 

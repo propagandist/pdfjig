@@ -102,7 +102,13 @@ final class Flags {
         CheckBox box = new CheckBox(text);
         box.setId(id);
         box.setSelected(true);
-        box.setOnAction(event -> members.forEach(member -> member.setSelected(box.isSelected())));
+        box.setOnAction(event -> {
+            // ★★ 押された値を先に控える。box.isSelected() をそのまま読むと、1 つ目を動かした
+            //   時点で下の受け口が「全部は揃っていない」と見て box を押し戻すので、
+            //   2 つ目から先が逆の値になる——束を付け直すと 1 つしか戻らない（#30 の門の 2 段目）。
+            boolean selected = box.isSelected();
+            members.forEach(member -> member.setSelected(selected));
+        });
         members.forEach(member -> member.selectedProperty()
                 .addListener(
                         (property, was, now) -> box.setSelected(members.stream().allMatch(CheckBox::isSelected))));
