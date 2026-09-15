@@ -1096,6 +1096,21 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("★★ 保護は、自分の抱えている鍵を数え上げられる")
+        void listsTheKeysItHolds() {
+            // ★★ 呼ぶ側が数え上げると、「鍵を足したが、片づける一覧へは足さなかった」形が書ける
+            //   ——そこを通った平文の配列は二度と消されない（INV-5。#135 / #144 / #145）。
+            //   ★ 空の鍵も並ぶ。閉じる対象であることに変わりはない。
+            try (Password user = Password.copyOf("");
+                    Password owner = Password.copyOf("owner")) {
+                Protection protection =
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256);
+
+                assertEquals(List.of(user, owner), protection.keys(), "抱えている鍵が全部は並んでいない");
+            }
+        }
+
+        @Test
         @DisplayName("書けない方式では、出力も残らない")
         void leavesNoOutputForAnUnsupportedAlgorithm() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
