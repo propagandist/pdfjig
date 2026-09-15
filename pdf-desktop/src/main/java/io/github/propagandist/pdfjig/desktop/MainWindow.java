@@ -542,7 +542,7 @@ public final class MainWindow {
                 () -> {
                     // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
                     boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
-                    return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output));
+                    return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output, null));
                 },
                 outcome -> {
                     markSaved(saving, sources, pages);

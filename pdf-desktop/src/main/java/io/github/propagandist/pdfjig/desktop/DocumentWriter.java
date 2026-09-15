@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.PageOperations;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.PdfBoxPageOperations;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Protection;
 import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.io.IOException;
@@ -72,12 +73,24 @@ final class DocumentWriter {
      * ここで印を見て包む形にすると、<b>2 つ目の {@link OutputWorkspace#nextTo} が足された日に
      * 黙って素通りする。</b>
      *
-     * @param sources 元のファイルと、鍵の要るものについてはその鍵
-     * @param pages   書き出すページの指定
-     * @param output  書き出し先
+     * <p><b>★★ 保護を掛けるなら、平文は 1 バイトもディスクに現れない</b>（#199）。
+     * <b>作業場所に書かれる時点で既に掛かっている</b>——{@code pdf-core} が
+     * <b>組み立てと保護を 1 回の書き出しで済ませる</b>ためである。
+     * <b>{@code Encryption#protect} を通す形では、組み立てた平文が一度ここへ落ちる</b>
+     * （{@code SECURITY.md}「対象範囲」2 番目）。
+     *
+     * <p><b>★ 掛けない呼び出しも {@code null} を明示して通す。</b>省ける多重定義を置くと
+     * <b>ここが自分を呼ぶ形になり</b>、{@code assembleIsCalledOnlyByMainWindow} が
+     * <b>正しく赤くなる</b>（2026-09-15 実測）——<b>あの規則は「頼めるのは
+     * {@code MainWindow} だけ」を見ており、緩めるとここから頼む道が開く。</b>
+     *
+     * @param sources    元のファイルと、鍵の要るものについてはその鍵
+     * @param pages      書き出すページの指定
+     * @param output     書き出し先
+     * @param protection 掛ける保護。<b>{@code null} なら掛けない</b>
      * @return 途中で出た警告
      */
-    static List<Warning> assemble(Sources sources, List<PageSelection> pages, Path output) {
+    static List<Warning> assemble(Sources sources, List<PageSelection> pages, Path output, Protection protection) {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
@@ -86,7 +99,7 @@ final class DocumentWriter {
             //   書けているのに「失敗しました」と出す——呼ぶ側はそこで寄せ直しを飛ばすので、
             //   次の保存で同じ変換が二重に掛かる（#118）。
             try {
-                operations.assemble(sources, pages, workspace.file());
+                operations.assemble(sources, pages, workspace.file(), protection);
                 move(workspace.file(), output, workspace);
             } catch (RuntimeException | Error failed) {
                 // ★★ Error まで受ける。狭く書くと、退避が済んだ後に OutOfMemoryError が
