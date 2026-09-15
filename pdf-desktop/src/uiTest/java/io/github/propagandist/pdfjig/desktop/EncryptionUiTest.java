@@ -92,6 +92,8 @@ class EncryptionUiTest extends DesktopUiTest {
 
         // ★★ プリセットを外すと、束の中身が全部外れる（SPEC.md §6.2 の 2 段構成）。
         clickWhenReady(robot, "#encryption-allow-print");
+        // ★★ 詳細を開いても「保護して保存」は押せたままである。窓を測り直さないと、伸びたぶんが
+        //   窓の外へ出てボタンが消える（2026-09-15、CI windows で実測。EncryptionPrompt）。
         clickWhenReady(robot, "#encryption-details");
         waitFor(() ->
                 robot.lookup("#encryption-details").queryAs(TitledPane.class).isExpanded());

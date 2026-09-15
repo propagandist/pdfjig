@@ -96,6 +96,8 @@ final class EncryptionPrompt {
         TitledPane details = new TitledPane("詳細（8 つの権限）", detailPane);
         details.setId("encryption-details");
         details.setExpanded(false);
+        // ★ 畳み開きは即座に終わらせる。伸びきる前に窓を測り直すと、足りない高さで止まる。
+        details.setAnimated(false);
 
         VBox content = new VBox(
                 10,
@@ -120,6 +122,16 @@ final class EncryptionPrompt {
         dialog.getDialogPane().lookupButton(apply).setId("encryption-apply");
         dialog.getDialogPane().lookupButton(ButtonType.CANCEL).setId("encryption-cancel");
         dialog.setOnShown(event -> userPassword.requestFocus());
+
+        // ★★ 詳細を開いたら窓を測り直す。Dialog は一度出した後の大きさを測り直さないので、
+        //   伸びたぶんは窓の外へ出る——「保護して保存」が画面から消えて、押せなくなる。
+        //   2026-09-15 に CI（windows）で実測した：#encryption-apply が
+        //   「1 nodes, but no nodes were visible」で掴めなかった——TestFX は
+        //   節点が scene の矩形と重なるかを見る（NodeQueryUtils#isNodeWithinSceneBounds）。
+        //   ★ 畳むときも測り直す。開いたままの高さが残ると、下が空く。
+        details.expandedProperty()
+                .addListener((property, was, now) ->
+                        dialog.getDialogPane().getScene().getWindow().sizeToScene());
 
         // ★★ 押せない条件は 2 つ。① 確認が一致しない ② どちらの鍵も空である。
         //   ★ ② を通すと「保護した」と思わせながら誰でも開ける文書ができる（優先順位 2）。
