@@ -433,11 +433,15 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
         for (int index : contributing) {
             PdfDocument document = documents.get(index);
-            // ★★ 保護を掛けるなら言わない（#199 の門の 2 段目）。あの文言は
-            //   「出力されたファイルは保護されていません」で終わる——掛けた出力について
+            // ★★ 中身が隠れるなら言わない（#199 の門の 2 段目）。あの文言は
+            //   「出力されたファイルは保護されていません」で終わる——隠れた出力について
             //   それを言うと嘘になり、次に本当のときに読まれなくなる（優先順位 2）。
             //   ★ 引き継いでいないのは確かだが、利用者が受け取るのは保護された出力である。
-            if (protection == null && document.encrypted()) {
+            //   ★★ 「保護を掛けた」では足りない（#30 の門の 2 段目）。ユーザーパスワードが
+            //   空なら中身は暗号化されず、残るのは申告制の権限フラグだけである
+            //   （Protection#encryptsContent）——そこで黙ると、鍵の要る入力から
+            //   誰でも開ける出力ができたことを、告げる口が 1 つも無くなる。
+            if ((protection == null || !protection.encryptsContent()) && document.encrypted()) {
                 warnings.add(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {

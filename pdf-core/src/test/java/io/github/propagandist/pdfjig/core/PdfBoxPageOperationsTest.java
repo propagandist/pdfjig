@@ -1111,6 +1111,25 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("★★ ユーザーパスワードが空なら、中身は隠れない")
+        void doesNotEncryptContentWithoutAUserPassword() {
+            // ★★ 「保護を掛けた」と「中身が隠れる」は別である（SPEC.md §6.1）。
+            //   同じものとして扱うと、告げる側が黙る（warnAboutContributing）。
+            try (Password empty = Password.copyOf("");
+                    Password user = Password.copyOf(USER);
+                    Password owner = Password.copyOf("owner")) {
+                assertFalse(
+                        new Protection(empty, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256)
+                                .encryptsContent(),
+                        "鍵が空なのに中身が隠れると答えている");
+                assertTrue(
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256)
+                                .encryptsContent(),
+                        "鍵があるのに中身が隠れないと答えている");
+            }
+        }
+
+        @Test
         @DisplayName("書けない方式では、出力も残らない")
         void leavesNoOutputForAnUnsupportedAlgorithm() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
@@ -1177,6 +1196,30 @@ class PdfBoxPageOperationsTest {
             }
 
             assertFalse(seen.contains(Warning.ENCRYPTION_NOT_PROPAGATED), "保護を掛けたのに「保護されていません」と言っている");
+        }
+
+        @Test
+        @DisplayName("★★ 中身が隠れないなら、保護を掛けても警告する")
+        void stillWarnsWhenTheContentStaysReadable() throws Exception {
+            // ★★ ユーザーパスワードが空だと、出力の中身は暗号化されない（SPEC.md §6.1）。
+            //   残るのは申告制の権限フラグだけである。「保護を掛けたから黙る」にすると、
+            //   鍵の要る入力から誰でも開ける出力ができたことを、告げる口が 1 つも無くなる
+            //   ——画面も窓を出さない側へ倒れる（MainWindow#save。#30 の門の 2 段目）。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+            Path output = tempDir.resolve("owner-only.pdf");
+
+            List<Warning> seen = new ArrayList<>();
+            PageOperations watching = new PdfBoxPageOperations(seen::add);
+            try (Password user = Password.copyOf("");
+                    Password owner = Password.copyOf("owner")) {
+                watching.assemble(
+                        Sources.ofPaths(List.of(encrypted)),
+                        List.of(PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertTrue(seen.contains(Warning.ENCRYPTION_NOT_PROPAGATED), "中身は隠れていないのに、保護が落ちたことを伝えていない");
         }
 
         @Test

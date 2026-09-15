@@ -104,6 +104,21 @@ public final class Password implements AutoCloseable {
     }
 
     /**
+     * 空か。
+     *
+     * <p><b>★ 答えるのは長さが 0 かどうかだけである。</b>中身は返さないので、
+     * <b>この口は INV-5 の境界を作らない</b>——「鍵が設定されているか」は
+     * <b>画面が判断に使う</b>（{@link Protection#encryptsContent()}）。
+     *
+     * <p><b>★ 閉じた後も答える。</b>ゼロ埋めは長さを変えず、判定は中身を読まない。
+     *
+     * @return 空なら {@code true}
+     */
+    public boolean isEmpty() {
+        return value.length == 0;
+    }
+
+    /**
      * 中身。
      *
      * <p>パッケージプライベート。pdf-core の内部実装のみが使う（INV-5）。
