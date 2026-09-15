@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Protection;
 import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Source;
 import io.github.propagandist.pdfjig.core.Sources;
@@ -419,6 +420,9 @@ public final class MainWindow {
                         null,
                         this::splitIntoSinglePages,
                         notSplittable),
+                // ★ ツールバーには出さない。繰り返し使う操作ではなく、
+                //   ツールバーの文言は起動スモークとの契約でもある（desktop-ui.md）。
+                new Action("protect", "パスワードで保護して保存…", null, null, null, this::protectAndSave, editingBlocked),
                 // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
                 new Action("about", AppInfo.NAME + " について", null, null, null, this::showAbout, null));
     }
@@ -504,7 +508,44 @@ public final class MainWindow {
         dialogs.openPdf(readingFolder().orElse(null)).ifPresent(this::open);
     }
 
+    /** 名前を付けて書き出す。保護は掛けない。 */
     private void saveAs() {
+        save(false);
+    }
+
+    /**
+     * パスワードで保護して書き出す。
+     *
+     * <p><b>★★ 組み立てと保護が 1 回の書き出しで済む</b>（#199）——<b>平文は 1 バイトも
+     * ディスクに現れない。</b>{@code Encryption#protect} を通す形では、組み立てた平文が
+     * 一度作業場所へ落ちる（{@code SECURITY.md}「対象範囲」2 番目）。
+     */
+    private void protectAndSave() {
+        save(true);
+    }
+
+    /**
+     * 書き出す。<b>保護を掛けるかどうかだけが違う。</b>
+     *
+     * <p><b>★★ 2 本に分けない。</b>写せば<b>順序と後始末の理由が 2 か所に散る</b>——
+     * ここが持っているのは、<b>置き換えの検めを書き出しより前に置くこと</b>（#118）、
+     * <b>鍵を訊くのは {@code run} の直前であること</b>（INV-5）、
+     * <b>警告より先に寄せ直しを始めること</b>の 3 つで、<b>どれも片方だけ直すと壊れる。</b>
+     *
+     * <p><b>★ 保護を掛けるときは、落ちることを問う窓を出さない</b>（#192）。
+     * <b>出力は保護される</b>ので「保護は引き継がれません」は当たらず、
+     * <b>{@code pdf-core} 側の警告も保護を渡したときは出ない</b>（#199）。
+     * <b>引き継がれないのは「入力の鍵」であって、利用者が受け取るのは保護された出力である。</b>
+     *
+     * <p><b>★★ 保護したときは寄せ直さず、古い印を立てる</b>（{@link #markStale}）。
+     * <b>出力は保護されており、開き直すにはいま使った鍵が要る</b>——
+     * <b>鍵は書き出しが終わった時点で閉じている</b>（INV-5）。
+     * <b>もう一度訊いて開き直す形は採らない</b>：保存のたびに 2 度訊くことになり、
+     * <b>「開き直してください」のほうが短い。</b>
+     *
+     * @param protecting 保護を尋ねて掛けるか
+     */
+    private void save(boolean protecting) {
         if (session == null) {
             return;
         }
@@ -521,51 +562,79 @@ public final class MainWindow {
         int selected = thumbnails.selectedIndex();
         Path output = chosen.get();
 
-        // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
-        //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
-        int asked = saving.keyedContributors(pages).size();
-        if (!consentsToDroppingProtection(saving, pages)) {
+        // ★ 書き出し先を決めた後に訊く。先に訊くと、行き先を取り消しただけで打った鍵が捨てられる。
+        Optional<Protection> requested = protecting ? EncryptionPrompt.ask(stage) : Optional.empty();
+        if (protecting && requested.isEmpty()) {
             return;
         }
+        Protection protection = requested.orElse(null);
 
-        // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
-        //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
-        //   持ち主の決まっていない平文の鍵がそこに残る（INV-5）——渡せば向こうが必ず閉じる。
-        //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
-        Optional<Sources> keyed = askKeys(saving);
-        if (keyed.isEmpty()) {
-            return;
-        }
-        Sources inputs = keyed.get();
-        boolean started = run(
-                inputs,
-                () -> {
-                    // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
-                    boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
-                    return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output));
-                },
-                outcome -> {
-                    markSaved(saving, sources, pages);
-                    // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
-                    //   出ている間は入れ子のイベントループに入る——後ろに置くと、
-                    //   利用者が閉じるまで寄せ直しが始まらない。
-                    //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
-                    //   これは例外的な経路ではない。
-                    try {
-                        if (outcome.replacedASource()) {
-                            reopenAt(saving, sources, output, breaks, selected);
+        // ★★ 渡しきる前に降りたら、掛ける側の鍵はここで閉じる。まだ渡していないので持ち主はここである
+        //   （INV-5。askKeys と同じ規律）。渡した後の片づけは BackgroundTasks が持つ。
+        boolean handedOver = false;
+        try {
+            // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
+            //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
+            int asked = protecting ? 0 : saving.keyedContributors(pages).size();
+            if (!protecting && !consentsToDroppingProtection(saving, pages)) {
+                return;
+            }
+
+            // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
+            //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
+            //   持ち主の決まっていない平文の鍵がそこに残る（INV-5）——渡せば向こうが必ず閉じる。
+            //   取り消されたら何も書かない——ここまでに入力された鍵は askKeys が閉じている。
+            Optional<Sources> keyed = askKeys(saving);
+            if (keyed.isEmpty()) {
+                return;
+            }
+            Sources inputs = keyed.get();
+
+            // ★★ 入力の鍵と、掛ける側の鍵の両方を渡す。どちらも仕事の枠が閉じる。
+            List<Password> owned = new ArrayList<>(keysOf(inputs.all()));
+            if (protection != null) {
+                owned.addAll(protection.keys());
+            }
+
+            handedOver = true;
+            boolean started = run(
+                    owned,
+                    () -> {
+                        // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
+                        boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
+                        return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output, protection));
+                    },
+                    outcome -> {
+                        markSaved(saving, sources, pages);
+                        // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
+                        //   出ている間は入れ子のイベントループに入る——後ろに置くと、
+                        //   利用者が閉じるまで寄せ直しが始まらない。
+                        //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
+                        //   これは例外的な経路ではない。
+                        try {
+                            if (outcome.replacedASource()) {
+                                if (protecting) {
+                                    markStale();
+                                } else {
+                                    reopenAt(saving, sources, output, breaks, selected);
+                                }
+                            }
+                        } finally {
+                            // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
+                            //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
+                            //   必ず出る警告であり、例外的な経路ではない。
+                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), asked));
                         }
-                    } finally {
-                        // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
-                        //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
-                        //   必ず出る警告であり、例外的な経路ではない。
-                        messages.warnings(exceptWhatWasAsked(outcome.warnings(), asked));
-                    }
-                });
-        // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
-        // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。
-        if (started) {
-            folders.rememberWrittenFile(output);
+                    });
+            // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
+            // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。
+            if (started) {
+                folders.rememberWrittenFile(output);
+            }
+        } finally {
+            if (!handedOver && protection != null) {
+                protection.keys().forEach(Password::close);
+            }
         }
     }
 
@@ -1107,7 +1176,15 @@ public final class MainWindow {
      * Consumer, Consumer)}。#146 / #193）。
      */
     private <T> boolean run(Sources owned, Supplier<T> work, Consumer<T> onSucceeded) {
-        return tasks.run(keysOf(owned.all()), work, onSucceeded, messages::failure);
+        return run(keysOf(owned.all()), work, onSucceeded);
+    }
+
+    /**
+     * 鍵を抱えた仕事を頼む。<b>鍵の出どころが 1 つとは限らない経路のためにある</b>——
+     * 書き出しは<b>入力の鍵と、掛ける側の鍵の両方</b>を抱える（{@link #save}）。
+     */
+    private <T> boolean run(List<Password> owned, Supplier<T> work, Consumer<T> onSucceeded) {
+        return tasks.run(owned, work, onSucceeded, messages::failure);
     }
 
     /**
