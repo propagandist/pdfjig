@@ -3,6 +3,8 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.core.EncryptionAlgorithm;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.Protection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -193,21 +195,48 @@ final class EncryptionPrompt {
 
         dialog.setResultConverter(button -> {
             try {
-                // ★ 写し取りは Password の中で行う。素の char[] がここに出ない（INV-5）。
-                return button != apply
-                        ? null
-                        : new Protection(
-                                Password.copyOf(userPassword.getCharacters()),
-                                Password.copyOf(ownerPassword.getCharacters()),
-                                flags.permissions(),
-                                algorithm.getValue());
+                return button != apply ? null : protectionFrom(userPassword, ownerPassword, flags, algorithm);
             } finally {
-                // ★★ どの道を通っても消す。投げて出る道（Protection が方式を拒む）もここを通る。
+                // ★★ どの道を通っても欄を消す。投げて出る道もここを通る。
                 clear(userPassword, userConfirm, ownerPassword, ownerConfirm);
             }
         });
 
         return dialog.showAndWait();
+    }
+
+    /**
+     * 打たれたものから保護を組む。
+     *
+     * <p><b>★ 写し取りは {@link Password} の中で行う。</b>素の {@code char[]} がここに出ない（INV-5）。
+     *
+     * <p><b>★★ 渡しきる前に投げたら、そこまでに写し取った鍵を閉じる。</b>
+     * <b>{@code new Protection(...)} の引数の途中で投げる道が実際にある</b>——
+     * {@link Protection} は書けない方式を値の段で拒む（#199）。
+     * <b>そこを素通しにすると、持ち主の決まっていない平文の配列が残る</b>
+     * （{@code MainWindow#askKeys} と同じ規律。#135 / #144 / #145）。
+     * <b>いまは選ばせる方式に書けないものが無いので届かないが、届かないことに寄りかからない</b>
+     * ——<b>選択肢を 1 つ足した日に、静かに開く。</b>
+     */
+    private static Protection protectionFrom(
+            PasswordField userPassword,
+            PasswordField ownerPassword,
+            Flags flags,
+            ChoiceBox<EncryptionAlgorithm> algorithm) {
+        List<Password> taken = new ArrayList<>(2);
+        boolean handedOver = false;
+        try {
+            taken.add(Password.copyOf(userPassword.getCharacters()));
+            taken.add(Password.copyOf(ownerPassword.getCharacters()));
+            Protection protection =
+                    new Protection(taken.get(0), taken.get(1), flags.permissions(), algorithm.getValue());
+            handedOver = true;
+            return protection;
+        } finally {
+            if (!handedOver) {
+                taken.forEach(Password::close);
+            }
+        }
     }
 
     private static PasswordField passwordField(String id) {
