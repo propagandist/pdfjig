@@ -17,9 +17,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.ScrollPane.ScrollBarPolicy;
 import javafx.scene.control.TitledPane;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 /**
@@ -137,23 +135,17 @@ final class EncryptionPrompt {
                 details);
         content.setPadding(new Insets(12));
 
-        // ★★ 中身を流せるようにして、高さを画面の 6 割で止める。詳細を開いた高さが窓に
-        //   収まらないと、ボタン列は scene の外に置かれ、「保護して保存」が押せなくなる
-        //   ——2026-09-15 に CI（windows）で実測した：#encryption-apply が
+        // ★★ 伸びるぶんはここが飲む。詳細を開くと中身は伸びるが窓は伸びないので、
+        //   飲む場所が無いと下の「保護して保存」が窓の外へ押し出される
+        //   ——2026-09-15 / 16 に CI（windows）で 3 度実測した：#encryption-apply が
         //   「1 nodes, but no nodes were visible」で掴めない（TestFX が見るのは
         //   節点が scene の矩形と重なるかである。NodeQueryUtils#isNodeWithinSceneBounds）。
-        //   ★★ 開閉のたびに窓を測り直す形は採らない。Dialog は一度出した後の大きさを
-        //   測り直さないので sizeToScene が要るが、TitledPane の皮は窓が出てから作られるため
-        //   受け口の順が定まらず、runLater で後ろへ回すと今度は測り直しが打鍵と重なる
-        //   （2026-09-16 実測。どちらの形でも CI が赤いままだった）。
-        //   窓を動かさなければ、開いた直後に触れる節点の位置も動かない。
         //   ★ 縦だけ流す。横に流すと、折り返す注意文が読めなくなる。
         ScrollPane scroller = new ScrollPane(content);
         scroller.setFitToWidth(true);
         scroller.setHbarPolicy(ScrollBarPolicy.NEVER);
         // 枠と地色を消す。中身は窓そのものの続きであって、囲まれた別の面ではない。
         scroller.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
-        scroller.setMaxHeight(Screen.getPrimary().getVisualBounds().getHeight() * 0.6);
 
         ButtonType apply = new ButtonType("保護して保存", ButtonData.OK_DONE);
 
@@ -162,8 +154,13 @@ final class EncryptionPrompt {
         dialog.setTitle("パスワードで保護");
         dialog.getDialogPane().setId("encryption-dialog");
         dialog.getDialogPane().setContent(scroller);
-        // ★ 折り返した本文の高さは窓の大きさが決まった後にしか分からない（#124。Messages#show）。
-        dialog.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+        // ★★ ここに Region.USE_PREF_SIZE を置かない（#124 の Messages#show とは事情が違う）。
+        //   あれは「いちばん低くてもこの高さは要る」という指定なので、中身が伸びると
+        //   DialogPane が scene より高くなり、ボタン列が窓の下へはみ出す——これが上の
+        //   3 度の赤の正体だった（2026-09-16 実測。35037324528）。
+        //   ★ あちらに要るのは中身の高さが動かないからである。こちらは詳細の開閉で動く。
+        //   出したときの大きさは Dialog が中身に合わせて決めるので、畳んだ状態は
+        //   これまでどおり過不足なく収まる。
         dialog.setResizable(true);
         dialog.getDialogPane().getButtonTypes().addAll(apply, ButtonType.CANCEL);
         dialog.getDialogPane().lookupButton(apply).setId("encryption-apply");
