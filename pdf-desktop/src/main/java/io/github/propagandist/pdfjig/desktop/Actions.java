@@ -36,6 +36,7 @@ record Actions(
         Action add,
         Action split,
         Action splitPages,
+        Action protect,
         Action about) {
 
     /** メニューバーを組む。ここに全部の操作が出る。 */
@@ -55,7 +56,14 @@ record Actions(
                         clearBreaks.menuItem(),
                         new SeparatorMenuItem(),
                         reset.menuItem()),
-                new Menu("ツール", null, add.menuItem(), split.menuItem(), splitPages.menuItem()),
+                new Menu(
+                        "ツール",
+                        null,
+                        add.menuItem(),
+                        split.menuItem(),
+                        splitPages.menuItem(),
+                        new SeparatorMenuItem(),
+                        protect.menuItem()),
                 new Menu("ヘルプ", null, about.menuItem()));
     }
 

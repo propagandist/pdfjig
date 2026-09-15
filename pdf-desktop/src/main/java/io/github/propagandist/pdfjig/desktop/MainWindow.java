@@ -5,6 +5,7 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Protection;
 import io.github.propagandist.pdfjig.core.Rotation;
 import io.github.propagandist.pdfjig.core.Source;
 import io.github.propagandist.pdfjig.core.Sources;
@@ -419,6 +420,9 @@ public final class MainWindow {
                         null,
                         this::splitIntoSinglePages,
                         notSplittable),
+                // ★ ツールバーには出さない。繰り返し使う操作ではなく、
+                //   ツールバーの文言は起動スモークとの契約でもある（desktop-ui.md）。
+                new Action("protect", "パスワードで保護して保存…", null, null, null, this::protectAndSave, editingBlocked),
                 // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
                 new Action("about", AppInfo.NAME + " について", null, null, null, this::showAbout, null));
     }
@@ -653,6 +657,81 @@ public final class MainWindow {
                 //   投げれば飛んでいる失敗を置き換えるが、倒れる先は押せなくなる側なので受ける。
                 markStale();
             }
+        }
+    }
+
+    /**
+     * パスワードで保護して書き出す。
+     *
+     * <p><b>★★ 組み立てと保護が 1 回の書き出しで済む</b>（#199）——<b>平文は 1 バイトも
+     * ディスクに現れない。</b>{@code Encryption#protect} を通す形では、組み立てた平文が
+     * 一度作業場所へ落ちる（{@code SECURITY.md}「対象範囲」2 番目）。
+     *
+     * <p><b>★ 保護が落ちることを問う窓は出さない</b>（#192）。<b>出力は保護される</b>ので、
+     * 「保護は引き継がれません」は当たらない——{@code pdf-core} 側の警告も、
+     * 保護を渡したときは出ない（#199）。<b>引き継がれないのは「入力の鍵」であって、
+     * 利用者が受け取るのは保護された出力である。</b>
+     *
+     * <p><b>★★ 出どころを置き換えたら、寄せ直さずに古い印を立てる</b>（{@link #markStale}）。
+     * {@code saveAs} は寄せ直すが、<b>こちらの出力は保護されており、開き直すには
+     * いま使った鍵が要る</b>——<b>鍵は書き出しが終わった時点で閉じている</b>（INV-5）。
+     * <b>もう一度訊いて開き直す形は採らない</b>：保存のたびに 2 度訊くことになり、
+     * <b>「開き直してください」のほうが短い。</b>
+     */
+    private void protectAndSave() {
+        if (session == null) {
+            return;
+        }
+        Optional<Path> chosen = dialogs.savePdf(writingFolder().orElse(null), suggestedFileName());
+        if (chosen.isEmpty()) {
+            return;
+        }
+
+        DocumentSession saving = session;
+        List<Path> sources = saving.paths();
+        List<PageSelection> pages = saving.order().toPageSelections();
+        Path output = chosen.get();
+
+        Optional<Protection> asked = EncryptionPrompt.ask(stage);
+        if (asked.isEmpty()) {
+            return;
+        }
+        Protection protection = asked.get();
+
+        // ★★ 入力の鍵と、出力へ掛ける鍵の両方を渡す。どちらも仕事の枠が閉じる
+        //   （BackgroundTasks#run(List, …)）——ここには片づけを書く場所が無い。
+        //   ★ 取り消されたら、掛ける側の鍵はここで閉じる。まだ渡していないので持ち主はここである。
+        Optional<Sources> keyed = askKeys(saving);
+        if (keyed.isEmpty()) {
+            EncryptionPrompt.keysOf(protection).forEach(Password::close);
+            return;
+        }
+        Sources inputs = keyed.get();
+
+        List<Password> owned = new ArrayList<>(keysOf(inputs.all()));
+        owned.addAll(EncryptionPrompt.keysOf(protection));
+
+        boolean started = tasks.run(
+                owned,
+                () -> {
+                    boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
+                    return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output, protection));
+                },
+                outcome -> {
+                    markSaved(saving, sources, pages);
+                    try {
+                        if (outcome.replacedASource()) {
+                            markStale();
+                        }
+                    } finally {
+                        // ★ 保護は掛かったので、ENCRYPTION_NOT_PROPAGATED はそもそも出ない（#199）。
+                        //   ほかの警告（文書情報・署名）は落とさない。
+                        messages.warnings(outcome.warnings());
+                    }
+                },
+                messages::failure);
+        if (started) {
+            folders.rememberWrittenFile(output);
         }
     }
 

@@ -1,0 +1,230 @@
+package io.github.propagandist.pdfjig.desktop;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.github.propagandist.pdfjig.core.AccessPermissions;
+import io.github.propagandist.pdfjig.core.EncryptionAlgorithm;
+import io.github.propagandist.pdfjig.core.EncryptionInfo;
+import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.Password;
+import io.github.propagandist.pdfjig.core.PdfBoxEncryption;
+import io.github.propagandist.pdfjig.core.PdfDocument;
+import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.TestPdfs;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import javafx.scene.Node;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.TitledPane;
+import javafx.stage.Stage;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.testfx.api.FxRobot;
+import org.testfx.framework.junit5.Start;
+import org.testfx.framework.junit5.Stop;
+import org.testfx.util.WaitForAsyncUtils;
+
+/**
+ * パスワードと権限フラグを設定して書き出す経路（#30）。
+ *
+ * <p><b>★★ 書き出しを伴うので、出力ファイルを開き直して中身まで確かめる</b>
+ * （{@code .claude/rules/ui-tests.md}）——<b>画面の上で何かが変わったことだけを見ても、
+ * ファイルが正しい保証にはならない。</b>
+ *
+ * <p><b>★ 目視でしか判定できないものは、ここでは縛らない。</b>
+ * <b>オーナーパスワードのみのときの注意文が誤解を招かないか</b>と
+ * <b>詳細が畳んだ状態で邪魔にならないか</b>は人が見る（{@code docs/HANDOVER.md} 4-4）。
+ */
+class EncryptionUiTest extends DesktopUiTest {
+
+    private static final String USER = "correct-horse";
+
+    private static final String OWNER = "owner-key";
+
+    @Start
+    void start(Stage stage) {
+        setUp(stage);
+    }
+
+    @Stop
+    void stop() {
+        tearDown();
+    }
+
+    @Test
+    void 保護して保存すると鍵の要るファイルができる(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2"));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        Path output = protectTo(dir.resolve("protected.pdf"), robot);
+
+        // ★ 鍵なしでは開けない。画面が何を出したかではなく、出来たファイルを見る。
+        assertEquals(
+                ErrorCode.PASSWORD_REQUIRED,
+                assertThrows(PdfjigException.class, () -> PdfDocument.open(output))
+                        .errorCode());
+
+        try (Password user = Password.copyOf(USER);
+                PdfDocument written = PdfDocument.open(output, user)) {
+            assertEquals(2, written.pageCount());
+            assertTrue(written.encrypted(), "保護が掛かっていない");
+        }
+    }
+
+    @Test
+    void 既定は全部許可のAES256である(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        Path output = protectTo(dir.resolve("protected.pdf"), robot);
+
+        EncryptionInfo info;
+        try (Password user = Password.copyOf(USER)) {
+            info = new PdfBoxEncryption().inspect(output, user);
+        }
+        // 既定は AES-256（docs/SPEC.md §6.2）。
+        assertEquals(EncryptionAlgorithm.AES_256, info.algorithm());
+        assertEquals(AccessPermissions.all(), info.permissions(), "既定で何かを塞いでいる");
+    }
+
+    @Test
+    void 詳細を開いて権限を外すと出力に効く(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        Path output = dir.resolve("protected.pdf");
+        dialogs.willSaveTo(output);
+        protectFromMenu(robot);
+        waitForNode(robot, "#encryption-dialog");
+
+        // ★★ プリセットを外すと、束の中身が全部外れる（SPEC.md §6.2 の 2 段構成）。
+        clickWhenReady(robot, "#encryption-allow-print");
+        clickWhenReady(robot, "#encryption-details");
+        waitFor(() -> titledPane(robot, "#encryption-details").isExpanded());
+        assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "束を外したのに中身が残っている");
+        assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "束を外したのに中身が残っている");
+
+        // ★★ 支援技術のための複製は束に入っていない。塞ぐと視覚障害者が読めなくなる（§6.2）。
+        clickWhenReady(robot, "#encryption-allow-extract");
+        assertTrue(
+                checkBox(robot, "#encryption-flag-extract-accessibility").isSelected(), "テキスト抽出を外したら支援技術のための複製まで落ちている");
+
+        typeKeys(robot);
+        clickWhenReady(robot, "#encryption-apply");
+        waitFor(() -> Files.exists(output) && Files.size(output) > 0);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        EncryptionInfo info;
+        try (Password user = Password.copyOf(USER)) {
+            info = new PdfBoxEncryption().inspect(output, user);
+        }
+        assertFalse(info.permissions().print(), "外した権限が立っている");
+        assertFalse(info.permissions().extractContent(), "外した権限が立っている");
+        assertTrue(info.permissions().extractForAccessibility(), "支援技術のための複製まで塞いでいる");
+    }
+
+    @Test
+    void ユーザーパスワードが空なら申告制であることを出す(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        dialogs.willSaveTo(dir.resolve("protected.pdf"));
+        protectFromMenu(robot);
+        waitForNode(robot, "#encryption-dialog");
+
+        // ★★ 空のまま出ている。利用者はほぼ確実に「コピー禁止にしたから安全」と誤解する
+        //   （docs/SPEC.md §6.1）ので、何が起きるのかをそこに書く。
+        assertTrue(node(robot, "#encryption-owner-only-warning").isVisible(), "申告制であることを出していない");
+
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        // 入れれば本文が暗号化されるので、申告制という話は当たらなくなる。
+        waitFor(() -> !node(robot, "#encryption-owner-only-warning").isVisible());
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
+    void 確認が一致しなければ押せない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        dialogs.willSaveTo(dir.resolve("protected.pdf"));
+        protectFromMenu(robot);
+        waitForNode(robot, "#encryption-dialog");
+
+        // ★★ どちらの鍵も空なら押せない。通すと「保護した」と思わせながら誰でも開ける文書ができる。
+        assertTrue(button(robot, "#encryption-apply").isDisabled(), "鍵が空なのに押せる");
+
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        clickWhenReady(robot, "#encryption-user-password-confirm");
+        robot.write(USER + "-typo");
+        // ★★ 打ち間違えると、開けない文書ができあがる（docs/SPEC.md §6）。
+        assertTrue(button(robot, "#encryption-apply").isDisabled(), "確認が一致していないのに押せる");
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    // ── 補助 ────────────────────────────────────────────────────────────────
+
+    /** 既定のまま保護して書き出し、ファイルができるまで待つ。 */
+    private Path protectTo(Path output, FxRobot robot) throws Exception {
+        dialogs.willSaveTo(output);
+        protectFromMenu(robot);
+        waitForNode(robot, "#encryption-dialog");
+        typeKeys(robot);
+        clickWhenReady(robot, "#encryption-apply");
+        waitFor(() -> Files.exists(output) && Files.size(output) > 0);
+        WaitForAsyncUtils.waitForFxEvents();
+        return output;
+    }
+
+    /**
+     * ツールメニューから「パスワードで保護して保存…」を選ぶ。
+     *
+     * <p><b>★ ここだけは文言で掴む</b>（{@code .claude/rules/ui-tests.md}）——
+     * <b>{@code MenuItem} は {@code Node} ではなく、id では掴めない。</b>
+     * ツールバーには出していない操作なので（{@code MainWindow#buildActions}）、
+     * <b>画面から辿れる道はメニューだけである。</b>
+     *
+     * <p><b>★ 選べるようになるのを待つ。</b>「保護して保存」と「保存」は同じ
+     * {@code editingBlocked} で縛られており、<b>読み込みが走っている間に選んでも何も起きない。</b>
+     * 待たずに開くと「ダイアログが出てこない」形で落ち、原因が読めなくなる。
+     */
+    private void protectFromMenu(FxRobot robot) throws Exception {
+        waitFor(() -> !button(robot, "#tool-save").isDisabled());
+        robot.clickOn("ツール");
+        robot.clickOn("パスワードで保護して保存…");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /** 4 つの欄を埋める。確認の再入力まで含める（docs/SPEC.md §6）。 */
+    private void typeKeys(FxRobot robot) throws Exception {
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        clickWhenReady(robot, "#encryption-user-password-confirm");
+        robot.write(USER);
+        clickWhenReady(robot, "#encryption-owner-password");
+        robot.write(OWNER);
+        clickWhenReady(robot, "#encryption-owner-password-confirm");
+        robot.write(OWNER);
+    }
+
+    private static CheckBox checkBox(FxRobot robot, String id) {
+        return robot.lookup(id).queryAs(CheckBox.class);
+    }
+
+    private static TitledPane titledPane(FxRobot robot, String id) {
+        return robot.lookup(id).queryAs(TitledPane.class);
+    }
+
+    private static Node node(FxRobot robot, String id) {
+        return robot.lookup(id).query();
+    }
+}

@@ -1,0 +1,185 @@
+package io.github.propagandist.pdfjig.desktop;
+
+import io.github.propagandist.pdfjig.core.EncryptionAlgorithm;
+import io.github.propagandist.pdfjig.core.Password;
+import io.github.propagandist.pdfjig.core.Protection;
+import java.util.List;
+import java.util.Optional;
+import javafx.beans.binding.Bindings;
+import javafx.geometry.Insets;
+import javafx.scene.control.ButtonBar.ButtonData;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.ChoiceBox;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Label;
+import javafx.scene.control.PasswordField;
+import javafx.scene.control.TitledPane;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+
+/**
+ * パスワードと権限フラグを尋ねるダイアログ。
+ *
+ * <p><b>★★ 権限フラグは暗号学的に強制されない</b>（{@code docs/SPEC.md} §6.1）。
+ * <b>ユーザーパスワードが空なら PDF の中身は暗号化されておらず</b>、権限フラグは
+ * <b>閲覧ソフトが自主的に従っているだけの申告制である。</b>
+ * <b>利用者はほぼ確実に「コピー禁止にしたから安全」と誤解する</b>ので、
+ * <b>オーナーパスワードだけを設定しようとしたときに明示する</b>（同 §6.1 の要件）。
+ *
+ * <p><b>★ 出す条件は「ユーザーパスワードが空であること」だけにしてある——要件より広い。</b>
+ * <b>空のまま開いた時点で出ているので、権限フラグと同時に目に入る。</b>
+ * <b>オーナー欄に打ち始めてから出す形にすると、フラグを触っている間は見えない</b>
+ * ——<b>誤解が生まれるのはまさにそこである。</b>
+ *
+ * <p><b>★★ 禁じはしない。</b>既存の文書に合わせる用途を塞ぐことになる——
+ * <b>禁止ではなく、何が起きるかを書く</b>（#30 の却下した案）。
+ *
+ * <p><b>2 段構成である</b>（同 §6.2）。<b>3 つに束ねたプリセットを先に見せ、
+ * 8 フラグの詳細は畳んでおく</b>——<b>8 つ並べると、どれが実効性を持つのかが
+ * かえって分からなくなる</b>（#30）。
+ *
+ * <p><b>★ 確認用の再入力欄を置く</b>（同 §6）。<b>打ち間違えると、開けない文書ができあがる。</b>
+ *
+ * <p><b>既知の限界:</b> JavaFX の {@link PasswordField} は入力を {@code String} で保持しており、
+ * pdfjig 側からこれを消す手段はない（{@link PasswordPrompt} と同じ）。
+ */
+final class EncryptionPrompt {
+
+    private EncryptionPrompt() {}
+
+    /**
+     * 保護の指定を尋ねる。
+     *
+     * <p><b>返された {@link Protection} が抱える鍵は、呼び出し側が閉じる</b>
+     * ——<b>作った場所が持ち主である</b>（{@code CLAUDE.md} INV-5）。
+     * <b>書き出しへ渡すなら枠ごと渡すこと</b>（{@code BackgroundTasks#run(List, …)}）。
+     *
+     * @param owner 親ウィンドウ
+     * @return 入力された指定。取り消された場合は空
+     */
+    static Optional<Protection> ask(Stage owner) {
+        PasswordField userPassword = passwordField("encryption-user-password");
+        PasswordField userConfirm = passwordField("encryption-user-password-confirm");
+        PasswordField ownerPassword = passwordField("encryption-owner-password");
+        PasswordField ownerConfirm = passwordField("encryption-owner-password-confirm");
+
+        Flags flags = new Flags();
+
+        Label ownerOnly =
+                new Label("この設定は閲覧ソフトの自主的な遵守に依存します。" + System.lineSeparator() + "確実に保護するにはユーザーパスワードを設定してください。");
+        ownerOnly.setId("encryption-owner-only-warning");
+        ownerOnly.setWrapText(true);
+        // ★★ ユーザーパスワードが空のときだけ出す。空でなければ本文が暗号化されるので、
+        //   権限フラグの申告制という話は当たらない（SPEC.md §6.1 の表）。
+        ownerOnly.visibleProperty().bind(userPassword.textProperty().isEmpty());
+        ownerOnly.managedProperty().bind(ownerOnly.visibleProperty());
+
+        ChoiceBox<EncryptionAlgorithm> algorithm = new ChoiceBox<>();
+        algorithm.setId("encryption-algorithm");
+        // ★ 書ける方式だけを出す。NONE と UNKNOWN は「読んだ結果」を表す値であり、
+        //   Protection を作るところで拒まれる（#199）。
+        algorithm
+                .getItems()
+                .setAll(
+                        EncryptionAlgorithm.AES_256,
+                        EncryptionAlgorithm.AES_128,
+                        EncryptionAlgorithm.RC4_128,
+                        EncryptionAlgorithm.RC4_40);
+        // 既定は AES-256（SPEC.md §6.2）。RC4 系と AES-128 は互換性が要るときだけの選択肢である。
+        algorithm.getSelectionModel().select(EncryptionAlgorithm.AES_256);
+
+        TitledPane details = new TitledPane("詳細（8 つの権限）", flags.detailPane(algorithm));
+        details.setId("encryption-details");
+        details.setExpanded(false);
+
+        VBox content = new VBox(
+                10,
+                new Label("書き出すファイルにパスワードを設定します。"),
+                passwordGrid(userPassword, userConfirm, ownerPassword, ownerConfirm),
+                ownerOnly,
+                flags.presetBox(),
+                details);
+        content.setPadding(new Insets(12));
+
+        ButtonType apply = new ButtonType("保護して保存", ButtonData.OK_DONE);
+
+        Dialog<Protection> dialog = new Dialog<>();
+        dialog.initOwner(owner);
+        dialog.setTitle("パスワードで保護");
+        dialog.getDialogPane().setId("encryption-dialog");
+        dialog.getDialogPane().setContent(content);
+        // ★ 折り返した本文の高さは窓の大きさが決まった後にしか分からない（#124。Messages#show）。
+        dialog.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+        dialog.setResizable(true);
+        dialog.getDialogPane().getButtonTypes().addAll(apply, ButtonType.CANCEL);
+        dialog.getDialogPane().lookupButton(apply).setId("encryption-apply");
+        dialog.getDialogPane().lookupButton(ButtonType.CANCEL).setId("encryption-cancel");
+        dialog.setOnShown(event -> userPassword.requestFocus());
+
+        // ★★ 押せない条件は 2 つ。① 確認が一致しない ② どちらの鍵も空である。
+        //   ★ ② を通すと「保護した」と思わせながら誰でも開ける文書ができる（優先順位 2）。
+        dialog.getDialogPane()
+                .lookupButton(apply)
+                .disableProperty()
+                .bind(Bindings.createBooleanBinding(
+                        () -> !userPassword.getText().equals(userConfirm.getText())
+                                || !ownerPassword.getText().equals(ownerConfirm.getText())
+                                || (userPassword.getText().isEmpty()
+                                        && ownerPassword.getText().isEmpty()),
+                        userPassword.textProperty(),
+                        userConfirm.textProperty(),
+                        ownerPassword.textProperty(),
+                        ownerConfirm.textProperty()));
+
+        dialog.setResultConverter(button -> {
+            if (button != apply) {
+                clear(userPassword, userConfirm, ownerPassword, ownerConfirm);
+                return null;
+            }
+            // ★ 写し取りは Password の中で行う。素の char[] がここに出ない（INV-5）。
+            Protection protection = new Protection(
+                    Password.copyOf(userPassword.getCharacters()),
+                    Password.copyOf(ownerPassword.getCharacters()),
+                    flags.permissions(),
+                    algorithm.getValue());
+            clear(userPassword, userConfirm, ownerPassword, ownerConfirm);
+            return protection;
+        });
+
+        return dialog.showAndWait();
+    }
+
+    /** 保護が抱えている鍵。閉じるのは仕事へ渡す側である。 */
+    static List<Password> keysOf(Protection protection) {
+        return List.of(protection.userPassword(), protection.ownerPassword());
+    }
+
+    private static PasswordField passwordField(String id) {
+        PasswordField field = new PasswordField();
+        field.setId(id);
+        return field;
+    }
+
+    private static GridPane passwordGrid(
+            PasswordField userPassword,
+            PasswordField userConfirm,
+            PasswordField ownerPassword,
+            PasswordField ownerConfirm) {
+        GridPane grid = new GridPane();
+        grid.setHgap(8);
+        grid.setVgap(6);
+        grid.addRow(0, new Label("ユーザーパスワード（開くとき）"), userPassword);
+        grid.addRow(1, new Label("　同じものをもう一度"), userConfirm);
+        grid.addRow(2, new Label("オーナーパスワード（権限を変えるとき）"), ownerPassword);
+        grid.addRow(3, new Label("　同じものをもう一度"), ownerConfirm);
+        return grid;
+    }
+
+    private static void clear(PasswordField... fields) {
+        for (PasswordField field : fields) {
+            field.clear();
+        }
+    }
+}
