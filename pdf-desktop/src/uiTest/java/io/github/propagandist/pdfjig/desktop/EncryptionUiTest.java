@@ -139,6 +139,26 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     @Test
+    void オーナーパスワードが空なら権限が効かないことを出す(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        // ★★ PDFBox は空のオーナーパスワードをユーザーパスワードで埋める
+        //   （StandardSecurityHandler#prepareDocumentForEncryption。2026-09-15 実測）。
+        //   開けた人がオーナー権限を持つので、外した権限フラグは規約どおりの閲覧ソフトでも無視される。
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        waitFor(() -> node(robot, "#encryption-no-owner-warning").isVisible());
+
+        clickWhenReady(robot, "#encryption-owner-password");
+        robot.write(OWNER);
+        // 入れれば権限の鍵が別になるので、この話は当たらなくなる。
+        waitFor(() -> !node(robot, "#encryption-no-owner-warning").isVisible());
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
     void 束を付け直すと中身が全部戻る(@TempDir Path dir, FxRobot robot) throws Exception {
         openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
 
@@ -159,6 +179,30 @@ class EncryptionUiTest extends DesktopUiTest {
         assertTrue(checkBox(robot, "#encryption-allow-modify").isSelected(), "中身は全部立っているのに束が外れている");
 
         clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
+    void 鍵の要る入力を中身が隠れない形で書き出すなら問う(@TempDir Path dir, FxRobot robot) throws Exception {
+        // ★★ ユーザーパスワードを空にすると、出力の中身は暗号化されない（docs/SPEC.md §6.1）。
+        //   鍵の要る入力が、誰でも開ける出力になる——「保護を掛けたから黙る」にすると、
+        //   窓も出ず pdf-core の警告も出ない形で、それが静かに起きる。
+        Path fixture = TestPdfs.encrypted(dir.resolve("locked.pdf"), USER, 1);
+        openProtectedFixture(robot, fixture, USER);
+
+        dialogs.willSaveTo(dir.resolve("owner-only.pdf"));
+        protectFromMenu(robot);
+        waitForNode(robot, "#encryption-dialog");
+
+        clickWhenReady(robot, "#encryption-owner-password");
+        robot.write(OWNER);
+        clickWhenReady(robot, "#encryption-owner-password-confirm");
+        robot.write(OWNER);
+        clickWhenReady(robot, "#encryption-apply");
+
+        // 保護が落ちることを伝える窓が出る（#29 / #192 と同じ口）。
+        waitForNode(robot, "#protection-dialog");
+        clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
     }
 

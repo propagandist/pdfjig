@@ -31,6 +31,13 @@ import javafx.stage.Stage;
  * <b>オーナー欄に打ち始めてから出す形にすると、フラグを触っている間は見えない</b>
  * ——<b>誤解が生まれるのはまさにそこである。</b>
  *
+ * <p><b>★★ 逆向きの穴も告げる。</b><b>オーナーパスワードが空だと、PDFBox は
+ * ユーザーパスワードをそのままオーナーパスワードとして書く</b>
+ * （{@code StandardSecurityHandler#prepareDocumentForEncryption}。2026-09-15 実測）——
+ * <b>文書を開けた人がオーナー権限を持つので、外した権限フラグは
+ * 規約どおりの閲覧ソフトでも無視される。</b>
+ * <b>これも禁じず、何が起きるかを書く</b>（同じ理由）。
+ *
  * <p><b>★★ 禁じはしない。</b>既存の文書に合わせる用途を塞ぐことになる——
  * <b>禁止ではなく、何が起きるかを書く</b>（#30 の却下した案）。
  *
@@ -74,6 +81,22 @@ final class EncryptionPrompt {
         ownerOnly.visibleProperty().bind(userPassword.textProperty().isEmpty());
         ownerOnly.managedProperty().bind(ownerOnly.visibleProperty());
 
+        Label noOwner = new Label(
+                "オーナーパスワードが空のときは、ユーザーパスワードがそのまま権限の鍵になります。" + System.lineSeparator() + "文書を開けた人は権限も変更できるため、上の設定は効きません。");
+        noOwner.setId("encryption-no-owner-warning");
+        noOwner.setWrapText(true);
+        // ★★ PDFBox は空のオーナーパスワードをユーザーパスワードで埋める
+        //   （StandardSecurityHandler#prepareDocumentForEncryption。3.0.8 の実装を読んで確かめた。
+        //   2026-09-15 実測）——開けた人がオーナー権限を持つので、外した権限フラグは
+        //   規約どおりの閲覧ソフトでも無視される。★ 中身が隠れているかとは別の話なので、
+        //   上の注意とは別に出す。両方が同時に当たることは無い（あちらはユーザー側が空のとき）。
+        noOwner.visibleProperty()
+                .bind(ownerPassword
+                        .textProperty()
+                        .isEmpty()
+                        .and(userPassword.textProperty().isNotEmpty()));
+        noOwner.managedProperty().bind(noOwner.visibleProperty());
+
         ChoiceBox<EncryptionAlgorithm> algorithm = new ChoiceBox<>();
         algorithm.setId("encryption-algorithm");
         // ★ 書ける方式だけを出す。NONE と UNKNOWN は「読んだ結果」を表す値であり、
@@ -104,6 +127,7 @@ final class EncryptionPrompt {
                 new Label("書き出すファイルにパスワードを設定します。"),
                 passwordGrid(userPassword, userConfirm, ownerPassword, ownerConfirm),
                 ownerOnly,
+                noOwner,
                 flags.presetBox(),
                 details);
         content.setPadding(new Insets(12));

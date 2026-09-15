@@ -575,8 +575,13 @@ public final class MainWindow {
         try {
             // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
             //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
-            int asked = protecting ? 0 : saving.keyedContributors(pages).size();
-            if (!protecting && !consentsToDroppingProtection(saving, pages)) {
+            //   ★★ 問わずに済むのは「中身が隠れる」ときだけである（#30 の門の 2 段目）。
+            //   「保護を掛けた」で分けると、ユーザーパスワードを空にした回に穴が開く——
+            //   出力の中身は暗号化されず、残るのは申告制の権限フラグだけなのに、
+            //   窓も出ず pdf-core の警告も出ない。鍵の要る入力が、誰でも開ける出力になる。
+            boolean hidden = protection != null && protection.encryptsContent();
+            int asked = hidden ? 0 : saving.keyedContributors(pages).size();
+            if (!hidden && !consentsToDroppingProtection(saving, pages)) {
                 return;
             }
 
