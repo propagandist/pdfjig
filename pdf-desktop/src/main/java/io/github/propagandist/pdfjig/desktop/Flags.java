@@ -58,7 +58,11 @@ final class Flags {
         //   ★ 片道にしない。外すだけにすると、印刷を戻した人の手元で高品質だけが
         //   落ちたままになる——本人が外していない権限が黙って残る（#30 の門の 2 段目）。
         printHighQuality.disableProperty().bind(print.selectedProperty().not());
-        print.selectedProperty().addListener((property, was, now) -> printHighQuality.setSelected(now));
+        print.selectedProperty().addListener((property, was, now) -> {
+            if (!now) {
+                printHighQuality.setSelected(false);
+            }
+        });
         allowPrint = preset("encryption-allow-print", "印刷を許可", List.of(print, printHighQuality));
         allowExtract = preset("encryption-allow-extract", "テキスト抽出を許可", List.of(extractContent));
         allowModify = preset(

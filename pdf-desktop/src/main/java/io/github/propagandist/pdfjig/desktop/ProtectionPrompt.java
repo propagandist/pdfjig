@@ -73,7 +73,7 @@ final class ProtectionPrompt {
         //   出どころの名前を並べるので、本文の長さが入力で決まる側である。
         alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
         alert.setResizable(true);
-        alert.setTitle(outcome.titleText);
+        alert.setTitle("保護は引き継がれません");
         alert.setHeaderText(headerFor(dropping, outcome));
         alert.getDialogPane().setId("protection-dialog");
         alert.getDialogPane().setContent(body(dropping, outcome));
@@ -124,7 +124,7 @@ final class ProtectionPrompt {
                 "ユーザーパスワードが空なので、書き出すファイルは誰でも開けます",
                 "オーナーパスワードと権限の設定は出力へ載りますが、権限は閲覧ソフトの自主的な遵守に依存します。" + System.lineSeparator()
                         + "開くときにパスワードが要るようにするには、ユーザーパスワードを設定してください。",
-                "このまま書き出す",
+                "保護を外して書き出す",
                 Warning.CONTENT_OPENS_WITHOUT_A_KEY);
 
         /** 窓の題。<b>固定しない</b>——保護を掛けている最中に「引き継がれません」と出る。 */

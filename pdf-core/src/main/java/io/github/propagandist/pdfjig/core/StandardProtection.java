@@ -89,7 +89,7 @@ final class StandardProtection {
         permission.setCanFillInForm(permissions.fillForms());
         permission.setCanAssembleDocument(permissions.assembleDocument());
         permission.setCanExtractForAccessibility(permissions.extractForAccessibility());
-        permission.setCanPrintFaithful(permissions.printHighQuality() && permissions.print());
+        permission.setCanPrintFaithful(permissions.printHighQuality());
         return permission;
     }
 }
