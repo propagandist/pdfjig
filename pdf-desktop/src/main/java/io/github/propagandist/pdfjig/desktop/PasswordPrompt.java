@@ -21,8 +21,14 @@ import javafx.stage.Stage;
  * 保持しており、pdfjig 側からこれを消す手段はない。この {@code String} は GC されるまで
  * ヒープに残る。{@link Password} への写し取りと入力欄の消去はここで行うが、
  * {@link PasswordField} 内部の複製までは追えない。JavaFX の実装に踏み込まずに
- * 回避する方法はないため、生成箇所をこの 1 か所に閉じて影響範囲を限っている
- * （CLAUDE.md INV-5）。
+ * 回避する方法はない（CLAUDE.md INV-5）。
+ *
+ * <p><b>★ 生成箇所は 2 つある。</b>ここと {@link EncryptionPrompt} で、
+ * <b>後者は #30 で足した</b>——<b>「この 1 か所に閉じている」と書いてあったが、
+ * その日から誤りになっていた</b>（{@code CLAUDE.md}「確かめていないことを、
+ * 確かめたように書かない」）。<b>写し取りと消去の作法はどちらも同じ形にしてある</b>
+ * ——{@code Password.copyOf(getCharacters())} で写し、{@code finally} で欄を消す。
+ * <b>3 つ目を作るなら、そのとき初めて 1 か所へ寄せる</b>。
  */
 final class PasswordPrompt {
 
