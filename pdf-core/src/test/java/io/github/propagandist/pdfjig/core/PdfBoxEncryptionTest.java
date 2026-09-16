@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -289,5 +290,19 @@ class PdfBoxEncryptionTest {
             assertFalse(rendered.contains("まったく違う"), "入力したパスワードが露出している");
             assertFalse(rendered.contains("org.apache.pdfbox"), "PDFBox のフレームが残っている");
         }
+    }
+
+    @Test
+    @DisplayName("★★ 書ける方式の並びは宣言順であり、先頭は既定ではない")
+    void writableIsInDeclarationOrderAndDoesNotLeadWithTheDefault() {
+        // ★★ 「先頭を選ぶ」と書くと 40 ビットの RC4 が既定になる（2026-09-16 実測。
+        //   画面で実際にそうなり、CI の uiTest が捕まえた）。選ぶ側は名前で指定すること。
+        assertEquals(
+                List.of(
+                        EncryptionAlgorithm.RC4_40,
+                        EncryptionAlgorithm.RC4_128,
+                        EncryptionAlgorithm.AES_128,
+                        EncryptionAlgorithm.AES_256),
+                EncryptionAlgorithm.writable());
     }
 }

@@ -127,8 +127,10 @@ final class EncryptionPrompt {
         });
         // ★ 並びは手で写さない。書ける方式が増えた日に、ここだけが黙って古いまま残る。
         algorithm.getItems().setAll(EncryptionAlgorithm.writable());
-        // 既定は先頭（SPEC.md §6.2 の AES-256）。RC4 系と AES-128 は互換性が要るときだけである。
-        algorithm.getSelectionModel().selectFirst();
+        // ★ 既定は名前で指定する（SPEC.md §6.2）。並びの先頭ではない
+        //   ——あちらは弱いほうから並んでおり、selectFirst だと RC4-40 になる（2026-09-16 実測）。
+        //   RC4 系と AES-128 は互換性が要るときだけの選択肢である。
+        algorithm.getSelectionModel().select(EncryptionAlgorithm.AES_256);
 
         // ★ 方式の選択は「8 つの権限」ではない。ここで組む——Flags へ渡すと、
         //   詳細に何が入るのかが 2 つのファイルに分かれる。
