@@ -75,7 +75,7 @@ public record Protection(
      * （INV-5。#135 / #144 / #145 で 3 度破れたのと同じ類型である）。
      * <b>1 つの正本から引けば、書き忘れる場所が無い。</b>
      * ★ <b>入力の側は {@code MainWindow#keysOf(List)} が同じことをしている</b>——
-     * <b>あちらを {@code Sources} へ下ろすのは #207 が持つ。</b>
+     * <b>あちらを {@code Sources} へ下ろすのは #208 が持つ。</b>
      *
      * <p><b>★ 閉じるのは持ち主である。</b>ここが返すのは読むための並びであって、
      * <b>持ち主が移るわけではない</b>（{@code BackgroundTasks#run(List, …)} へ渡すと、あそこが持つ）。
