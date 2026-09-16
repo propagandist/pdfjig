@@ -2,8 +2,10 @@ package io.github.propagandist.pdfjig.core;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,6 +77,30 @@ class PasswordTest {
         try (Password password = Password.copyOf("")) {
             assertEquals(0, password.value().length);
         }
+    }
+
+    @Test
+    @DisplayName("空かどうかを答える")
+    void tellsWhetherItIsEmpty() {
+        try (Password empty = Password.copyOf("");
+                Password filled = Password.copyOf(SECRET)) {
+            assertTrue(empty.isEmpty());
+            assertFalse(filled.isEmpty());
+        }
+    }
+
+    @Test
+    @DisplayName("★★ 閉じた後も空かどうかは答える")
+    void stillTellsWhetherItIsEmptyAfterClosing() {
+        // ★★ value() と違って投げない。ゼロ埋めは長さを変えず、判定は中身を読まない
+        //   ——ここへ検査を足すと、書き出しの裏で読む側が落ちる（Protection#userPasswordRequired）。
+        Password empty = Password.copyOf("");
+        Password filled = Password.copyOf(SECRET);
+        empty.close();
+        filled.close();
+
+        assertTrue(empty.isEmpty(), "閉じたら空かどうかを答えなくなった");
+        assertFalse(filled.isEmpty(), "ゼロ埋めで長さまで変わっている");
     }
 
     @Test

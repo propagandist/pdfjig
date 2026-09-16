@@ -1,5 +1,8 @@
 package io.github.propagandist.pdfjig.core;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * 暗号化の方式。
  *
@@ -48,4 +51,40 @@ public enum EncryptionAlgorithm {
     // ★ 鍵の長さも AES かどうかも、ここには持たせない。NONE と UNKNOWN が同じ値を返す形になり、
     //   「混ぜるな」と書いた隣で 2 つが同値になる。方式を方針へ当てるのは
     //   PdfBoxEncryption の網羅的な switch である——書ける方式が増えた日にコンパイラが知らせる。
+
+    /**
+     * 書き出しに指定できる方式。<b>並びは宣言の順（弱いほうから）である。</b>
+     *
+     * <p><b>★★ 先頭は既定ではない。</b>既定は AES-256（{@code docs/SPEC.md} §6.2）であり、
+     * <b>ここでは最後に並ぶ</b>——<b>「先頭を選ぶ」と書くと 40 ビットの RC4 が既定になる</b>
+     * （<b>2026-09-16 実測</b>。CI の uiTest が捕まえた）。<b>選ぶ側が名前で指定すること。</b>
+     *
+     * <p><b>★★ 選ばせる側が数え上げないためにある。</b>画面で並びを手で写すと、
+     * <b>方式を 1 つ足した日に、方針の場所も見せ方もコンパイラが知らせるのに、
+     * 選べる並びだけが黙って古いまま残る</b>（#30 の門の 1 段目）。
+     *
+     * <p><b>★★ {@code switch} は式で組む。</b>値が増えたらここがコンパイルで落ちる
+     * ——<b>文の {@code switch} だと落ちない。</b>Java 21 は enum を選択子に取る文の
+     * {@code switch} に網羅性を求めない（<b>2026-09-16 実測</b>。定数を 1 つ足しても
+     * {@code -Xlint:all -Werror} が通った）——<b>初めは文で書いており、
+     * この註のほうが偽だった</b>（#30 の門の 2 段目）。
+     *
+     * @return 書ける方式。{@link #NONE} と {@link #UNKNOWN} は入らない
+     */
+    public static List<EncryptionAlgorithm> writable() {
+        return WRITABLE;
+    }
+
+    /**
+     * 並びは一度だけ組む。{@code values()} は呼ぶたび配列を複製する。
+     *
+     * <p><b>★ 手で {@code List.of(…)} と書かない。</b>それだとコンパイラの検査が消える。
+     */
+    private static final List<EncryptionAlgorithm> WRITABLE = Arrays.stream(values())
+            .filter(algorithm -> switch (algorithm) {
+                case AES_256, AES_128, RC4_128, RC4_40 -> true;
+                // 読んだ結果を表す値であり、掛ける側にはならない（Protection が拒む。#199）。
+                case NONE, UNKNOWN -> false;
+            })
+            .toList();
 }

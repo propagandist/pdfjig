@@ -4,7 +4,7 @@ package io.github.propagandist.pdfjig.core;
  * 権限フラグ。
  *
  * <p><b>★★ これは暗号学的に強制されない</b>（{@code docs/SPEC.md} §6.1）。
- * ユーザーパスワードが空なら PDF の中身は暗号化されておらず、<b>閲覧ソフトが自主的に
+ * ユーザーパスワードが空なら<b>出力は誰でも開ける</b>ので、<b>閲覧ソフトが自主的に
  * 従っているだけの申告制である。</b>PDFBox を含む任意のライブラリで無視できる。
  *
  * <p><b>pdfjig 自身も、抽出を禁じる設定を無視して抽出する</b>（§6.1.1）——
@@ -17,7 +17,12 @@ package io.github.propagandist.pdfjig.core;
  * @param fillForms               フォームへの入力
  * @param assembleDocument        ページの挿入・削除・回転
  * @param extractForAccessibility 支援技術のための複製。<b>既定で許可する</b>
- * @param printHighQuality        高品質での印刷
+ * @param printHighQuality        高品質での印刷。<b>印刷を許しているときしか意味を持たない</b>
+ *                                （PDF 32000-1 の表 22。ビット 12 はビット 3 を修飾する）。
+ *                                <b>★★ ここでは揃えない</b>——<b>この型は読んだ結果を返す側でも使う</b>
+ *                                （{@link PdfDocument#encryption()}の「権限は素の {@code /P} を読む」）ので、
+ *                                <b>揃えると文書が書いていることを告げられなくなる。</b>
+ *                                <b>掛ける側で揃える</b>（{@code StandardProtection}）
  */
 public record AccessPermissions(
         boolean print,

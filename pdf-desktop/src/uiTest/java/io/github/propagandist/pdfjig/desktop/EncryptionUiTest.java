@@ -16,9 +16,11 @@ import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.TitledPane;
+import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -130,7 +132,7 @@ class EncryptionUiTest extends DesktopUiTest {
 
         clickWhenReady(robot, "#encryption-user-password");
         robot.write(USER);
-        // 入れれば本文が暗号化されるので、申告制という話は当たらなくなる。
+        // 入れれば開くのに鍵が要るので、申告制という話は当たらなくなる。
         waitFor(() -> !node(robot, "#encryption-owner-only-warning").isVisible());
 
         clickWhenReady(robot, "#encryption-cancel");
@@ -152,6 +154,53 @@ class EncryptionUiTest extends DesktopUiTest {
         robot.write(OWNER);
         // 入れれば権限の鍵が別になるので、この話は当たらなくなる。
         waitFor(() -> !node(robot, "#encryption-no-owner-warning").isVisible());
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
+    void 両方に同じ鍵を打っても権限が効かないことを出す(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        // ★★ 読む側は isOwnerPassword を先に試す（StandardSecurityHandler
+        //   #prepareDocumentForDecryption。3.0.8 の実装を読んで確かめた）。
+        //   同じ文字列なら、渡した 1 つの鍵でオーナー扱いになる
+        //   ——空のときだけを見る形だと、こちらが素通りする。
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        clickWhenReady(robot, "#encryption-owner-password");
+        robot.write(USER);
+        waitFor(() -> node(robot, "#encryption-no-owner-warning").isVisible());
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
+    void 印刷を外すと高品質も落ちて押せなくなる(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        clickWhenReady(robot, "#encryption-details");
+        waitFor(() ->
+                robot.lookup("#encryption-details").queryAs(TitledPane.class).isExpanded());
+
+        // ★★ 高品質の印刷は、印刷を許しているときしか意味を持たない（PDF 32000-1 の表 22）。
+        //   チェックを残したままにできると、画面は「高品質で印刷できる」と言いながら
+        //   出力は印刷を一切許さない（優先順位 2）。
+        // ★★ 束ではなく、印刷そのものを外す。束を押すと中身を 2 つとも外すので、
+        //   「印刷を外したら高品質も落ちる」仕掛けを消しても赤くならない。
+        //   ★ 押さずに、焦点を送って空白で切り替える——詳細の中は流れるので、
+        //   座標で押すと流れた先の節点に当たる（2026-09-16 実測。CI windows）。
+        toggle(robot, "#encryption-flag-print");
+        assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "印刷が外れていない");
+        assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を外したのに高品質が残っている");
+        assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を外したのに高品質を押せる");
+
+        // ★★ 戻したら戻る。外すだけにすると、本人が外していない権限が黙って残る。
+        toggle(robot, "#encryption-flag-print");
+        assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を戻したのに高品質が落ちたままである");
+        assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を戻したのに高品質を押せない");
 
         clickWhenReady(robot, "#encryption-cancel");
         WaitForAsyncUtils.waitForFxEvents();
@@ -182,8 +231,8 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     @Test
-    void 鍵の要る入力を中身が隠れない形で書き出すなら問う(@TempDir Path dir, FxRobot robot) throws Exception {
-        // ★★ ユーザーパスワードを空にすると、出力の中身は暗号化されない（docs/SPEC.md §6.1）。
+    void 鍵の要る入力を誰でも開ける形で書き出すなら問う(@TempDir Path dir, FxRobot robot) throws Exception {
+        // ★★ ユーザーパスワードを空にすると、出力は誰でも開ける（docs/SPEC.md §6.1）。
         //   鍵の要る入力が、誰でも開ける出力になる——「保護を掛けたから黙る」にすると、
         //   窓も出ず pdf-core の警告も出ない形で、それが静かに起きる。
         Path fixture = TestPdfs.encrypted(dir.resolve("locked.pdf"), USER, 1);
@@ -201,6 +250,11 @@ class EncryptionUiTest extends DesktopUiTest {
 
         // 保護が落ちることを伝える窓が出る（#29 / #192 と同じ口）。
         waitForNode(robot, "#protection-dialog");
+        // ★★ 文言はこちら向けである。保護を掛けている最中に「保護を外して書き出す」と
+        //   出すと、何を押しているのかが読んで分からなくなる（優先順位 2）
+        //   ——オーナーパスワードと権限フラグは、確かに出力へ載る。
+        assertEquals("このまま書き出す", button(robot, "#protection-proceed").getText(), "保護を掛けているのに「外す」と出ている");
+
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
     }
@@ -296,6 +350,25 @@ class EncryptionUiTest extends DesktopUiTest {
         robot.write(OWNER);
         clickWhenReady(robot, "#encryption-owner-password-confirm");
         robot.write(OWNER);
+    }
+
+    /**
+     * 節点へ焦点を送って、空白で切り替える。
+     *
+     * <p><b>★★ 座標で押さない。</b>詳細の中身は {@code ScrollPane} の外へ流れるが、
+     * <b>流れた節点も scene の矩形とは重なったまま</b>なので、
+     * <b>待ち合わせは通るのに押した先が別の節点になる</b>
+     * （<b>2026-09-16 実測</b>。CI windows で 2 度踏んだ）。
+     *
+     * <p><b>★ 吸収ではない。</b>焦点が入らなければ上限まで待って落ちる。
+     * <b>人はキーボードでも同じことをする</b>ので、見ている仕掛けは変わらない。
+     */
+    private static void toggle(FxRobot robot, String id) throws Exception {
+        Node node = node(robot, id);
+        Platform.runLater(node::requestFocus);
+        waitFor(node::isFocused);
+        robot.type(KeyCode.SPACE);
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     private static CheckBox checkBox(FxRobot robot, String id) {

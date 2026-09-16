@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.Warning;
 import java.util.List;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
@@ -54,14 +55,15 @@ final class ProtectionPrompt {
      *
      * @param owner    親ウィンドウ
      * @param dropping 保護が落ちる出どころのファイル名。<b>空で呼ばないこと</b>
+     * @param outcome  書き出した先がどうなるのか。<b>文言と、後から出す警告のどれを落とすかを決める</b>
      * @return 続けるなら {@code true}
      */
-    static boolean confirm(Stage owner, List<String> dropping) {
+    static boolean confirm(Stage owner, List<String> dropping, Outcome outcome) {
         if (dropping.isEmpty()) {
             throw new IllegalArgumentException("保護が落ちる出どころが無いのに問うことはできません。");
         }
 
-        ButtonType proceed = new ButtonType("保護を外して書き出す", ButtonData.OK_DONE);
+        ButtonType proceed = new ButtonType(outcome.proceedText, ButtonData.OK_DONE);
         ButtonType cancel = new ButtonType("中止", ButtonData.CANCEL_CLOSE);
 
         Alert alert = new Alert(AlertType.WARNING);
@@ -71,10 +73,10 @@ final class ProtectionPrompt {
         //   出どころの名前を並べるので、本文の長さが入力で決まる側である。
         alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
         alert.setResizable(true);
-        alert.setTitle("保護は引き継がれません");
-        alert.setHeaderText(headerFor(dropping));
+        alert.setTitle(outcome.titleText);
+        alert.setHeaderText(headerFor(dropping, outcome));
         alert.getDialogPane().setId("protection-dialog");
-        alert.getDialogPane().setContent(body(dropping));
+        alert.getDialogPane().setContent(body(dropping, outcome));
         alert.getButtonTypes().setAll(proceed, cancel);
 
         Button proceedButton = (Button) alert.getDialogPane().lookupButton(proceed);
@@ -93,10 +95,73 @@ final class ProtectionPrompt {
         return alert.showAndWait().filter(proceed::equals).isPresent();
     }
 
-    private static String headerFor(List<String> dropping) {
+    /**
+     * 書き出した先がどうなるのか。
+     *
+     * <p><b>★★ 文言を分ける。</b>どちらも<b>「パスワードなしで開ける」は同じ</b>だが、
+     * <b>保護を掛けている最中に「保護されません」「保護を外して書き出す」と出すと、
+     * 何を押しているのかが読んで分からなくなる</b>（{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）
+     * ——<b>オーナーパスワードと権限フラグは、確かに出力へ載る。</b>
+     */
+    enum Outcome {
+
+        /** 保護を何も掛けない。出力は平文である。 */
+        PLAIN(
+                "保護は引き継がれません",
+                "書き出すファイルはパスワードで保護されません",
+                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。",
+                "保護を外して書き出す",
+                Warning.ENCRYPTION_NOT_PROPAGATED),
+
+        /**
+         * オーナーパスワードと権限フラグは掛けるが、ユーザーパスワードが空である。
+         *
+         * <p><b>★ 出力には暗号化辞書が載るが、鍵は空文字列から導かれるので
+         * 誰でも開ける</b>（2026-09-16 実測。{@code Protection#userPasswordRequired}）。
+         */
+        OPENS_WITHOUT_A_KEY(
+                "書き出すファイルは誰でも開けます",
+                "ユーザーパスワードが空なので、書き出すファイルは誰でも開けます",
+                "オーナーパスワードと権限の設定は出力へ載りますが、権限は閲覧ソフトの自主的な遵守に依存します。" + System.lineSeparator()
+                        + "開くときにパスワードが要るようにするには、ユーザーパスワードを設定してください。",
+                "このまま書き出す",
+                Warning.CONTENT_OPENS_WITHOUT_A_KEY);
+
+        /** 窓の題。<b>固定しない</b>——保護を掛けている最中に「引き継がれません」と出る。 */
+        final String titleText;
+
+        /** 見出し。<b>句点は付けない</b>——件数を後ろへ挿すので、付けるのは組む側である。 */
+        final String headerText;
+
+        /** 添える一文。 */
+        final String adviceText;
+
+        /** 続ける側のボタンの文言。 */
+        final String proceedText;
+
+        /**
+         * この窓で問うたことを、書き出しの後にもう一度言わないための値。
+         *
+         * <p><b>★★ 対をここに持たせる。</b>落とす値をフィルタの側へ書き込むと、
+         * <b>問う窓を 1 つ足した日に、その分が黙って素通りする</b>
+         * （{@code MainWindow#exceptWhatWasAsked}。#30 の門の 1 段目）。
+         */
+        final Warning preempts;
+
+        Outcome(String titleText, String headerText, String adviceText, String proceedText, Warning preempts) {
+            this.titleText = titleText;
+            this.headerText = headerText;
+            this.adviceText = adviceText;
+            this.proceedText = proceedText;
+            this.preempts = preempts;
+        }
+    }
+
+    private static String headerFor(List<String> dropping, Outcome outcome) {
+        // ★ 件数は句点の前に入れる。後ろへ付けると、文の真ん中に句点が残る。
         return dropping.size() == 1
-                ? "書き出すファイルはパスワードで保護されません。"
-                : "書き出すファイルはパスワードで保護されません（保護された入力が " + dropping.size() + " 件）。";
+                ? outcome.headerText + "。"
+                : outcome.headerText + "（保護された入力が " + dropping.size() + " 件）。";
     }
 
     /**
@@ -105,13 +170,12 @@ final class ProtectionPrompt {
      * <p><b>★ 出どころの名前を出す。</b>どのファイルの保護が落ちるのかは、
      * <b>数だけでは辿れない。</b>
      */
-    private static VBox body(List<String> dropping) {
+    private static VBox body(List<String> dropping, Outcome outcome) {
         Label sources = new Label(String.join(System.lineSeparator(), dropping));
         sources.setId("protection-sources");
         sources.setWrapText(true);
 
-        Label consequence = new Label(
-                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。");
+        Label consequence = new Label(outcome.adviceText);
         consequence.setWrapText(true);
 
         VBox content = new VBox(8, sources, consequence);

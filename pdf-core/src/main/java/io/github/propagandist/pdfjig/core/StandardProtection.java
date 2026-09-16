@@ -77,13 +77,19 @@ final class StandardProtection {
     private static AccessPermission permissionOf(AccessPermissions permissions) {
         AccessPermission permission = new AccessPermission();
         permission.setCanPrint(permissions.print());
+        // ★★ 高品質の印刷は、印刷を許しているときしか意味を持たない
+        //   （PDF 32000-1 の表 22。ビット 12 はビット 3 を修飾する）。両方をそのまま書くと
+        //   「高品質なら印刷できる」と読める値が残る——読む側はビット 3 を見て
+        //   印刷を拒むので、思ったのと違う結果になる（優先順位 2。#30 の門の 2 段目）。
+        //   ★ 揃えるのはここだけである——AccessPermissions は読んだ結果を返す側でも使うので、
+        //   あちらで揃えると文書が書いていることを告げられなくなる。
         permission.setCanModify(permissions.modify());
         permission.setCanExtractContent(permissions.extractContent());
         permission.setCanModifyAnnotations(permissions.modifyAnnotations());
         permission.setCanFillInForm(permissions.fillForms());
         permission.setCanAssembleDocument(permissions.assembleDocument());
         permission.setCanExtractForAccessibility(permissions.extractForAccessibility());
-        permission.setCanPrintFaithful(permissions.printHighQuality());
+        permission.setCanPrintFaithful(permissions.printHighQuality() && permissions.print());
         return permission;
     }
 }

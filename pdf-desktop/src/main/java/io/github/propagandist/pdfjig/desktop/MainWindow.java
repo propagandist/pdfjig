@@ -106,6 +106,37 @@ public final class MainWindow {
     private final BooleanProperty stale = new SimpleBooleanProperty(false);
 
     /**
+     * 何があって食い違ったのか。<b>場を塞ぐかどうかは変わらない。変わるのは文言だけである。</b>
+     *
+     * <p><b>★★ 分けないと嘘を言う。</b>保護して書き出した回は<b>何も失敗していない</b>
+     * ——<b>鍵が要るので開き直さなかっただけである。</b>
+     * <b>そこで「開き直せませんでした」と出すと、本当に落ちた回と見分けが付かなくなる</b>
+     * （{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）。
+     */
+    private StaleReason staleReason = StaleReason.REOPEN_FAILED;
+
+    /** 食い違いの理由と、そのとき状態行に出す文言。 */
+    private enum StaleReason {
+
+        /** 上書きの後で寄せ直せなかった（#118）。 */
+        REOPEN_FAILED("（書き出したファイルを開き直せませんでした。開き直してください）"),
+
+        /**
+         * 出どころを置き換えたが、その出力は開くのに鍵が要る。
+         *
+         * <p><b>★ 鍵は書き出しが終わった時点で閉じている</b>（INV-5）ので、
+         * <b>こちらからは開き直せない。失敗ではない。</b>
+         */
+        OUTPUT_NEEDS_A_KEY("（書き出したファイルには鍵が要るため、開き直していません。開き直してください）");
+
+        final String text;
+
+        StaleReason(String text) {
+            this.text = text;
+        }
+    }
+
+    /**
      * 文書の中身を変える操作を通してはならない条件。
      *
      * <p><b>★★ ここが唯一の門である</b>（#114）。以前は {@link Action} から作られた節点だけが
@@ -532,20 +563,27 @@ public final class MainWindow {
      * <b>鍵を訊くのは {@code run} の直前であること</b>（INV-5）、
      * <b>警告より先に寄せ直しを始めること</b>の 3 つで、<b>どれも片方だけ直すと壊れる。</b>
      *
-     * <p><b>★ 保護を掛けるときは、落ちることを問う窓を出さない</b>（#192）。
-     * <b>出力は保護される</b>ので「保護は引き継がれません」は当たらず、
-     * <b>{@code pdf-core} 側の警告も保護を渡したときは出ない</b>（#199）。
-     * <b>引き継がれないのは「入力の鍵」であって、利用者が受け取るのは保護された出力である。</b>
+     * <p><b>★★ 分かれ目は「保護を掛けたか」ではなく、「開くのに鍵が要るか」である</b>
+     * （{@code Protection#userPasswordRequired}）。<b>ユーザーパスワードを空にすると、
+     * 保護を掛けても出力は誰でも開ける</b>——<b>そこで「掛けたか」で分けると、
+     * 鍵の要る入力が誰でも開ける出力になっても、窓も出ず警告も出ない</b>（#30 の門の 2 段目）。
      *
-     * <p><b>★★ 保護したときは寄せ直さず、古い印を立てる</b>（{@link #markStale}）。
-     * <b>出力は保護されており、開き直すにはいま使った鍵が要る</b>——
-     * <b>鍵は書き出しが終わった時点で閉じている</b>（INV-5）。
+     * <p><b>★ 鍵が要る出力になるときだけ、問う窓を出さない</b>（#192）。
+     * <b>引き継がれないのは「入力の鍵」であって、利用者が受け取るのは鍵の要る出力である。</b>
+     * <b>そうでない回は従来どおり問う</b>——<b>文言だけを分ける</b>
+     * （{@link ProtectionPrompt.Outcome}）。
+     *
+     * <p><b>★★ 鍵が要る出力になったときは寄せ直さず、食い違いの印を立てる</b>
+     * （{@link #markStale}）。<b>開き直すにはいま使った鍵が要るが、
+     * 鍵は書き出しが終わった時点で閉じている</b>（INV-5）。
      * <b>もう一度訊いて開き直す形は採らない</b>：保存のたびに 2 度訊くことになり、
      * <b>「開き直してください」のほうが短い。</b>
+     * ★ <b>鍵が要らない出力なら、寄せ直せるので寄せ直す。</b>
      *
-     * @param protecting 保護を尋ねて掛けるか
+     * @param asksForProtection 保護の指定を尋ねるか。<b>分かれ目には使わない</b>——使うのは尋ねた後の
+     *                          {@code needsAKey} である
      */
-    private void save(boolean protecting) {
+    private void save(boolean asksForProtection) {
         if (session == null) {
             return;
         }
@@ -563,25 +601,33 @@ public final class MainWindow {
         Path output = chosen.get();
 
         // ★ 書き出し先を決めた後に訊く。先に訊くと、行き先を取り消しただけで打った鍵が捨てられる。
-        Optional<Protection> requested = protecting ? EncryptionPrompt.ask(stage) : Optional.empty();
-        if (protecting && requested.isEmpty()) {
+        Optional<Protection> requested = asksForProtection ? EncryptionPrompt.ask(stage) : Optional.empty();
+        if (asksForProtection && requested.isEmpty()) {
             return;
         }
         Protection protection = requested.orElse(null);
 
-        // ★★ 渡しきる前に降りたら、掛ける側の鍵はここで閉じる。まだ渡していないので持ち主はここである
-        //   （INV-5。askKeys と同じ規律）。渡した後の片づけは BackgroundTasks が持つ。
+        // ★★ 渡しきるまでの持ち主はここである（INV-5。askKeys と同じ規律）。
+        //   ★★ 掛ける側だけでは足りない。askKeys が返した入力の鍵も、渡すまではここのものである
+        //   ——間に投げるものがあると、そこを通った平文の配列は二度と消されない
+        //   （#135 / #144 / #145 と同じ類型。#30 の門の 2 段目）。
+        List<Password> owned = new ArrayList<>();
+        if (protection != null) {
+            owned.addAll(protection.keys());
+        }
         boolean handedOver = false;
         try {
             // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
-            //   ★ 鍵を訊くより先に問う。中止されたら 1 文字も打たせずに済む。
-            //   ★★ 問わずに済むのは「中身が隠れる」ときだけである（#30 の門の 2 段目）。
+            //   ★★ 問わずに済むのは「鍵が要る出力になる」ときだけである（#30 の門の 2 段目）。
             //   「保護を掛けた」で分けると、ユーザーパスワードを空にした回に穴が開く——
-            //   出力の中身は暗号化されず、残るのは申告制の権限フラグだけなのに、
-            //   窓も出ず pdf-core の警告も出ない。鍵の要る入力が、誰でも開ける出力になる。
-            boolean hidden = protection != null && protection.encryptsContent();
-            int asked = hidden ? 0 : saving.keyedContributors(pages).size();
-            if (!hidden && !consentsToDroppingProtection(saving, pages)) {
+            //   出力は誰でも開けるのに、窓も出ず pdf-core の警告も出ない。
+            //   ★ 文言は分ける。保護を掛けている最中に「保護を外して書き出す」と出すと、
+            //   何を押しているのかが読んで分からなくなる（ProtectionPrompt.Outcome）。
+            boolean needsAKey = protection != null && protection.userPasswordRequired();
+            ProtectionPrompt.Outcome consequence =
+                    protection == null ? ProtectionPrompt.Outcome.PLAIN : ProtectionPrompt.Outcome.OPENS_WITHOUT_A_KEY;
+            int asked = needsAKey ? 0 : saving.keyedContributors(pages).size();
+            if (!needsAKey && !consentsToDroppingProtection(saving, pages, consequence)) {
                 return;
             }
 
@@ -596,10 +642,7 @@ public final class MainWindow {
             Sources inputs = keyed.get();
 
             // ★★ 入力の鍵と、掛ける側の鍵の両方を渡す。どちらも仕事の枠が閉じる。
-            List<Password> owned = new ArrayList<>(keysOf(inputs.all()));
-            if (protection != null) {
-                owned.addAll(protection.keys());
-            }
+            owned.addAll(keysOf(inputs.all()));
 
             handedOver = true;
             boolean started = run(
@@ -618,8 +661,10 @@ public final class MainWindow {
                         //   これは例外的な経路ではない。
                         try {
                             if (outcome.replacedASource()) {
-                                if (protecting) {
-                                    markStale();
+                                // ★★ 分かれ目は「掛けたか」ではない。鍵が要らない出力なら
+                                //   寄せ直せる——そこで印を立てると、直せたのに編集を塞ぐ。
+                                if (needsAKey) {
+                                    markStale(StaleReason.OUTPUT_NEEDS_A_KEY);
                                 } else {
                                     reopenAt(saving, sources, output, breaks, selected);
                                 }
@@ -628,7 +673,7 @@ public final class MainWindow {
                             // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
                             //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
                             //   必ず出る警告であり、例外的な経路ではない。
-                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), asked));
+                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts, asked));
                         }
                     });
             // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
@@ -637,8 +682,8 @@ public final class MainWindow {
                 folders.rememberWrittenFile(output);
             }
         } finally {
-            if (!handedOver && protection != null) {
-                protection.keys().forEach(Password::close);
+            if (!handedOver) {
+                owned.forEach(Password::close);
             }
         }
     }
@@ -659,8 +704,9 @@ public final class MainWindow {
      * ——回転は保存のたびに 90 度ずつ回り、削除は 2 回目に止まる（#118）。
      * <b>別の名前へ保存したときは呼ばない。</b>元のファイルは変わっておらず、いまの並びが正しい。
      *
-     * <p><b>寄せ直しはふつうの「開く」である。</b>書き出したものは平文であり
-     * （{@code EncryptionPropagation.NONE} しか対応していない）、<b>パスワードを訊かれることはない。</b>
+     * <p><b>寄せ直しはふつうの「開く」である。</b><b>パスワードを訊かれることはない</b>
+     * ——<b>鍵の要る出力を作った回は、ここを通らず印を立てる</b>（{@link #save}）。
+     * ★ <b>「書き出したものは平文である」と書いてあったが、#30 で偽になった。</b>
      *
      * <p><b>★ 区切りは持ち越す。</b>書き出しに関与しないので寄せ直すと消えるが、
      * <b>並びは書き出したものと同じなので、位置はそのまま通じる。</b>
@@ -691,7 +737,7 @@ public final class MainWindow {
             //   寄せ直すとその編集ごと消える——直す前はそれが生き残っていたので、
             //   直しながら別のものを壊すことになる（CLAUDE.md 優先順位 1）。
             //   寄せないので古いままである。保存を押せなくして、そこで止める。
-            markStale();
+            markStale(StaleReason.REOPEN_FAILED);
             return;
         }
         boolean started = false;
@@ -713,7 +759,7 @@ public final class MainWindow {
                     failure -> {
                         // 開き直せなかった。書き出しは成功しておりファイルはできているが、
                         // セッションは古いままである。押せなくして止める。
-                        markStale();
+                        markStale(StaleReason.REOPEN_FAILED);
                         messages.failure(failure);
                     });
         } finally {
@@ -725,13 +771,14 @@ public final class MainWindow {
                 //   ★ ここは markSaved が済んだ後である。印を立て損ねると、押せてしまう。
                 //   ★ Password#close と違い、これは投げうる（束縛が連なり、状態行を組み直す）。
                 //   投げれば飛んでいる失敗を置き換えるが、倒れる先は押せなくなる側なので受ける。
-                markStale();
+                markStale(StaleReason.REOPEN_FAILED);
             }
         }
     }
 
     /** 開いている文書が、書き出したファイルと食い違っていることを記す。 */
-    private void markStale() {
+    private void markStale(StaleReason reason) {
+        staleReason = reason;
         stale.set(true);
         updateStatus();
     }
@@ -999,7 +1046,7 @@ public final class MainWindow {
         // ★★ 分割は操作ごとに 1 回だけ問う（docs/SPEC.md §4.3.1。#29）。
         //   N 回出すと「読まずに続行を押す」習慣ができる。
         List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
-        if (!consentsToDroppingProtection(writing, allPages)) {
+        if (!consentsToDroppingProtection(writing, allPages, ProtectionPrompt.Outcome.PLAIN)) {
             return;
         }
         // ★★ 数えるのはかたまりごとである。pdf-core は assembleEach でかたまりの数だけ
@@ -1089,7 +1136,7 @@ public final class MainWindow {
 
     private void showSplitResult(DocumentWriter.SplitResult result, int asked) {
         messages.information(result.fileCount() + " 個のファイルを書き出しました。");
-        messages.warnings(exceptWhatWasAsked(result.warnings(), asked));
+        messages.warnings(exceptWhatWasAsked(result.warnings(), ProtectionPrompt.Outcome.PLAIN.preempts, asked));
     }
 
     /**
@@ -1111,19 +1158,25 @@ public final class MainWindow {
      * 窓に名前が出ていない</b>ので、<b>あのぶんは残さなければ、保護が落ちたことを
      * 伝える口が 1 つも無くなる</b>（2026-09-14 に実測して直した。#29 の門の 2 段目）。
      *
+     * <p><b>★★ 何を問うたのかを呼ぶ側が渡す。</b>落とす値をここへ書き込むと、
+     * <b>問う窓を 1 つ足した日に、その分が黙って素通りする</b>——<b>同じ文を窓と警告で 2 度読ませる</b>
+     * のは、<b>読まずに閉じる習慣を作る側である</b>（#30 の門の 1 段目）。
+     * <b>{@link ProtectionPrompt.Outcome} が、問う文言と対になる値を持っている。</b>
+     *
      * <p><b>★ どれを落とすかは選べない。</b>{@link Warning} は<b>どの出どころのものかを
      * 持っていない</b>——同じ値が並ぶだけである。<b>だから数で引く。</b>
      * 残った数が、<b>問わずに保護を落とした入力の数になる。</b>
      *
      * @param warnings 書き出しで出た警告
-     * @param asked    窓で名前を出して同意を得た出どころの数
+     * @param asked    窓が既に言った値。{@link ProtectionPrompt.Outcome} が問う文言と対で持っている
+     * @param count    その値を落とす上限。<b>窓で名前を出して同意を得た出どころの数である</b>
      * @return 残す警告
      */
-    static List<Warning> exceptWhatWasAsked(List<Warning> warnings, int asked) {
+    static List<Warning> exceptWhatWasAsked(List<Warning> warnings, Warning asked, int count) {
         List<Warning> remaining = new ArrayList<>(warnings.size());
         int dropped = 0;
         for (Warning warning : warnings) {
-            if (warning == Warning.ENCRYPTION_NOT_PROPAGATED && dropped < asked) {
+            if (warning == asked && dropped < count) {
                 dropped++;
                 continue;
             }
@@ -1215,9 +1268,10 @@ public final class MainWindow {
      * @param pages  出力に含めるページ
      * @return 続けてよいなら {@code true}
      */
-    private boolean consentsToDroppingProtection(DocumentSession saving, List<PageSelection> pages) {
+    private boolean consentsToDroppingProtection(
+            DocumentSession saving, List<PageSelection> pages, ProtectionPrompt.Outcome outcome) {
         List<String> dropping = saving.keyedContributors(pages);
-        return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping);
+        return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping, outcome);
     }
 
     /**
@@ -1313,7 +1367,7 @@ public final class MainWindow {
             }
             if (stale.get()) {
                 // 書き出したファイルはできている。開き直せば続けられる。
-                text.append("（書き出したファイルを開き直せませんでした。開き直してください）");
+                text.append(staleReason.text);
             }
             if (session.encrypted()) {
                 text.append("（暗号化されています）");

@@ -101,17 +101,28 @@ final class PasswordPrompt {
         dialog.setOnShown(event -> field.requestFocus());
 
         dialog.setResultConverter(button -> {
-            if (button != unlock) {
+            try {
+                // ★ 写し取りは Password の中で行う。素の char[] がここに出ないので、
+                //   持ち主の無い配列を作れる場所がそもそも無い（INV-5）。
+                return button != unlock ? null : Password.copyOf(field.getCharacters());
+            } finally {
+                // ★★ どの道を通っても消す。分けて書くと、写し取りが投げた回だけ欄が残る
+                //   ——{@link EncryptionPrompt} と同じ形に揃える（#30 の門の 1 段目）。
                 field.clear();
-                return null;
             }
-            // ★ 写し取りは Password の中で行う。素の char[] がここに出ないので、
-            //   持ち主の無い配列を作れる場所がそもそも無い（INV-5）。
-            Password password = Password.copyOf(field.getCharacters());
-            field.clear();
-            return password;
         });
 
-        return dialog.showAndWait();
+        // ★★ 作った {@link Password} が戻らない道を塞ぐ。{@link EncryptionPrompt} と同じ形である
+        //   ——結果は押した時点で Dialog に載るが、showAndWait が戻るまでの間に投げると、
+        //   持ち主の決まっていない平文の鍵が残る（INV-5。#30 の門の 1 段目）。
+        try {
+            return dialog.showAndWait();
+        } catch (RuntimeException | Error failed) {
+            Password orphan = dialog.getResult();
+            if (orphan != null) {
+                orphan.close();
+            }
+            throw failed;
+        }
     }
 }

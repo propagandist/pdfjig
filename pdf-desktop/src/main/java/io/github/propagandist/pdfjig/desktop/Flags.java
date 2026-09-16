@@ -39,12 +39,31 @@ final class Flags {
 
     private final CheckBox assembleDocument = flag("encryption-flag-assemble", "ページを挿入・削除・回転する");
 
-    private final CheckBox allowPrint = preset("encryption-allow-print", "印刷を許可", List.of(print, printHighQuality));
+    private final CheckBox allowPrint;
 
-    private final CheckBox allowExtract = preset("encryption-allow-extract", "テキスト抽出を許可", List.of(extractContent));
+    private final CheckBox allowExtract;
 
-    private final CheckBox allowModify =
-            preset("encryption-allow-modify", "編集を許可", List.of(modify, modifyAnnotations, fillForms, assembleDocument));
+    private final CheckBox allowModify;
+
+    /**
+     * 束はここで組む。
+     *
+     * <p><b>★ 初期化子の並びに依存させない。</b>束の宣言を 8 つの上へ移すだけで
+     * <b>{@code List.of} が {@code null} を拒んで投げ</b>、メニューを押しても窓が出ない
+     * ——<b>コンパイルは通る。</b>
+     */
+    Flags() {
+        // ★★ 高品質は印刷の下にある（permissions の註）。印刷を外したら外して押せなくし、
+        //   戻したら戻す。
+        //   ★ 片道にしない。外すだけにすると、印刷を戻した人の手元で高品質だけが
+        //   落ちたままになる——本人が外していない権限が黙って残る（#30 の門の 2 段目）。
+        printHighQuality.disableProperty().bind(print.selectedProperty().not());
+        print.selectedProperty().addListener((property, was, now) -> printHighQuality.setSelected(now));
+        allowPrint = preset("encryption-allow-print", "印刷を許可", List.of(print, printHighQuality));
+        allowExtract = preset("encryption-allow-extract", "テキスト抽出を許可", List.of(extractContent));
+        allowModify = preset(
+                "encryption-allow-modify", "編集を許可", List.of(modify, modifyAnnotations, fillForms, assembleDocument));
+    }
 
     /** プリセットの並び。畳んだ状態で見えるのはここだけである。 */
     VBox presetBox() {
@@ -65,7 +84,17 @@ final class Flags {
                 assembleDocument);
     }
 
-    /** いま選ばれている権限。 */
+    /**
+     * いま選ばれている権限。
+     *
+     * <p><b>★★ 高品質の印刷は、印刷を許しているときしか意味を持たない</b>
+     * （PDF 32000-1 の表 22。ビット 12 はビット 3 を修飾する）。
+     * <b>印刷を外したまま高品質を残すと、画面は「高品質で印刷できる」と言いながら
+     * 出力は印刷を一切許さない</b>（{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）。
+     *
+     * <p><b>★ 画面で縛る。</b>印刷を外したら<b>高品質も押せなくする</b>——
+     * <b>ここで黙って落とす形にすると、チェックが入ったまま効かないという同じ誤解が残る。</b>
+     */
     AccessPermissions permissions() {
         return new AccessPermissions(
                 print.isSelected(),
@@ -101,7 +130,10 @@ final class Flags {
     private static CheckBox preset(String id, String text, List<CheckBox> members) {
         CheckBox box = new CheckBox(text);
         box.setId(id);
-        box.setSelected(true);
+        // ★ 初期値も受け口も同じ式を呼ぶ。書き分けると、フラグの既定を変えた日に
+        //   束だけが古い値を持って残る——受け口は変化でしか発火しないので、直る契機が無い。
+        Runnable follow = () -> box.setSelected(members.stream().allMatch(CheckBox::isSelected));
+        follow.run();
         box.setOnAction(event -> {
             // ★★ 押された値を先に控える。box.isSelected() をそのまま読むと、1 つ目を動かした
             //   時点で下の受け口が「全部は揃っていない」と見て box を押し戻すので、
@@ -109,9 +141,7 @@ final class Flags {
             boolean selected = box.isSelected();
             members.forEach(member -> member.setSelected(selected));
         });
-        members.forEach(member -> member.selectedProperty()
-                .addListener(
-                        (property, was, now) -> box.setSelected(members.stream().allMatch(CheckBox::isSelected))));
+        members.forEach(member -> member.selectedProperty().addListener(ignored -> follow.run()));
         return box;
     }
 }

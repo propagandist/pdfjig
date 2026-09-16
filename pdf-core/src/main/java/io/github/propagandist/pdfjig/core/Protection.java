@@ -18,7 +18,8 @@ import java.util.List;
  * <b>既にある文書へ後から掛けるのは {@link Encryption#protect} である</b>——
  * あちらを通すと<b>平文が一度ディスクに現れる。</b>
  *
- * @param userPassword  文書を開くための鍵。<b>空でない鍵を渡すと、本文が暗号化される</b>
+ * @param userPassword  文書を開くための鍵。<b>空なら出力は誰でも開ける</b>
+ *                      （{@link #userPasswordRequired()}。中身は暗号化される）
  * @param ownerPassword 権限を変更するための鍵
  * @param permissions   権限フラグ。<b>暗号学的には強制されない</b>（{@code docs/SPEC.md} §6.1）
  * @param algorithm     暗号方式。既定は {@link EncryptionAlgorithm#AES_256}（同 §6.2）。
@@ -38,29 +39,34 @@ public record Protection(
         if (algorithm == null) {
             throw new IllegalArgumentException("algorithm は null にできません。");
         }
+        // ★ 判定は EncryptionAlgorithm が持つ。手で数え上げると、ここだけが
+        //   コンパイラの検査から外れる——拒むはずの値が黙って通るのはここである。
         // ★★ 書けない方式は値の段で拒む。奥で拒むと、そこへ届くまでに
         //   秘密が String 化され（StandardProtection）、入力も全部開かれている
         //   ——断ると分かっている要求のために、消せない文字列が 2 本残る（#199 の門）。
-        if (algorithm == EncryptionAlgorithm.NONE || algorithm == EncryptionAlgorithm.UNKNOWN) {
+        if (!EncryptionAlgorithm.writable().contains(algorithm)) {
             throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
         }
     }
 
     /**
-     * この保護が、文書の中身そのものを隠すか。
+     * この保護を掛けた出力を開くのに、パスワードが要るか。
      *
-     * <p><b>★★ ユーザーパスワードが空なら、中身は暗号化されない</b>（{@code docs/SPEC.md} §6.1）。
-     * そのとき残るのは<b>権限フラグだけ</b>で、あれは<b>閲覧ソフトが自主的に従っているだけの
-     * 申告制である。</b>
+     * <p><b>★★ 「暗号化されるか」ではない。</b>{@link EncryptionInfo#userPasswordRequired()} と
+     * <b>同じことを、掛ける前に訊いている</b>——<b>ユーザーパスワードが空でも、中身は
+     * 暗号化される。</b>鍵が空文字列から導かれるので、<b>誰でも開ける</b>だけである
+     * （<b>2026-09-16 実測</b>。空の鍵で書いた出力は {@code encrypted() == true} ／
+     * {@code AES_256} ／ 鍵なしで開けた）。
      *
-     * <p><b>★★ 「保護を掛けた」と「中身が隠れる」を同じものとして扱わないこと。</b>
-     * <b>入力の保護が落ちることを伝える口</b>（{@link Warning#ENCRYPTION_NOT_PROPAGATED}）は
-     * <b>ここが false のとき黙ってはならない</b>——<b>鍵の要る入力から、誰でも開ける出力が
-     * できている。</b>
+     * <p><b>★★ 「保護を掛けた」と「守られる」を同じものとして扱わないこと。</b>
+     * <b>ここが false なら、残るのは権限フラグだけ</b>で、あれは<b>閲覧ソフトが自主的に
+     * 従っているだけの申告制である</b>（{@code docs/SPEC.md} §6.1）。
+     * <b>そのことを告げる口が {@link Warning#CONTENT_OPENS_WITHOUT_A_KEY} である</b>
+     * ——<b>ここが false のとき黙ってはならない。</b>
      *
-     * @return 中身が暗号化されるなら {@code true}
+     * @return 開くのにパスワードが要るなら {@code true}
      */
-    public boolean encryptsContent() {
+    public boolean userPasswordRequired() {
         return !userPassword.isEmpty();
     }
 
@@ -70,7 +76,9 @@ public record Protection(
      * <p><b>★★ 呼ぶ側が数え上げて別に持たない。</b>持つと<b>「鍵を足したが、片づける一覧へは
      * 足さなかった」形が書ける</b>——そこを通った平文の配列は<b>二度と消されない</b>
      * （INV-5。#135 / #144 / #145 で 3 度破れたのと同じ類型である）。
-     * <b>1 つの正本から引けば、書き忘れる場所が無い</b>——{@code Source} の側も同じ形をしている。
+     * <b>1 つの正本から引けば、書き忘れる場所が無い。</b>
+     * ★ <b>入力の側は {@code MainWindow#keysOf(List)} が同じことをしている</b>——
+     * <b>あちらを {@code Sources} へ下ろすのは #208 が持つ。</b>
      *
      * <p><b>★ 閉じるのは持ち主である。</b>ここが返すのは読むための並びであって、
      * <b>持ち主が移るわけではない</b>（{@code BackgroundTasks#run(List, …)} へ渡すと、あそこが持つ）。

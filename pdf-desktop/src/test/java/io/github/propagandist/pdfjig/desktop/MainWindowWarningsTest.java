@@ -22,7 +22,7 @@ class MainWindowWarningsTest {
     void keepsEverythingWhenNothingWasAsked() {
         List<Warning> warnings = List.of(Warning.ENCRYPTION_NOT_PROPAGATED, Warning.METADATA_FROM_FIRST_INPUT);
 
-        assertEquals(warnings, MainWindow.exceptWhatWasAsked(warnings, 0));
+        assertEquals(warnings, MainWindow.exceptWhatWasAsked(warnings, Warning.ENCRYPTION_NOT_PROPAGATED, 0));
     }
 
     @Test
@@ -33,7 +33,7 @@ class MainWindowWarningsTest {
 
         assertEquals(
                 List.of(Warning.ENCRYPTION_NOT_PROPAGATED, Warning.SIGNATURE_INVALIDATED),
-                MainWindow.exceptWhatWasAsked(warnings, 1));
+                MainWindow.exceptWhatWasAsked(warnings, Warning.ENCRYPTION_NOT_PROPAGATED, 1));
     }
 
     @Test
@@ -43,7 +43,9 @@ class MainWindowWarningsTest {
         // pdf-core は 2 件発し、窓で名前を出したのは 1 件である。
         List<Warning> warnings = List.of(Warning.ENCRYPTION_NOT_PROPAGATED, Warning.ENCRYPTION_NOT_PROPAGATED);
 
-        assertEquals(List.of(Warning.ENCRYPTION_NOT_PROPAGATED), MainWindow.exceptWhatWasAsked(warnings, 1));
+        assertEquals(
+                List.of(Warning.ENCRYPTION_NOT_PROPAGATED),
+                MainWindow.exceptWhatWasAsked(warnings, Warning.ENCRYPTION_NOT_PROPAGATED, 1));
     }
 
     @Test
@@ -57,7 +59,26 @@ class MainWindowWarningsTest {
                 Warning.ENCRYPTION_NOT_PROPAGATED,
                 Warning.ENCRYPTION_NOT_PROPAGATED);
 
-        assertEquals(List.of(), MainWindow.exceptWhatWasAsked(warnings, 3));
+        assertEquals(List.of(), MainWindow.exceptWhatWasAsked(warnings, Warning.ENCRYPTION_NOT_PROPAGATED, 3));
+    }
+
+    @Test
+    @DisplayName("★★ 問う窓が何を言ったかで、落とす値が変わる")
+    void dropsWhicheverWarningTheDialogAlreadySaid() {
+        // ★★ 落とす値をフィルタの側へ書き込むと、問う窓を 1 つ足した日に
+        //   その分が黙って素通りする——同じ文を窓と警告で 2 度読ませるのは、
+        //   読まずに閉じる習慣を作る側である（#30 の門の 1 段目）。
+        List<Warning> warnings = List.of(Warning.CONTENT_OPENS_WITHOUT_A_KEY, Warning.ENCRYPTION_NOT_PROPAGATED);
+
+        assertEquals(
+                List.of(Warning.ENCRYPTION_NOT_PROPAGATED),
+                MainWindow.exceptWhatWasAsked(warnings, Warning.CONTENT_OPENS_WITHOUT_A_KEY, 1),
+                "窓で言ったのに、同じことをもう一度伝えている");
+        assertEquals(
+                List.of(Warning.CONTENT_OPENS_WITHOUT_A_KEY),
+                MainWindow.exceptWhatWasAsked(
+                        List.of(Warning.CONTENT_OPENS_WITHOUT_A_KEY), Warning.ENCRYPTION_NOT_PROPAGATED, 1),
+                "窓で言っていない値まで落としている");
     }
 
     @Test
@@ -70,6 +91,6 @@ class MainWindowWarningsTest {
 
         assertEquals(
                 List.of(Warning.METADATA_FROM_FIRST_INPUT, Warning.DANGLING_REFERENCES_REMOVED),
-                MainWindow.exceptWhatWasAsked(warnings, 1));
+                MainWindow.exceptWhatWasAsked(warnings, Warning.ENCRYPTION_NOT_PROPAGATED, 1));
     }
 }
