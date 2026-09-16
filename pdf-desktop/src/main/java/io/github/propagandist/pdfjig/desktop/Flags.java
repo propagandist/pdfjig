@@ -133,9 +133,10 @@ final class Flags {
     private static CheckBox preset(String id, String text, List<CheckBox> members) {
         CheckBox box = new CheckBox(text);
         box.setId(id);
-        // ★ 初期値も下の受け口と同じ式から引く。書き分けると、フラグの既定を変えた日に
+        // ★ 初期値も受け口も同じ式を呼ぶ。書き分けると、フラグの既定を変えた日に
         //   束だけが古い値を持って残る——受け口は変化でしか発火しないので、直る契機が無い。
-        box.setSelected(members.stream().allMatch(CheckBox::isSelected));
+        Runnable follow = () -> box.setSelected(members.stream().allMatch(CheckBox::isSelected));
+        follow.run();
         box.setOnAction(event -> {
             // ★★ 押された値を先に控える。box.isSelected() をそのまま読むと、1 つ目を動かした
             //   時点で下の受け口が「全部は揃っていない」と見て box を押し戻すので、
@@ -143,9 +144,7 @@ final class Flags {
             boolean selected = box.isSelected();
             members.forEach(member -> member.setSelected(selected));
         });
-        members.forEach(member -> member.selectedProperty()
-                .addListener(
-                        (property, was, now) -> box.setSelected(members.stream().allMatch(CheckBox::isSelected))));
+        members.forEach(member -> member.selectedProperty().addListener(ignored -> follow.run()));
         return box;
     }
 }

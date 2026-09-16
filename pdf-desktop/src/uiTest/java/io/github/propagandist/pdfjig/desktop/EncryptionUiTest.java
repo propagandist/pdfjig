@@ -186,7 +186,11 @@ class EncryptionUiTest extends DesktopUiTest {
         // ★★ 高品質の印刷は、印刷を許しているときしか意味を持たない（PDF 32000-1 の表 22）。
         //   チェックを残したままにできると、画面は「高品質で印刷できる」と言いながら
         //   出力は印刷を一切許さない（優先順位 2）。
-        clickWhenReady(robot, "#encryption-flag-print");
+        // ★★ 押すのは束の㡳うである。詳細を開くと中身は窓より高くなり、
+        //   流れた先の節点は scene の矩形と重なったままなので、待ち合わせは通るのに
+        //   押した先が別の節点になる（2026-09-16 実測。CI windows で「印刷が外れていない」と落ちた）。
+        //   ★ 束を外しても print の変化を通るので、見たい仕掛けは同じである。
+        clickWhenReady(robot, "#encryption-allow-print");
         assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "印刷が外れていない");
         assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を外したのに高品質が残っている");
         assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を外したのに高品質を押せる");

@@ -584,9 +584,10 @@ public final class MainWindow {
      * <b>「開き直してください」のほうが短い。</b>
      * ★ <b>鍵が要らない出力なら、寄せ直せるので寄せ直す。</b>
      *
-     * @param protecting 保護を尋ねて掛けるか
+     * @param asksForProtection 保護の指定を尋ねるか。<b>分かれ目には使わない</b>——使うのは尋ねた後の
+     *                          {@code needsAKey} である
      */
-    private void save(boolean protecting) {
+    private void save(boolean asksForProtection) {
         if (session == null) {
             return;
         }
@@ -604,8 +605,8 @@ public final class MainWindow {
         Path output = chosen.get();
 
         // ★ 書き出し先を決めた後に訊く。先に訊くと、行き先を取り消しただけで打った鍵が捨てられる。
-        Optional<Protection> requested = protecting ? EncryptionPrompt.ask(stage) : Optional.empty();
-        if (protecting && requested.isEmpty()) {
+        Optional<Protection> requested = asksForProtection ? EncryptionPrompt.ask(stage) : Optional.empty();
+        if (asksForProtection && requested.isEmpty()) {
             return;
         }
         Protection protection = requested.orElse(null);
@@ -627,14 +628,10 @@ public final class MainWindow {
             //   ★ 文言は分ける。保護を掛けている最中に「保護を外して書き出す」と出すと、
             //   何を押しているのかが読んで分からなくなる（ProtectionPrompt.Outcome）。
             boolean needsAKey = protection != null && protection.userPasswordRequired();
+            ProtectionPrompt.Outcome consequence =
+                    protection == null ? ProtectionPrompt.Outcome.PLAIN : ProtectionPrompt.Outcome.OPENS_WITHOUT_A_KEY;
             int asked = needsAKey ? 0 : saving.keyedContributors(pages).size();
-            if (!needsAKey
-                    && !consentsToDroppingProtection(
-                            saving,
-                            pages,
-                            protection == null
-                                    ? ProtectionPrompt.Outcome.PLAIN
-                                    : ProtectionPrompt.Outcome.OPENS_WITHOUT_A_KEY)) {
+            if (!needsAKey && !consentsToDroppingProtection(saving, pages, consequence)) {
                 return;
             }
 
@@ -680,7 +677,7 @@ public final class MainWindow {
                             // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
                             //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
                             //   必ず出る警告であり、例外的な経路ではない。
-                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), asked));
+                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts(), asked));
                         }
                     });
             // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
@@ -1143,7 +1140,7 @@ public final class MainWindow {
 
     private void showSplitResult(DocumentWriter.SplitResult result, int asked) {
         messages.information(result.fileCount() + " 個のファイルを書き出しました。");
-        messages.warnings(exceptWhatWasAsked(result.warnings(), asked));
+        messages.warnings(exceptWhatWasAsked(result.warnings(), Warning.ENCRYPTION_NOT_PROPAGATED, asked));
     }
 
     /**
@@ -1165,6 +1162,11 @@ public final class MainWindow {
      * 窓に名前が出ていない</b>ので、<b>あのぶんは残さなければ、保護が落ちたことを
      * 伝える口が 1 つも無くなる</b>（2026-09-14 に実測して直した。#29 の門の 2 段目）。
      *
+     * <p><b>★★ 何を問うたのかを呼ぶ側が渡す。</b>落とす値をここへ書き込むと、
+     * <b>問う窓を 1 つ足した日に、その分が黙って素通りする</b>——<b>同じ文を窓と警告で 2 度読ませる</b>
+     * のは、<b>読まずに閉じる習慣を作る側である</b>（#30 の門の 1 段目）。
+     * <b>{@link ProtectionPrompt.Outcome} が、問う文言と対になる値を持っている。</b>
+     *
      * <p><b>★ どれを落とすかは選べない。</b>{@link Warning} は<b>どの出どころのものかを
      * 持っていない</b>——同じ値が並ぶだけである。<b>だから数で引く。</b>
      * 残った数が、<b>問わずに保護を落とした入力の数になる。</b>
@@ -1173,11 +1175,11 @@ public final class MainWindow {
      * @param asked    窓で名前を出して同意を得た出どころの数
      * @return 残す警告
      */
-    static List<Warning> exceptWhatWasAsked(List<Warning> warnings, int asked) {
+    static List<Warning> exceptWhatWasAsked(List<Warning> warnings, Warning asked, int count) {
         List<Warning> remaining = new ArrayList<>(warnings.size());
         int dropped = 0;
         for (Warning warning : warnings) {
-            if (warning == Warning.ENCRYPTION_NOT_PROPAGATED && dropped < asked) {
+            if (warning == asked && dropped < count) {
                 dropped++;
                 continue;
             }

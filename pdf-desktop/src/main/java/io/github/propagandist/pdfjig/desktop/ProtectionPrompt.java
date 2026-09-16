@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import io.github.propagandist.pdfjig.core.Warning;
 import java.util.List;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
@@ -61,7 +62,7 @@ final class ProtectionPrompt {
             throw new IllegalArgumentException("保護が落ちる出どころが無いのに問うことはできません。");
         }
 
-        ButtonType proceed = new ButtonType(outcome.proceedText(), ButtonData.OK_DONE);
+        ButtonType proceed = new ButtonType(outcome.proceedText, ButtonData.OK_DONE);
         ButtonType cancel = new ButtonType("中止", ButtonData.CANCEL_CLOSE);
 
         Alert alert = new Alert(AlertType.WARNING);
@@ -104,7 +105,11 @@ final class ProtectionPrompt {
     enum Outcome {
 
         /** 保護を何も掛けない。出力は平文である。 */
-        PLAIN("書き出すファイルはパスワードで保護されません。", "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。", "保護を外して書き出す"),
+        PLAIN(
+                "書き出すファイルはパスワードで保護されません。",
+                "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。",
+                "保護を外して書き出す",
+                Warning.ENCRYPTION_NOT_PROPAGATED),
 
         /**
          * オーナーパスワードと権限フラグは掛けるが、ユーザーパスワードが空である。
@@ -112,37 +117,44 @@ final class ProtectionPrompt {
          * <p><b>★ 出力には暗号化辞書が載るが、鍵は空文字列から導かれるので
          * 誰でも開ける</b>（2026-09-16 実測。{@code Protection#userPasswordRequired}）。
          */
-        OPENS_WITHOUT_A_KEY("書き出すファイルは、ユーザーパスワードが空なので誰でも開けます。", "開くときにパスワードを要るようにするには、ユーザーパスワードを設定してください。", "このまま書き出す");
+        OPENS_WITHOUT_A_KEY(
+                "書き出すファイルは、ユーザーパスワードが空なので誰でも開けます。",
+                "開くときにパスワードを要るようにするには、ユーザーパスワードを設定してください。",
+                "このまま書き出す",
+                Warning.CONTENT_OPENS_WITHOUT_A_KEY);
 
-        private final String headerText;
+        /** 見出し。 */
+        final String headerText;
 
-        private final String adviceText;
+        /** 添える一文。 */
+        final String adviceText;
 
-        private final String proceedText;
+        /** 続ける側のボタンの文言。 */
+        final String proceedText;
 
-        Outcome(String headerText, String adviceText, String proceedText) {
+        /**
+         * この窓で問ったことを、書き出しの後にもう一度言わないための値。
+         *
+         * <p><b>★★ 対をここに持たせる。</b>落とす値をフィルタの側へ書き込むと、
+         * <b>問う窓を 1 つ足した日に、その分が黙って素通りする</b>
+         * （{@code MainWindow#exceptWhatWasAsked}。#30 の門の 1 段目）。
+         */
+        final Warning preempts;
+
+        Outcome(String headerText, String adviceText, String proceedText, Warning preempts) {
             this.headerText = headerText;
             this.adviceText = adviceText;
             this.proceedText = proceedText;
+            this.preempts = preempts;
         }
 
-        String headerText() {
-            return headerText;
-        }
-
-        String adviceText() {
-            return adviceText;
-        }
-
-        String proceedText() {
-            return proceedText;
+        Warning preempts() {
+            return preempts;
         }
     }
 
     private static String headerFor(List<String> dropping, Outcome outcome) {
-        return dropping.size() == 1
-                ? outcome.headerText()
-                : outcome.headerText() + "（保護された入力が " + dropping.size() + " 件）";
+        return dropping.size() == 1 ? outcome.headerText : outcome.headerText + "（保護された入力が " + dropping.size() + " 件）";
     }
 
     /**
@@ -156,7 +168,7 @@ final class ProtectionPrompt {
         sources.setId("protection-sources");
         sources.setWrapText(true);
 
-        Label consequence = new Label("書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + outcome.adviceText());
+        Label consequence = new Label("書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + outcome.adviceText);
         consequence.setWrapText(true);
 
         VBox content = new VBox(8, sources, consequence);

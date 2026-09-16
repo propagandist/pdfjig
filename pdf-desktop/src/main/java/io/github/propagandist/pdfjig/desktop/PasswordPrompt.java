@@ -112,6 +112,17 @@ final class PasswordPrompt {
             }
         });
 
-        return dialog.showAndWait();
+        // ★★ 作った {@link Password} が戻らない道を塞ぐ。{@link EncryptionPrompt} と同じ形である
+        //   ——結果は押した時点で Dialog に載るが、showAndWait が戻るまでの間に投げると、
+        //   持ち主の決まっていない平文の鍵が残る（INV-5。#30 の門の 1 段目）。
+        try {
+            return dialog.showAndWait();
+        } catch (RuntimeException | Error failed) {
+            Password orphan = dialog.getResult();
+            if (orphan != null) {
+                orphan.close();
+            }
+            throw failed;
+        }
     }
 }

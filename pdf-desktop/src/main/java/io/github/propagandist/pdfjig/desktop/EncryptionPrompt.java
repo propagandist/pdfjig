@@ -6,6 +6,7 @@ import io.github.propagandist.pdfjig.core.Protection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import javafx.beans.property.StringProperty;
 import javafx.geometry.Insets;
 import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
@@ -25,7 +26,7 @@ import javafx.util.StringConverter;
  * パスワードと権限フラグを尋ねるダイアログ。
  *
  * <p><b>★★ 権限フラグは暗号学的に強制されない</b>（{@code docs/SPEC.md} §6.1）。
- * <b>ユーザーパスワードが空なら PDF の中身は暗号化されておらず</b>、権限フラグは
+ * <b>ユーザーパスワードが空なら出力は誰でも開ける</b>ので、権限フラグは
  * <b>閲覧ソフトが自主的に従っているだけの申告制である。</b>
  * <b>利用者はほぼ確実に「コピー禁止にしたから安全」と誤解する</b>ので、
  * <b>オーナーパスワードだけを設定しようとしたときに明示する</b>（同 §6.1 の要件）。
@@ -76,15 +77,21 @@ final class EncryptionPrompt {
         PasswordField ownerPassword = passwordField("encryption-owner-password");
         PasswordField ownerConfirm = passwordField("encryption-owner-password-confirm");
 
+        // 打たれている中身。束縛はこちらで組む——欄そのものは焦点と写し取りに使う。
+        StringProperty typedUser = userPassword.textProperty();
+        StringProperty typedUserAgain = userConfirm.textProperty();
+        StringProperty typedOwner = ownerPassword.textProperty();
+        StringProperty typedOwnerAgain = ownerConfirm.textProperty();
+
         Flags flags = new Flags();
 
         Label ownerOnly =
                 new Label("この設定は閲覧ソフトの自主的な遵守に依存します。" + System.lineSeparator() + "確実に保護するにはユーザーパスワードを設定してください。");
         ownerOnly.setId("encryption-owner-only-warning");
         ownerOnly.setWrapText(true);
-        // ★★ ユーザーパスワードが空のときだけ出す。空でなければ本文が暗号化されるので、
+        // ★★ ユーザーパスワードが空のときだけ出す。空でなければ開くのに鍵が要るので、
         //   権限フラグの申告制という話は当たらない（SPEC.md §6.1 の表）。
-        ownerOnly.visibleProperty().bind(userPassword.textProperty().isEmpty());
+        ownerOnly.visibleProperty().bind(typedUser.isEmpty());
         ownerOnly.managedProperty().bind(ownerOnly.visibleProperty());
 
         Label noOwner = new Label(
@@ -100,13 +107,7 @@ final class EncryptionPrompt {
         //   オーナー扱いになる——空のときだけを見ると、こちらが素通りする（#30 の門の 2 段目）。
         //   ★ 上の注意と同時には当たらない（あちらはユーザー側が空のとき）。
         noOwner.visibleProperty()
-                .bind(userPassword
-                        .textProperty()
-                        .isNotEmpty()
-                        .and(ownerPassword
-                                .textProperty()
-                                .isEmpty()
-                                .or(ownerPassword.textProperty().isEqualTo(userPassword.textProperty()))));
+                .bind(typedUser.isNotEmpty().and(typedOwner.isEmpty().or(typedOwner.isEqualTo(typedUser))));
         noOwner.managedProperty().bind(noOwner.visibleProperty());
 
         ChoiceBox<EncryptionAlgorithm> algorithm = new ChoiceBox<>();
@@ -124,17 +125,10 @@ final class EncryptionPrompt {
                 throw new UnsupportedOperationException("選ぶだけで、打ち込む形は無い。");
             }
         });
-        // ★ 書ける方式だけを出す。NONE と UNKNOWN は「読んだ結果」を表す値であり、
-        //   Protection を作るところで拒まれる（#199）。
-        algorithm
-                .getItems()
-                .setAll(
-                        EncryptionAlgorithm.AES_256,
-                        EncryptionAlgorithm.AES_128,
-                        EncryptionAlgorithm.RC4_128,
-                        EncryptionAlgorithm.RC4_40);
-        // 既定は AES-256（SPEC.md §6.2）。RC4 系と AES-128 は互換性が要るときだけの選択肢である。
-        algorithm.getSelectionModel().select(EncryptionAlgorithm.AES_256);
+        // ★ 並びは手で写さない。書ける方式が増えた日に、ここだけが黙って古いまま残る。
+        algorithm.getItems().setAll(EncryptionAlgorithm.writable());
+        // 既定は先頭（SPEC.md §6.2 の AES-256）。RC4 系と AES-128 は互換性が要るときだけである。
+        algorithm.getSelectionModel().selectFirst();
 
         // ★ 方式の選択は「8 つの権限」ではない。ここで組む——Flags へ渡すと、
         //   詳細に何が入るのかが 2 つのファイルに分かれる。
@@ -196,14 +190,10 @@ final class EncryptionPrompt {
         dialog.getDialogPane()
                 .lookupButton(apply)
                 .disableProperty()
-                .bind(userPassword
-                        .textProperty()
-                        .isNotEqualTo(userConfirm.textProperty())
-                        .or(ownerPassword.textProperty().isNotEqualTo(ownerConfirm.textProperty()))
-                        .or(userPassword
-                                .textProperty()
-                                .isEmpty()
-                                .and(ownerPassword.textProperty().isEmpty())));
+                .bind(typedUser
+                        .isNotEqualTo(typedUserAgain)
+                        .or(typedOwner.isNotEqualTo(typedOwnerAgain))
+                        .or(typedUser.isEmpty().and(typedOwner.isEmpty())));
 
         dialog.setResultConverter(button -> {
             try {
