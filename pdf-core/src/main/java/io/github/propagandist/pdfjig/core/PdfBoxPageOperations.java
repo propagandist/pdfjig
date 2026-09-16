@@ -424,6 +424,10 @@ public final class PdfBoxPageOperations implements PageOperations {
      * {@link Warning#ENCRYPTION_NOT_PROPAGATED} は<b>「出力されたファイルは
      * 保護されていません」で終わる</b>——<b>掛けた出力についてそれを言うと嘘になる。</b>
      * <b>署名のほうは黙らない</b>——<b>保護を掛けても、署名は無効のままである。</b>
+     *
+     * <p><b>★★ 掛けたうえで誰でも開けるなら、それは別に言う</b>
+     * （{@link Warning#CONTENT_OPENS_WITHOUT_A_KEY}。#30 の門の 2 段目）。
+     * <b>入力が暗号化されているかとは無関係なので、寄与する入力の輪の外で 1 度だけ出す。</b>
      */
     private static void warnAboutContributing(
             List<PdfDocument> documents, List<PageSelection> pages, Warnings warnings, Protection protection) {
@@ -431,17 +435,22 @@ public final class PdfBoxPageOperations implements PageOperations {
         for (PageSelection selection : pages) {
             contributing.add(selection.sourceIndex());
         }
+        // ★★ 入力とは無関係に、1 度だけ言う。保護を掛けたのにユーザーパスワードが空なら、
+        //   出力は誰でも開ける——入力が平文でも同じである（docs/SPEC.md §6.1）。
+        //   ★ 輪の外に置く。中では寄与する入力の数だけ繰り返してしまい、数が意味を持たない。
+        if (protection != null && !protection.userPasswordRequired()) {
+            warnings.add(Warning.CONTENT_OPENS_WITHOUT_A_KEY);
+        }
         for (int index : contributing) {
             PdfDocument document = documents.get(index);
-            // ★★ 中身が隠れるなら言わない（#199 の門の 2 段目）。あの文言は
-            //   「出力されたファイルは保護されていません」で終わる——隠れた出力について
+            // ★★ 保護を掛けるなら言わない（#199 の門の 2 段目）。あの文言は
+            //   「出力されたファイルは保護されていません」で終わる——掛けた出力について
             //   それを言うと嘘になり、次に本当のときに読まれなくなる（優先順位 2）。
             //   ★ 引き継いでいないのは確かだが、利用者が受け取るのは保護された出力である。
-            //   ★★ 「保護を掛けた」では足りない（#30 の門の 2 段目）。ユーザーパスワードが
-            //   空なら中身は暗号化されず、残るのは申告制の権限フラグだけである
-            //   （Protection#encryptsContent）——そこで黙ると、鍵の要る入力から
-            //   誰でも開ける出力ができたことを、告げる口が 1 つも無くなる。
-            if ((protection == null || !protection.encryptsContent()) && document.encrypted()) {
+            //   ★★ 誰でも開ける出力になったことは、別の値で言う（CONTENT_OPENS_WITHOUT_A_KEY）。
+            //   ここへ寄せると、暗号化辞書もオーナーパスワードも載った出力について
+            //   「保護されていません」と言うことになり、同じ嘘を逆向きに吐く（#30 の門の 2 段目）。
+            if (protection == null && document.encrypted()) {
                 warnings.add(Warning.ENCRYPTION_NOT_PROPAGATED);
             }
             if (document.signed()) {

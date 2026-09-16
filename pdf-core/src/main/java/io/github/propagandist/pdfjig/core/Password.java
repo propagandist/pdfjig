@@ -108,7 +108,7 @@ public final class Password implements AutoCloseable {
      *
      * <p><b>★ 答えるのは長さが 0 かどうかだけである。</b>中身は返さないので、
      * <b>この口は INV-5 の境界を作らない</b>——「鍵が設定されているか」は
-     * <b>画面が判断に使う</b>（{@link Protection#encryptsContent()}）。
+     * <b>画面が判断に使う</b>（{@link Protection#userPasswordRequired()}）。
      *
      * <p><b>★ 閉じた後も答える。</b>ゼロ埋めは長さを変えず、判定は中身を読まない。
      *

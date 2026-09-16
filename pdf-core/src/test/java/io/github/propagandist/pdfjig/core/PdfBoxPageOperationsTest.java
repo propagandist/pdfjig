@@ -1111,21 +1111,63 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
-        @DisplayName("★★ ユーザーパスワードが空なら、中身は隠れない")
-        void doesNotEncryptContentWithoutAUserPassword() {
-            // ★★ 「保護を掛けた」と「中身が隠れる」は別である（SPEC.md §6.1）。
+        @DisplayName("★★ ユーザーパスワードが空なら、出力は鍵なしで開ける")
+        void saysTheOutputOpensWithoutAKeyWhenTheUserPasswordIsEmpty() {
+            // ★★ 「保護を掛けた」と「守られる」は別である（SPEC.md §6.1）。
             //   同じものとして扱うと、告げる側が黙る（warnAboutContributing）。
             try (Password empty = Password.copyOf("");
                     Password user = Password.copyOf(USER);
                     Password owner = Password.copyOf("owner")) {
                 assertFalse(
                         new Protection(empty, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256)
-                                .encryptsContent(),
-                        "鍵が空なのに中身が隠れると答えている");
+                                .userPasswordRequired(),
+                        "鍵が空なのに、開くのに鍵が要ると答えている");
                 assertTrue(
                         new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256)
-                                .encryptsContent(),
-                        "鍵があるのに中身が隠れないと答えている");
+                                .userPasswordRequired(),
+                        "鍵があるのに、鍵なしで開けると答えている");
+            }
+        }
+
+        @Test
+        @DisplayName("★★ 鍵が空でも中身は暗号化される。違うのは誰でも開けることである")
+        void stillEncryptsWithAnEmptyUserPassword() throws Exception {
+            // ★★ 「暗号化されない」と書いていたが、誤りだった（2026-09-16 実測）。
+            //   PDFBox は空文字列から鍵を導いて暗号化する。違うのは開くのに鍵が要らないことで、
+            //   そこを取り違えると Warning の文言が嘘になる（#30 の門の 2 段目）。
+            Path input = TestPdfs.plain(tempDir.resolve("empty-key.pdf"), 1);
+            Path output = tempDir.resolve("opens-without-a-key.pdf");
+            protect(List.of(input), List.of(PageSelection.of(0, 1)), output, "", "owner");
+
+            EncryptionInfo info = new PdfBoxEncryption().inspect(output);
+            assertTrue(info.encrypted(), "鍵が空だと暗号化そのものが掛かっていない");
+            assertEquals(EncryptionAlgorithm.AES_256, info.algorithm());
+            assertFalse(info.userPasswordRequired(), "鍵が空なのに開くのに鍵が要る");
+        }
+
+        @Test
+        @DisplayName("★★ 鍵の要る入力からでも、指定した権限がそのまま載る")
+        void carriesThePermissionsThroughAKeyedInput() throws Exception {
+            // ★★ 入力の暗号化辞書を抱えた PDDocument へ掛け直す経路である。
+            //   古い /R や /Perms が残ると、詳細で外した権限が出力に載らない。
+            //   画面は暗号化された文書を開いて保護して保存できるので、ここは実際に通る。
+            Path locked = TestPdfs.encrypted(tempDir.resolve("locked.pdf"), "in", 1);
+            Path output = tempDir.resolve("relocked-keyed.pdf");
+            AccessPermissions noPrint = new AccessPermissions(false, true, false, true, true, true, true, false);
+            try (Password in = Password.copyOf("in");
+                    Password user = Password.copyOf(USER);
+                    Password owner = Password.copyOf("owner")) {
+                new PdfBoxPageOperations(WarningListener.ignoring())
+                        .assemble(
+                                new Sources(List.of(Source.of(locked, in))),
+                                List.of(PageSelection.of(0, 1)),
+                                output,
+                                new Protection(user, owner, noPrint, EncryptionAlgorithm.AES_256));
+            }
+
+            try (Password user = Password.copyOf(USER)) {
+                assertEquals(
+                        noPrint, new PdfBoxEncryption().inspect(output, user).permissions(), "外した権限が出力に載っていない");
             }
         }
 
@@ -1199,14 +1241,55 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
-        @DisplayName("★★ 中身が隠れないなら、保護を掛けても警告する")
-        void stillWarnsWhenTheContentStaysReadable() throws Exception {
-            // ★★ ユーザーパスワードが空だと、出力の中身は暗号化されない（SPEC.md §6.1）。
-            //   残るのは申告制の権限フラグだけである。「保護を掛けたから黙る」にすると、
-            //   鍵の要る入力から誰でも開ける出力ができたことを、告げる口が 1 つも無くなる
-            //   ——画面も窓を出さない側へ倒れる（MainWindow#save。#30 の門の 2 段目）。
-            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+        @DisplayName("★★ 誰でも開ける出力になったなら、そう告げる")
+        void warnsWhenTheOutputOpensWithoutAKey() throws Exception {
+            // ★★ 「保護されていません」では嘘になる——暗号化辞書もオーナーパスワードも
+            //   権限フラグも載っている。告げるのは「誰でも開ける」ことである（#30 の門の 2 段目）。
+            //   ★ 入力が平文でも出す。入力の保護とは無関係な事実である。
+            Path plain = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
             Path output = tempDir.resolve("owner-only.pdf");
+
+            List<Warning> seen = new ArrayList<>();
+            PageOperations watching = new PdfBoxPageOperations(seen::add);
+            try (Password user = Password.copyOf("");
+                    Password owner = Password.copyOf("owner")) {
+                watching.assemble(
+                        Sources.ofPaths(List.of(plain)),
+                        List.of(PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertEquals(List.of(Warning.CONTENT_OPENS_WITHOUT_A_KEY), seen, "誰でも開ける出力になったことを、1 度だけ告げていない");
+        }
+
+        @Test
+        @DisplayName("★★ 鍵が要るなら、誰でも開けるとは言わない")
+        void staysSilentWhenAKeyIsRequired() throws Exception {
+            Path plain = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("locked.pdf");
+
+            List<Warning> seen = new ArrayList<>();
+            PageOperations watching = new PdfBoxPageOperations(seen::add);
+            try (Password user = Password.copyOf(USER);
+                    Password owner = Password.copyOf("owner")) {
+                watching.assemble(
+                        Sources.ofPaths(List.of(plain)),
+                        List.of(PageSelection.of(0, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertFalse(seen.contains(Warning.CONTENT_OPENS_WITHOUT_A_KEY), "鍵が要るのに「誰でも開ける」と言っている");
+        }
+
+        @Test
+        @DisplayName("★★ 保護を掛けたなら「保護されていません」とは言わない")
+        void neverSaysUnprotectedAboutAProtectedOutput() throws Exception {
+            // ★★ 逆向きの嘘を塞ぐ。オーナーパスワードだけの出力にも暗号化辞書は載っており、
+            //   あの文言は当たらない——嘘を言えば、次に本当のときに読まれなくなる（優先順位 2）。
+            Path encrypted = TestPdfs.ownerProtected(tempDir.resolve("owner.pdf"), "owner", 1);
+            Path output = tempDir.resolve("relocked.pdf");
 
             List<Warning> seen = new ArrayList<>();
             PageOperations watching = new PdfBoxPageOperations(seen::add);
@@ -1219,7 +1302,7 @@ class PdfBoxPageOperationsTest {
                         new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
             }
 
-            assertTrue(seen.contains(Warning.ENCRYPTION_NOT_PROPAGATED), "中身は隠れていないのに、保護が落ちたことを伝えていない");
+            assertFalse(seen.contains(Warning.ENCRYPTION_NOT_PROPAGATED), "保護を掛けた出力に「保護されていません」と言っている");
         }
 
         @Test
@@ -1256,6 +1339,19 @@ class PdfBoxPageOperationsTest {
                     Password owner = Password.copyOf("owner")) {
                 operations.assemble(
                         Sources.ofPaths(inputs), pages, output, new Protection(user, owner, permissions, algorithm));
+            }
+        }
+
+        /** 鍵を指定して保護して書き出す。空の鍵を渡す経路のためにある。 */
+        private void protect(
+                List<Path> inputs, List<PageSelection> pages, Path output, String userPassword, String ownerPassword) {
+            try (Password user = Password.copyOf(userPassword);
+                    Password owner = Password.copyOf(ownerPassword)) {
+                operations.assemble(
+                        Sources.ofPaths(inputs),
+                        pages,
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
             }
         }
 
