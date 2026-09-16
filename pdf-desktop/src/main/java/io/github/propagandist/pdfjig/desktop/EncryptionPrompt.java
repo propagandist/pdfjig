@@ -84,22 +84,6 @@ final class EncryptionPrompt {
         ownerOnly.visibleProperty().bind(userPassword.textProperty().isEmpty());
         ownerOnly.managedProperty().bind(ownerOnly.visibleProperty());
 
-        Label noOwner = new Label(
-                "オーナーパスワードが空のときは、ユーザーパスワードがそのまま権限の鍵になります。" + System.lineSeparator() + "文書を開けた人は権限も変更できるため、上の設定は効きません。");
-        noOwner.setId("encryption-no-owner-warning");
-        noOwner.setWrapText(true);
-        // ★★ PDFBox は空のオーナーパスワードをユーザーパスワードで埋める
-        //   （StandardSecurityHandler#prepareDocumentForEncryption。3.0.8 の実装を読んで確かめた。
-        //   2026-09-15 実測）——開けた人がオーナー権限を持つので、外した権限フラグは
-        //   規約どおりの閲覧ソフトでも無視される。★ 中身が隠れているかとは別の話なので、
-        //   上の注意とは別に出す。両方が同時に当たることは無い（あちらはユーザー側が空のとき）。
-        noOwner.visibleProperty()
-                .bind(ownerPassword
-                        .textProperty()
-                        .isEmpty()
-                        .and(userPassword.textProperty().isNotEmpty()));
-        noOwner.managedProperty().bind(noOwner.visibleProperty());
-
         ChoiceBox<EncryptionAlgorithm> algorithm = new ChoiceBox<>();
         algorithm.setId("encryption-algorithm");
         // ★ 書ける方式だけを出す。NONE と UNKNOWN は「読んだ結果」を表す値であり、
@@ -130,7 +114,6 @@ final class EncryptionPrompt {
                 new Label("書き出すファイルにパスワードを設定します。"),
                 passwordGrid(userPassword, userConfirm, ownerPassword, ownerConfirm),
                 ownerOnly,
-                noOwner,
                 flags.presetBox(),
                 details);
         content.setPadding(new Insets(12));
@@ -161,6 +144,7 @@ final class EncryptionPrompt {
         //   ★ あちらに要るのは中身の高さが動かないからである。こちらは詳細の開閉で動く。
         //   出したときの大きさは Dialog が中身に合わせて決めるので、畳んだ状態は
         //   これまでどおり過不足なく収まる。
+        dialog.getDialogPane().setMinHeight(javafx.scene.layout.Region.USE_PREF_SIZE);
         dialog.setResizable(true);
         dialog.getDialogPane().getButtonTypes().addAll(apply, ButtonType.CANCEL);
         dialog.getDialogPane().lookupButton(apply).setId("encryption-apply");
