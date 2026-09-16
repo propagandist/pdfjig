@@ -19,8 +19,8 @@ import java.nio.file.Path;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TitledPane;
+import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -190,16 +190,15 @@ class EncryptionUiTest extends DesktopUiTest {
         //   出力は印刷を一切許さない（優先順位 2）。
         // ★★ 束ではなく、印刷そのものを外す。束を押すと中身を 2 つとも外すので、
         //   「印刷を外したら高品質も落ちる」仕掛けを消しても赤くならない。
-        //   ★ 詳細の中は流れるので、押す前に見えていることを確かめる
-        //   （待ち合わせだけでは、流れた先の節点を押してしまう。2026-09-16 実測）。
-        scrollTo(robot, "#encryption-flag-print");
-        clickWhenReady(robot, "#encryption-flag-print");
+        //   ★ 押さずに、焦点を送って空白で切り替える——詳細の中は流れるので、
+        //   座標で押すと流れた先の節点に当たる（2026-09-16 実測。CI windows）。
+        toggle(robot, "#encryption-flag-print");
         assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "印刷が外れていない");
         assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を外したのに高品質が残っている");
         assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を外したのに高品質を押せる");
 
         // ★★ 戻したら戻る。外すだけにすると、本人が外していない権限が黙って残る。
-        clickWhenReady(robot, "#encryption-flag-print");
+        toggle(robot, "#encryption-flag-print");
         assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を戻したのに高品質が落ちたままである");
         assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を戻したのに高品質を押せない");
 
@@ -354,27 +353,21 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     /**
-     * 流れる中身の節点を、見える位置まで送る。
+     * 節点へ焦点を送って、空白で切り替える。
      *
-     * <p><b>★★ 待ち合わせだけでは足りない。</b>{@code ScrollPane} の外へ流れた節点も
-     * <b>scene の矩形とは重なったまま</b>なので、{@code clickWhenReady} は通るのに
-     * <b>押した先が別の節点になる</b>（2026-09-16 実測。CI windows）。
+     * <p><b>★★ 座標で押さない。</b>詳細の中身は {@code ScrollPane} の外へ流れるが、
+     * <b>流れた節点も scene の矩形とは重なったまま</b>なので、
+     * <b>待ち合わせは通るのに押した先が別の節点になる</b>
+     * （<b>2026-09-16 実測</b>。CI windows で 2 度踏んだ）。
      *
-     * <p><b>★ 吸収ではない。</b>送っても見えないなら、{@code clickWhenReady} が上限まで待って落ちる。
+     * <p><b>★ 吸収ではない。</b>焦点が入らなければ上限まで待って落ちる。
+     * <b>人はキーボードでも同じことをする</b>ので、見ている仕掛けは変わらない。
      */
-    private static void scrollTo(FxRobot robot, String id) throws Exception {
+    private static void toggle(FxRobot robot, String id) throws Exception {
         Node node = node(robot, id);
-        Platform.runLater(() -> {
-            for (Node parent = node.getParent(); parent != null; parent = parent.getParent()) {
-                if (parent instanceof ScrollPane scroller) {
-                    double content = scroller.getContent().getBoundsInLocal().getHeight();
-                    double viewport = scroller.getViewportBounds().getHeight();
-                    double top = node.getBoundsInParent().getMinY();
-                    scroller.setVvalue(content <= viewport ? 0 : top / (content - viewport));
-                    return;
-                }
-            }
-        });
+        Platform.runLater(node::requestFocus);
+        waitFor(node::isFocused);
+        robot.type(KeyCode.SPACE);
         WaitForAsyncUtils.waitForFxEvents();
     }
 
