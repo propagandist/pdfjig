@@ -438,11 +438,11 @@ public final class PdfBoxPageOperations implements PageOperations {
         // ★★ 入力とは無関係に、1 度だけ言う。保護を掛けたのにユーザーパスワードが空なら、
         //   出力は誰でも開ける——入力が平文でも同じである（docs/SPEC.md §6.1）。
         //   ★ 輪の外に置く。中では寄与する入力の数だけ繰り返してしまい、数が意味を持たない。
+        if (protection != null && !protection.userPasswordRequired()) {
+            warnings.add(Warning.CONTENT_OPENS_WITHOUT_A_KEY);
+        }
         for (int index : contributing) {
             PdfDocument document = documents.get(index);
-            if (protection != null && !protection.userPasswordRequired()) {
-                warnings.add(Warning.CONTENT_OPENS_WITHOUT_A_KEY);
-            }
             // ★★ 保護を掛けるなら言わない（#199 の門の 2 段目）。あの文言は
             //   「出力されたファイルは保護されていません」で終わる——掛けた出力について
             //   それを言うと嘘になり、次に本当のときに読まれなくなる（優先順位 2）。
