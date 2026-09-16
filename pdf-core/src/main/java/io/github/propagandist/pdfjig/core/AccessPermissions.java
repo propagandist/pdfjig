@@ -4,7 +4,7 @@ package io.github.propagandist.pdfjig.core;
  * 権限フラグ。
  *
  * <p><b>★★ これは暗号学的に強制されない</b>（{@code docs/SPEC.md} §6.1）。
- * ユーザーパスワードが空なら PDF の中身は暗号化されておらず、<b>閲覧ソフトが自主的に
+ * ユーザーパスワードが空なら<b>出力は誰でも開ける</b>ので、<b>閲覧ソフトが自主的に
  * 従っているだけの申告制である。</b>PDFBox を含む任意のライブラリで無視できる。
  *
  * <p><b>pdfjig 自身も、抽出を禁じる設定を無視して抽出する</b>（§6.1.1）——
@@ -28,6 +28,22 @@ public record AccessPermissions(
         boolean assembleDocument,
         boolean extractForAccessibility,
         boolean printHighQuality) {
+
+    /**
+     * 高品質の印刷は、印刷を許しているときしか意味を持たないので、そうなら落とす。
+     *
+     * <p><b>★★ 保っても印刷はできない</b>（PDF 32000-1 の表 22。ビット 12 はビット 3 を修飾する）。
+     * <b>両方をそのまま書くと、「高品質なら印刷できる」と読める値が残る</b>——
+     * <b>読む側はビット 3 を見て印刷を拒むので、思ったのと違う結果になる</b>
+     * （{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）。
+     *
+     * <p><b>★ 断らずに揃える。</b>断る形にすると、<b>既にこの形を作っている呼び手が
+     * 突然落ちる</b>——{@code all()} も {@code none()} も元から揃っている。
+     * <b>画面はそれとは別に、押せなくして見せる</b>（{@code Flags}）。
+     */
+    public AccessPermissions {
+        printHighQuality = printHighQuality && print;
+    }
 
     /**
      * すべて許可する。
