@@ -129,14 +129,10 @@ public final class MainWindow {
          */
         OUTPUT_NEEDS_A_KEY("（書き出したファイルには鍵が要るため、開き直していません。開き直してください）");
 
-        private final String text;
+        final String text;
 
         StaleReason(String text) {
             this.text = text;
-        }
-
-        String text() {
-            return text;
         }
     }
 
@@ -677,7 +673,7 @@ public final class MainWindow {
                             // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
                             //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
                             //   必ず出る警告であり、例外的な経路ではない。
-                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts(), asked));
+                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts, asked));
                         }
                     });
             // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
@@ -1140,7 +1136,7 @@ public final class MainWindow {
 
     private void showSplitResult(DocumentWriter.SplitResult result, int asked) {
         messages.information(result.fileCount() + " 個のファイルを書き出しました。");
-        messages.warnings(exceptWhatWasAsked(result.warnings(), Warning.ENCRYPTION_NOT_PROPAGATED, asked));
+        messages.warnings(exceptWhatWasAsked(result.warnings(), ProtectionPrompt.Outcome.PLAIN.preempts, asked));
     }
 
     /**
@@ -1172,7 +1168,8 @@ public final class MainWindow {
      * 残った数が、<b>問わずに保護を落とした入力の数になる。</b>
      *
      * @param warnings 書き出しで出た警告
-     * @param asked    窓で名前を出して同意を得た出どころの数
+     * @param asked    窓が既に言った値。{@link ProtectionPrompt.Outcome} が問う文言と対で持っている
+     * @param count    その値を落とす上限。<b>窓で名前を出して同意を得た出どころの数である</b>
      * @return 残す警告
      */
     static List<Warning> exceptWhatWasAsked(List<Warning> warnings, Warning asked, int count) {
@@ -1370,7 +1367,7 @@ public final class MainWindow {
             }
             if (stale.get()) {
                 // 書き出したファイルはできている。開き直せば続けられる。
-                text.append(staleReason.text());
+                text.append(staleReason.text);
             }
             if (session.encrypted()) {
                 text.append("（暗号化されています）");

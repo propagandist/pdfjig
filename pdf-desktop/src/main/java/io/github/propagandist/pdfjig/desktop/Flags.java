@@ -49,19 +49,16 @@ final class Flags {
      * 束はここで組む。
      *
      * <p><b>★ 初期化子の並びに依存させない。</b>束の宣言を 8 つの上へ移すだけで
-     * <b>{@code List.of(null)} になり</b>、メニューを押しても何も起きない形で壊れる
+     * <b>{@code List.of} が {@code null} を拒んで投げ</b>、メニューを押しても窓が出ない
      * ——<b>コンパイルは通る。</b>
      */
     Flags() {
-        // ★★ 高品質は印刷の下にある（permissions の註）。印刷を外したら押せなくし、
-        //   印刷を戻したら押せるように戻す——押せないままチェックが残ると、
-        //   「高品質では印刷できる」と読める。
+        // ★★ 高品質は印刷の下にある（permissions の註）。印刷を外したら外して押せなくし、
+        //   戻したら戻す。
+        //   ★ 片道にしない。外すだけにすると、印刷を戻した人の手元で高品質だけが
+        //   落ちたままになる——本人が外していない権限が黙って残る（#30 の門の 2 段目）。
         printHighQuality.disableProperty().bind(print.selectedProperty().not());
-        print.selectedProperty().addListener((property, was, now) -> {
-            if (!now) {
-                printHighQuality.setSelected(false);
-            }
-        });
+        print.selectedProperty().addListener((property, was, now) -> printHighQuality.setSelected(now));
         allowPrint = preset("encryption-allow-print", "印刷を許可", List.of(print, printHighQuality));
         allowExtract = preset("encryption-allow-extract", "テキスト抽出を許可", List.of(extractContent));
         allowModify = preset(

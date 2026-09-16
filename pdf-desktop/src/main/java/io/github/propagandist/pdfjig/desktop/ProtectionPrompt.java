@@ -55,6 +55,7 @@ final class ProtectionPrompt {
      *
      * @param owner    親ウィンドウ
      * @param dropping 保護が落ちる出どころのファイル名。<b>空で呼ばないこと</b>
+     * @param outcome  書き出した先がどうなるのか。<b>文言と、後から出す警告のどれを落とすかを決める</b>
      * @return 続けるなら {@code true}
      */
     static boolean confirm(Stage owner, List<String> dropping, Outcome outcome) {
@@ -72,7 +73,7 @@ final class ProtectionPrompt {
         //   出どころの名前を並べるので、本文の長さが入力で決まる側である。
         alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
         alert.setResizable(true);
-        alert.setTitle("保護は引き継がれません");
+        alert.setTitle(outcome.titleText);
         alert.setHeaderText(headerFor(dropping, outcome));
         alert.getDialogPane().setId("protection-dialog");
         alert.getDialogPane().setContent(body(dropping, outcome));
@@ -106,8 +107,9 @@ final class ProtectionPrompt {
 
         /** 保護を何も掛けない。出力は平文である。 */
         PLAIN(
-                "書き出すファイルはパスワードで保護されません。",
-                "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。",
+                "保護は引き継がれません",
+                "書き出すファイルはパスワードで保護されません",
+                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。",
                 "保護を外して書き出す",
                 Warning.ENCRYPTION_NOT_PROPAGATED),
 
@@ -118,12 +120,17 @@ final class ProtectionPrompt {
          * 誰でも開ける</b>（2026-09-16 実測。{@code Protection#userPasswordRequired}）。
          */
         OPENS_WITHOUT_A_KEY(
-                "書き出すファイルは、ユーザーパスワードが空なので誰でも開けます。",
-                "開くときにパスワードを要るようにするには、ユーザーパスワードを設定してください。",
+                "書き出すファイルは誰でも開けます",
+                "ユーザーパスワードが空なので、書き出すファイルは誰でも開けます",
+                "オーナーパスワードと権限の設定は出力へ載りますが、権限は閲覧ソフトの自主的な遵守に依存します。" + System.lineSeparator()
+                        + "開くときにパスワードが要るようにするには、ユーザーパスワードを設定してください。",
                 "このまま書き出す",
                 Warning.CONTENT_OPENS_WITHOUT_A_KEY);
 
-        /** 見出し。 */
+        /** 窓の題。<b>固定しない</b>——保護を掛けている最中に「引き継がれません」と出る。 */
+        final String titleText;
+
+        /** 見出し。<b>句点は付けない</b>——件数を後ろへ挿すので、付けるのは組む側である。 */
         final String headerText;
 
         /** 添える一文。 */
@@ -133,7 +140,7 @@ final class ProtectionPrompt {
         final String proceedText;
 
         /**
-         * この窓で問ったことを、書き出しの後にもう一度言わないための値。
+         * この窓で問うたことを、書き出しの後にもう一度言わないための値。
          *
          * <p><b>★★ 対をここに持たせる。</b>落とす値をフィルタの側へ書き込むと、
          * <b>問う窓を 1 つ足した日に、その分が黙って素通りする</b>
@@ -141,20 +148,20 @@ final class ProtectionPrompt {
          */
         final Warning preempts;
 
-        Outcome(String headerText, String adviceText, String proceedText, Warning preempts) {
+        Outcome(String titleText, String headerText, String adviceText, String proceedText, Warning preempts) {
+            this.titleText = titleText;
             this.headerText = headerText;
             this.adviceText = adviceText;
             this.proceedText = proceedText;
             this.preempts = preempts;
         }
-
-        Warning preempts() {
-            return preempts;
-        }
     }
 
     private static String headerFor(List<String> dropping, Outcome outcome) {
-        return dropping.size() == 1 ? outcome.headerText : outcome.headerText + "（保護された入力が " + dropping.size() + " 件）";
+        // ★ 件数は句点の前に入れる。後ろへ付けると、文の真ん中に句点が残る。
+        return dropping.size() == 1
+                ? outcome.headerText + "。"
+                : outcome.headerText + "（保護された入力が " + dropping.size() + " 件）。";
     }
 
     /**
@@ -168,7 +175,7 @@ final class ProtectionPrompt {
         sources.setId("protection-sources");
         sources.setWrapText(true);
 
-        Label consequence = new Label("書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + outcome.adviceText);
+        Label consequence = new Label(outcome.adviceText);
         consequence.setWrapText(true);
 
         VBox content = new VBox(8, sources, consequence);

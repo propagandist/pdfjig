@@ -18,7 +18,8 @@ import java.util.List;
  * <b>既にある文書へ後から掛けるのは {@link Encryption#protect} である</b>——
  * あちらを通すと<b>平文が一度ディスクに現れる。</b>
  *
- * @param userPassword  文書を開くための鍵。<b>空でない鍵を渡すと、本文が暗号化される</b>
+ * @param userPassword  文書を開くための鍵。<b>空なら出力は誰でも開ける</b>
+ *                      （{@link #userPasswordRequired()}。中身は暗号化される）
  * @param ownerPassword 権限を変更するための鍵
  * @param permissions   権限フラグ。<b>暗号学的には強制されない</b>（{@code docs/SPEC.md} §6.1）
  * @param algorithm     暗号方式。既定は {@link EncryptionAlgorithm#AES_256}（同 §6.2）。
@@ -38,10 +39,12 @@ public record Protection(
         if (algorithm == null) {
             throw new IllegalArgumentException("algorithm は null にできません。");
         }
+        // ★ 判定は EncryptionAlgorithm が持つ。手で数え上げると、ここだけが
+        //   コンパイラの検査から外れる——拒むはずの値が黙って通るのはここである。
         // ★★ 書けない方式は値の段で拒む。奥で拒むと、そこへ届くまでに
         //   秘密が String 化され（StandardProtection）、入力も全部開かれている
         //   ——断ると分かっている要求のために、消せない文字列が 2 本残る（#199 の門）。
-        if (algorithm == EncryptionAlgorithm.NONE || algorithm == EncryptionAlgorithm.UNKNOWN) {
+        if (!EncryptionAlgorithm.writable().contains(algorithm)) {
             throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
         }
     }

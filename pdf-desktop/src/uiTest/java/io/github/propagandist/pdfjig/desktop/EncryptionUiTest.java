@@ -16,8 +16,10 @@ import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TitledPane;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
@@ -130,7 +132,7 @@ class EncryptionUiTest extends DesktopUiTest {
 
         clickWhenReady(robot, "#encryption-user-password");
         robot.write(USER);
-        // 入れれば本文が暗号化されるので、申告制という話は当たらなくなる。
+        // 入れれば開くのに鍵が要るので、申告制という話は当たらなくなる。
         waitFor(() -> !node(robot, "#encryption-owner-only-warning").isVisible());
 
         clickWhenReady(robot, "#encryption-cancel");
@@ -186,14 +188,20 @@ class EncryptionUiTest extends DesktopUiTest {
         // ★★ 高品質の印刷は、印刷を許しているときしか意味を持たない（PDF 32000-1 の表 22）。
         //   チェックを残したままにできると、画面は「高品質で印刷できる」と言いながら
         //   出力は印刷を一切許さない（優先順位 2）。
-        // ★★ 押すのは束の㡳うである。詳細を開くと中身は窓より高くなり、
-        //   流れた先の節点は scene の矩形と重なったままなので、待ち合わせは通るのに
-        //   押した先が別の節点になる（2026-09-16 実測。CI windows で「印刷が外れていない」と落ちた）。
-        //   ★ 束を外しても print の変化を通るので、見たい仕掛けは同じである。
-        clickWhenReady(robot, "#encryption-allow-print");
+        // ★★ 束ではなく、印刷そのものを外す。束を押すと中身を 2 つとも外すので、
+        //   「印刷を外したら高品質も落ちる」仕掛けを消しても赤くならない。
+        //   ★ 詳細の中は流れるので、押す前に見えていることを確かめる
+        //   （待ち合わせだけでは、流れた先の節点を押してしまう。2026-09-16 実測）。
+        scrollTo(robot, "#encryption-flag-print");
+        clickWhenReady(robot, "#encryption-flag-print");
         assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "印刷が外れていない");
         assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を外したのに高品質が残っている");
         assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を外したのに高品質を押せる");
+
+        // ★★ 戻したら戻る。外すだけにすると、本人が外していない権限が黙って残る。
+        clickWhenReady(robot, "#encryption-flag-print");
+        assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を戻したのに高品質が落ちたままである");
+        assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を戻したのに高品質を押せない");
 
         clickWhenReady(robot, "#encryption-cancel");
         WaitForAsyncUtils.waitForFxEvents();
@@ -224,8 +232,8 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     @Test
-    void 鍵の要る入力を中身が隠れない形で書き出すなら問う(@TempDir Path dir, FxRobot robot) throws Exception {
-        // ★★ ユーザーパスワードを空にすると、出力の中身は暗号化されない（docs/SPEC.md §6.1）。
+    void 鍵の要る入力を誰でも開ける形で書き出すなら問う(@TempDir Path dir, FxRobot robot) throws Exception {
+        // ★★ ユーザーパスワードを空にすると、出力は誰でも開ける（docs/SPEC.md §6.1）。
         //   鍵の要る入力が、誰でも開ける出力になる——「保護を掛けたから黙る」にすると、
         //   窓も出ず pdf-core の警告も出ない形で、それが静かに起きる。
         Path fixture = TestPdfs.encrypted(dir.resolve("locked.pdf"), USER, 1);
@@ -343,6 +351,31 @@ class EncryptionUiTest extends DesktopUiTest {
         robot.write(OWNER);
         clickWhenReady(robot, "#encryption-owner-password-confirm");
         robot.write(OWNER);
+    }
+
+    /**
+     * 流れる中身の節点を、見える位置まで送る。
+     *
+     * <p><b>★★ 待ち合わせだけでは足りない。</b>{@code ScrollPane} の外へ流れた節点も
+     * <b>scene の矩形とは重なったまま</b>なので、{@code clickWhenReady} は通るのに
+     * <b>押した先が別の節点になる</b>（2026-09-16 実測。CI windows）。
+     *
+     * <p><b>★ 吸収ではない。</b>送っても見えないなら、{@code clickWhenReady} が上限まで待って落ちる。
+     */
+    private static void scrollTo(FxRobot robot, String id) throws Exception {
+        Node node = node(robot, id);
+        Platform.runLater(() -> {
+            for (Node parent = node.getParent(); parent != null; parent = parent.getParent()) {
+                if (parent instanceof ScrollPane scroller) {
+                    double content = scroller.getContent().getBoundsInLocal().getHeight();
+                    double viewport = scroller.getViewportBounds().getHeight();
+                    double top = node.getBoundsInParent().getMinY();
+                    scroller.setVvalue(content <= viewport ? 0 : top / (content - viewport));
+                    return;
+                }
+            }
+        });
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     private static CheckBox checkBox(FxRobot robot, String id) {

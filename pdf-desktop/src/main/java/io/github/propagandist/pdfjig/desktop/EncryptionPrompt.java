@@ -94,8 +94,8 @@ final class EncryptionPrompt {
         ownerOnly.visibleProperty().bind(typedUser.isEmpty());
         ownerOnly.managedProperty().bind(ownerOnly.visibleProperty());
 
-        Label noOwner = new Label(
-                "オーナーパスワードがユーザーパスワードと同じになります。" + System.lineSeparator() + "文書を開けた人は権限も変更できるため、下の権限の設定は効きません。");
+        Label noOwner =
+                new Label("権限の鍵が、文書を開く鍵と同じになります。" + System.lineSeparator() + "文書を開けた人は権限も変更できるため、下の権限の設定は効きません。");
         noOwner.setId("encryption-no-owner-warning");
         noOwner.setWrapText(true);
         // ★★ PDFBox は空のオーナーパスワードをユーザーパスワードで埋める

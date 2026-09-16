@@ -1264,6 +1264,36 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("★★ 入力が何本あっても、1 度だけ告げる")
+        void warnsOnlyOnceRegardlessOfHowManyInputsContribute() throws Exception {
+            // ★★ 入力の数だけ繰り返す形に戻ると、画面側のフィルタが問うた数だけ落とすので
+            //   全部飲まれる——誰でも開ける出力ができたことを告げる口が 1 つも無くなる
+            //   （MainWindow#exceptWhatWasAsked。#30 の門の 2 段目）。入力を 1 本で見ると、
+            //   輪の中へ戻しても赤くならない。
+            Path first = TestPdfs.plain(tempDir.resolve("a.pdf"), 1);
+            Path second = TestPdfs.plain(tempDir.resolve("b.pdf"), 1);
+            Path output = tempDir.resolve("two-sources.pdf");
+
+            List<Warning> seen = new ArrayList<>();
+            PageOperations watching = new PdfBoxPageOperations(seen::add);
+            try (Password user = Password.copyOf("");
+                    Password owner = Password.copyOf("owner")) {
+                watching.assemble(
+                        Sources.ofPaths(List.of(first, second)),
+                        List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                        output,
+                        new Protection(user, owner, AccessPermissions.all(), EncryptionAlgorithm.AES_256));
+            }
+
+            assertEquals(
+                    1,
+                    seen.stream()
+                            .filter(warning -> warning == Warning.CONTENT_OPENS_WITHOUT_A_KEY)
+                            .count(),
+                    "入力の数だけ繰り返している");
+        }
+
+        @Test
         @DisplayName("★★ 鍵が要るなら、誰でも開けるとは言わない")
         void staysSilentWhenAKeyIsRequired() throws Exception {
             Path plain = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);

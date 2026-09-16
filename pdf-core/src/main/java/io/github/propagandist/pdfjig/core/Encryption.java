@@ -54,7 +54,7 @@ public interface Encryption {
      * 暗号化して書き出す。
      *
      * <p><b>★ 権限フラグは暗号学的に強制されない</b>（{@link AccessPermissions}）。
-     * <b>ユーザーパスワードを空にすると、中身は暗号化されず、権限は申告制になる。</b>
+     * <b>ユーザーパスワードを空にすると、出力は誰でも開け、権限は申告制になる。</b>
      *
      * @param input          入力ファイル
      * @param userPassword   開くためのパスワード。<b>空なら出力は誰でも開ける</b>
