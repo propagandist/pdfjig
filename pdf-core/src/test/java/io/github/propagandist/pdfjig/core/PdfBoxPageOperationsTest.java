@@ -1264,6 +1264,31 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("★★ 印刷を外したら、高品質を残しても出力には載せない")
+        void dropsHighQualityPrintingWhenPrintingIsForbidden() throws Exception {
+            // ★★ ビット 12 はビット 3 を修飾する（PDF 32000-1 の表 22）。両方をそのまま書くと
+            //   「高品質なら印刷できる」と読める値が残る——読む側はビット 3 を見て印刷を拒むので、
+            //   思ったのと違う結果になる（優先順位 2。#30 の門の 2 段目）。
+            //   ★ 揃えるのは書き出しの境界だけである——AccessPermissions は読んだ結果を返す側でも使うので、
+            //   値の段で揃えると、細工された /P について文書が書いていることを告げられなくなる。
+            AccessPermissions asked = new AccessPermissions(false, true, true, true, true, true, true, true);
+            assertTrue(asked.printHighQuality(), "値の段で揃えている——読んだ結果を返す側でも使う型である");
+
+            Path input = TestPdfs.plain(tempDir.resolve("doc.pdf"), 1);
+            Path output = tempDir.resolve("no-print.pdf");
+            protect(List.of(input), List.of(PageSelection.of(0, 1)), output, asked, EncryptionAlgorithm.AES_256);
+
+            try (Password user = Password.copyOf(USER)) {
+                assertFalse(
+                        new PdfBoxEncryption()
+                                .inspect(output, user)
+                                .permissions()
+                                .printHighQuality(),
+                        "印刷を外したのに、高品質が出力へ載っている");
+            }
+        }
+
+        @Test
         @DisplayName("★★ 入力が何本あっても、1 度だけ告げる")
         void warnsOnlyOnceRegardlessOfHowManyInputsContribute() throws Exception {
             // ★★ 入力の数だけ繰り返す形に戻ると、画面側のフィルタが問うた数だけ落とすので
