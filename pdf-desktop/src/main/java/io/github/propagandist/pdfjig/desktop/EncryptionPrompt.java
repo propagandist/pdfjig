@@ -19,6 +19,7 @@ import javafx.scene.control.TitledPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.util.StringConverter;
 
 /**
  * パスワードと権限フラグを尋ねるダイアログ。
@@ -60,8 +61,10 @@ final class EncryptionPrompt {
     /**
      * 保護の指定を尋ねる。
      *
-     * <p><b>返された {@link Protection} が抱える鍵は、呼び出し側が閉じる</b>
-     * ——<b>作った場所が持ち主である</b>（{@code CLAUDE.md} INV-5）。
+     * <p><b>返された {@link Protection} が抱える鍵は、受け取った側が閉じる。</b>
+     * <b>ここが作って渡すまでの持ち主であり、渡した後は受け取った側である</b>
+     * ——INV-5 の「作った場所で try-with-resources に載せる」は<b>枠を越えて生きる仕事へ渡すとき
+     * 枠ごと渡す</b>とも定めている（{@code .claude/rules/modules-and-invariants.md}）。
      * <b>書き出しへ渡すなら枠ごと渡すこと</b>（{@code BackgroundTasks#run(List, …)}）。
      *
      * @param owner 親ウィンドウ
@@ -85,23 +88,42 @@ final class EncryptionPrompt {
         ownerOnly.managedProperty().bind(ownerOnly.visibleProperty());
 
         Label noOwner = new Label(
-                "オーナーパスワードが空のときは、ユーザーパスワードがそのまま権限の鍵になります。" + System.lineSeparator() + "文書を開けた人は権限も変更できるため、上の設定は効きません。");
+                "オーナーパスワードがユーザーパスワードと同じになります。" + System.lineSeparator() + "文書を開けた人は権限も変更できるため、下の権限の設定は効きません。");
         noOwner.setId("encryption-no-owner-warning");
         noOwner.setWrapText(true);
         // ★★ PDFBox は空のオーナーパスワードをユーザーパスワードで埋める
         //   （StandardSecurityHandler#prepareDocumentForEncryption。3.0.8 の実装を読んで確かめた。
         //   2026-09-15 実測）——開けた人がオーナー権限を持つので、外した権限フラグは
-        //   規約どおりの閲覧ソフトでも無視される。★ 中身が隠れているかとは別の話なので、
-        //   上の注意とは別に出す。両方が同時に当たることは無い（あちらはユーザー側が空のとき）。
+        //   規約どおりの閲覧ソフトでも無視される。
+        //   ★★ 同じ文字列を両方に打っても同じことが起きる。読む側は isOwnerPassword を
+        //   先に試すので（同 StandardSecurityHandler#prepareDocumentForDecryption）、渡した 1 つの鍵で
+        //   オーナー扱いになる——空のときだけを見ると、こちらが素通りする（#30 の門の 2 段目）。
+        //   ★ 上の注意と同時には当たらない（あちらはユーザー側が空のとき）。
         noOwner.visibleProperty()
-                .bind(ownerPassword
+                .bind(userPassword
                         .textProperty()
-                        .isEmpty()
-                        .and(userPassword.textProperty().isNotEmpty()));
+                        .isNotEmpty()
+                        .and(ownerPassword
+                                .textProperty()
+                                .isEmpty()
+                                .or(ownerPassword.textProperty().isEqualTo(userPassword.textProperty()))));
         noOwner.managedProperty().bind(noOwner.visibleProperty());
 
         ChoiceBox<EncryptionAlgorithm> algorithm = new ChoiceBox<>();
         algorithm.setId("encryption-algorithm");
+        // ★ 定数名をそのまま出さない。日本語の窓に AES_256 と並ぶし、
+        //   どれが既定でどれが互換性のためのものかが読んで分からない（SPEC.md §6.2）。
+        algorithm.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(EncryptionAlgorithm value) {
+                return value == null ? "" : labelFor(value);
+            }
+
+            @Override
+            public EncryptionAlgorithm fromString(String text) {
+                throw new UnsupportedOperationException("選ぶだけで、打ち込む形は無い。");
+            }
+        });
         // ★ 書ける方式だけを出す。NONE と UNKNOWN は「読んだ結果」を表す値であり、
         //   Protection を作るところで拒まれる（#199）。
         algorithm
@@ -192,7 +214,18 @@ final class EncryptionPrompt {
             }
         });
 
-        return dialog.showAndWait();
+        // ★★ 作った {@link Protection} が戻らない道を塞ぐ。結果は押した時点で Dialog に
+        //   載るが、showAndWait が戻るまでの間に投げると、呼ぶ側は受け取らないままになる
+        //   ——持ち主の決まっていない平文の鍵が 2 本残る（INV-5。#30 の門の 2 段目）。
+        try {
+            return dialog.showAndWait();
+        } catch (RuntimeException | Error failed) {
+            Protection orphan = dialog.getResult();
+            if (orphan != null) {
+                orphan.keys().forEach(Password::close);
+            }
+            throw failed;
+        }
     }
 
     /**
@@ -214,19 +247,39 @@ final class EncryptionPrompt {
             Flags flags,
             ChoiceBox<EncryptionAlgorithm> algorithm) {
         List<Password> taken = new ArrayList<>(2);
-        boolean handedOver = false;
         try {
-            taken.add(Password.copyOf(userPassword.getCharacters()));
-            taken.add(Password.copyOf(ownerPassword.getCharacters()));
-            Protection protection =
-                    new Protection(taken.get(0), taken.get(1), flags.permissions(), algorithm.getValue());
-            handedOver = true;
+            // ★ 名前を付けて渡す。並びから引く形にすると、ユーザーとオーナーを
+            //   入れ替えてもコンパイルは通る——同じ型だからである（passwordGrid と同じ理由）。
+            Password user = Password.copyOf(userPassword.getCharacters());
+            taken.add(user);
+            Password owner = Password.copyOf(ownerPassword.getCharacters());
+            taken.add(owner);
+            Protection protection = new Protection(user, owner, flags.permissions(), algorithm.getValue());
+            // 渡しきった。ここからは呼ぶ側が持ち主である。
+            taken.clear();
             return protection;
         } finally {
-            if (!handedOver) {
-                taken.forEach(Password::close);
-            }
+            taken.forEach(Password::close);
         }
+    }
+
+    /**
+     * 方式の見せ方。
+     *
+     * <p><b>★★ RC4 には弱いと書く。</b>40 ビットは<b>総当たりで破れる</b>のに
+     * 名前だけではそれが読み取れず、<b>「パスワードを掛けたから安全」と誤解される</b>
+     * （{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）。<b>選べなくはしない</b>——
+     * <b>古い閲覧ソフトに合わせる用途を塞ぐことになるので、何が起きるかを書くだけである。</b>
+     */
+    private static String labelFor(EncryptionAlgorithm algorithm) {
+        return switch (algorithm) {
+            case AES_256 -> "AES-256（推奨）";
+            case AES_128 -> "AES-128（古い閲覧ソフト向け）";
+            case RC4_128 -> "RC4-128（古い閲覧ソフト向け。強度は低い）";
+            case RC4_40 -> "RC4-40（古い閲覧ソフト向け。短時間で破られる）";
+            // ★ 読んだ結果を表す値であり、選ばせる並びには入れない（Protection が拒む。#199）。
+            case NONE, UNKNOWN -> algorithm.name();
+        };
     }
 
     private static PasswordField passwordField(String id) {

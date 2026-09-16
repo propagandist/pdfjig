@@ -56,12 +56,12 @@ final class ProtectionPrompt {
      * @param dropping 保護が落ちる出どころのファイル名。<b>空で呼ばないこと</b>
      * @return 続けるなら {@code true}
      */
-    static boolean confirm(Stage owner, List<String> dropping) {
+    static boolean confirm(Stage owner, List<String> dropping, Outcome outcome) {
         if (dropping.isEmpty()) {
             throw new IllegalArgumentException("保護が落ちる出どころが無いのに問うことはできません。");
         }
 
-        ButtonType proceed = new ButtonType("保護を外して書き出す", ButtonData.OK_DONE);
+        ButtonType proceed = new ButtonType(outcome.proceedText(), ButtonData.OK_DONE);
         ButtonType cancel = new ButtonType("中止", ButtonData.CANCEL_CLOSE);
 
         Alert alert = new Alert(AlertType.WARNING);
@@ -72,9 +72,9 @@ final class ProtectionPrompt {
         alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
         alert.setResizable(true);
         alert.setTitle("保護は引き継がれません");
-        alert.setHeaderText(headerFor(dropping));
+        alert.setHeaderText(headerFor(dropping, outcome));
         alert.getDialogPane().setId("protection-dialog");
-        alert.getDialogPane().setContent(body(dropping));
+        alert.getDialogPane().setContent(body(dropping, outcome));
         alert.getButtonTypes().setAll(proceed, cancel);
 
         Button proceedButton = (Button) alert.getDialogPane().lookupButton(proceed);
@@ -93,10 +93,56 @@ final class ProtectionPrompt {
         return alert.showAndWait().filter(proceed::equals).isPresent();
     }
 
-    private static String headerFor(List<String> dropping) {
+    /**
+     * 書き出した先がどうなるのか。
+     *
+     * <p><b>★★ 文言を分ける。</b>どちらも<b>「パスワードなしで開ける」は同じ</b>だが、
+     * <b>保護を掛けている最中に「保護されません」「保護を外して書き出す」と出すと、
+     * 何を押しているのかが読んで分からなくなる</b>（{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）
+     * ——<b>オーナーパスワードと権限フラグは、確かに出力へ載る。</b>
+     */
+    enum Outcome {
+
+        /** 保護を何も掛けない。出力は平文である。 */
+        PLAIN("書き出すファイルはパスワードで保護されません。", "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。", "保護を外して書き出す"),
+
+        /**
+         * オーナーパスワードと権限フラグは掛けるが、ユーザーパスワードが空である。
+         *
+         * <p><b>★ 出力には暗号化辞書が載るが、鍵は空文字列から導かれるので
+         * 誰でも開ける</b>（2026-09-16 実測。{@code Protection#userPasswordRequired}）。
+         */
+        OPENS_WITHOUT_A_KEY("書き出すファイルは、ユーザーパスワードが空なので誰でも開けます。", "開くときにパスワードを要るようにするには、ユーザーパスワードを設定してください。", "このまま書き出す");
+
+        private final String headerText;
+
+        private final String adviceText;
+
+        private final String proceedText;
+
+        Outcome(String headerText, String adviceText, String proceedText) {
+            this.headerText = headerText;
+            this.adviceText = adviceText;
+            this.proceedText = proceedText;
+        }
+
+        String headerText() {
+            return headerText;
+        }
+
+        String adviceText() {
+            return adviceText;
+        }
+
+        String proceedText() {
+            return proceedText;
+        }
+    }
+
+    private static String headerFor(List<String> dropping, Outcome outcome) {
         return dropping.size() == 1
-                ? "書き出すファイルはパスワードで保護されません。"
-                : "書き出すファイルはパスワードで保護されません（保護された入力が " + dropping.size() + " 件）。";
+                ? outcome.headerText()
+                : outcome.headerText() + "（保護された入力が " + dropping.size() + " 件）";
     }
 
     /**
@@ -105,13 +151,12 @@ final class ProtectionPrompt {
      * <p><b>★ 出どころの名前を出す。</b>どのファイルの保護が落ちるのかは、
      * <b>数だけでは辿れない。</b>
      */
-    private static VBox body(List<String> dropping) {
+    private static VBox body(List<String> dropping, Outcome outcome) {
         Label sources = new Label(String.join(System.lineSeparator(), dropping));
         sources.setId("protection-sources");
         sources.setWrapText(true);
 
-        Label consequence = new Label(
-                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。");
+        Label consequence = new Label("書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + outcome.adviceText());
         consequence.setWrapText(true);
 
         VBox content = new VBox(8, sources, consequence);

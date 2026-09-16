@@ -158,6 +158,44 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     @Test
+    void 両方に同じ鍵を打っても権限が効かないことを出す(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        // ★★ 読む側は isOwnerPassword を先に試す（StandardSecurityHandler
+        //   #prepareDocumentForDecryption。3.0.8 の実装を読んで確かめた）。
+        //   同じ文字列なら、渡した 1 つの鍵でオーナー扱いになる
+        //   ——空のときだけを見る形だと、こちらが素通りする。
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        clickWhenReady(robot, "#encryption-owner-password");
+        robot.write(USER);
+        waitFor(() -> node(robot, "#encryption-no-owner-warning").isVisible());
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
+    void 印刷を外すと高品質も落ちて押せなくなる(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        clickWhenReady(robot, "#encryption-details");
+        waitFor(() ->
+                robot.lookup("#encryption-details").queryAs(TitledPane.class).isExpanded());
+
+        // ★★ 高品質の印刷は、印刷を許しているときしか意味を持たない（PDF 32000-1 の表 22）。
+        //   チェックを残したままにできると、画面は「高品質で印刷できる」と言いながら
+        //   出力は印刷を一切許さない（優先順位 2）。
+        clickWhenReady(robot, "#encryption-flag-print");
+        assertFalse(checkBox(robot, "#encryption-flag-print").isSelected(), "印刷が外れていない");
+        assertFalse(checkBox(robot, "#encryption-flag-print-high-quality").isSelected(), "印刷を外したのに高品質が残っている");
+        assertTrue(checkBox(robot, "#encryption-flag-print-high-quality").isDisabled(), "印刷を外したのに高品質を押せる");
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    @Test
     void 束を付け直すと中身が全部戻る(@TempDir Path dir, FxRobot robot) throws Exception {
         openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
 
@@ -201,6 +239,11 @@ class EncryptionUiTest extends DesktopUiTest {
 
         // 保護が落ちることを伝える窓が出る（#29 / #192 と同じ口）。
         waitForNode(robot, "#protection-dialog");
+        // ★★ 文言はこちら向けである。保護を掛けている最中に「保護を外して書き出す」と
+        //   出すと、何を押しているのかが読んで分からなくなる（優先順位 2）
+        //   ——オーナーパスワードと権限フラグは、確かに出力へ載る。
+        assertEquals("このまま書き出す", button(robot, "#protection-proceed").getText(), "保護を掛けているのに「外す」と出ている");
+
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
     }
