@@ -1,5 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
+import java.util.List;
+
 /**
  * 書き出しに掛ける保護。
  *
@@ -42,5 +44,40 @@ public record Protection(
         if (algorithm == EncryptionAlgorithm.NONE || algorithm == EncryptionAlgorithm.UNKNOWN) {
             throw new PdfjigException(ErrorCode.UNSUPPORTED_ENCRYPTION);
         }
+    }
+
+    /**
+     * この保護が、文書の中身そのものを隠すか。
+     *
+     * <p><b>★★ ユーザーパスワードが空なら、中身は暗号化されない</b>（{@code docs/SPEC.md} §6.1）。
+     * そのとき残るのは<b>権限フラグだけ</b>で、あれは<b>閲覧ソフトが自主的に従っているだけの
+     * 申告制である。</b>
+     *
+     * <p><b>★★ 「保護を掛けた」と「中身が隠れる」を同じものとして扱わないこと。</b>
+     * <b>入力の保護が落ちることを伝える口</b>（{@link Warning#ENCRYPTION_NOT_PROPAGATED}）は
+     * <b>ここが false のとき黙ってはならない</b>——<b>鍵の要る入力から、誰でも開ける出力が
+     * できている。</b>
+     *
+     * @return 中身が暗号化されるなら {@code true}
+     */
+    public boolean encryptsContent() {
+        return !userPassword.isEmpty();
+    }
+
+    /**
+     * この保護が抱えている鍵。
+     *
+     * <p><b>★★ 呼ぶ側が数え上げて別に持たない。</b>持つと<b>「鍵を足したが、片づける一覧へは
+     * 足さなかった」形が書ける</b>——そこを通った平文の配列は<b>二度と消されない</b>
+     * （INV-5。#135 / #144 / #145 で 3 度破れたのと同じ類型である）。
+     * <b>1 つの正本から引けば、書き忘れる場所が無い</b>——{@code Source} の側も同じ形をしている。
+     *
+     * <p><b>★ 閉じるのは持ち主である。</b>ここが返すのは読むための並びであって、
+     * <b>持ち主が移るわけではない</b>（{@code BackgroundTasks#run(List, …)} へ渡すと、あそこが持つ）。
+     *
+     * @return 抱えている鍵。<b>空の鍵も並ぶ</b>——閉じる対象であることに変わりはない
+     */
+    public List<Password> keys() {
+        return List.of(userPassword, ownerPassword);
     }
 }

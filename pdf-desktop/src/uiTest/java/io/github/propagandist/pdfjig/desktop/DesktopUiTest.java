@@ -278,7 +278,19 @@ abstract class DesktopUiTest {
         WaitForAsyncUtils.waitForFxEvents();
     }
 
-    /** 見えていて、大きさを持っていて、その窓が出ているか。 */
+    /**
+     * 見えていて、大きさを持っていて、その窓が出ていて、<b>scene の矩形の中にあるか。</b>
+     *
+     * <p><b>★★ 最後の 1 つを落とすと、待ったのに掴めない。</b>TestFX が見るのも
+     * <b>節点が scene の矩形と重なるか</b>である（{@code NodeQueryUtils#isNodeWithinSceneBounds}）
+     * ——そこを見ずに待つと、<b>窓からはみ出した節点を「押せる」と読んでしまい</b>、
+     * {@code clickOn} が「1 nodes, but no nodes were visible」で落ちる。
+     * <b>待ち合わせの条件が緩いと、落ちた理由が読めなくなる</b>
+     * （2026-09-15 に CI windows で 2 度踏んだ。{@code EncryptionPrompt} の詳細）。
+     *
+     * <p><b>★ これは吸収ではない。</b>本当にはみ出したままなら上限まで待って落ちる——
+     * <b>「待てば直る」形にはしていない</b>（{@code .claude/rules/ui-tests.md}）。
+     */
     private static boolean clickable(Node node) {
         if (!node.isVisible() || node.getOpacity() <= 0) {
             return false;
@@ -288,7 +300,11 @@ abstract class DesktopUiTest {
             return false;
         }
         Bounds bounds = node.localToScene(node.getBoundsInLocal());
-        return bounds.getWidth() > 0 && bounds.getHeight() > 0 && scene.getWidth() > 0 && scene.getHeight() > 0;
+        return bounds.getWidth() > 0
+                && bounds.getHeight() > 0
+                && scene.getWidth() > 0
+                && scene.getHeight() > 0
+                && bounds.intersects(0, 0, scene.getWidth(), scene.getHeight());
     }
 
     /**
