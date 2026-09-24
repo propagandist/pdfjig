@@ -442,6 +442,7 @@ public final class MainWindow {
                 new Action("clear-breaks", "区切りをすべて外す", null, null, null, this::clearBreaks, noBreaks),
                 new Action("reset", "編集を元に戻す", "元に戻す", ToolIcons.RESET, null, this::resetOrder, editingBlocked),
                 new Action("add", "PDF を追加…", "追加", ToolIcons.ADD, null, this::addDocuments, editingBlocked),
+                legend.removeMenu(),
                 new Action("split", "この文書を分割…", "分割", ToolIcons.SPLIT, null, this::splitDocument, editingBlocked),
                 new Action(
                         "split-pages",

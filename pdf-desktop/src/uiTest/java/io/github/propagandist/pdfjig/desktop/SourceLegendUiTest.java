@@ -1,11 +1,18 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Stream;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
+import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -130,6 +137,77 @@ class SourceLegendUiTest extends DesktopUiTest {
         assertEquals("b.pdf をこの編集から外す", accessibleTextOf(robot, "#source-remove-1"));
     }
 
+    /**
+     * マウスに触れずに、メニューから 1 ファイルを外せる（#127）。
+     *
+     * <p><b>★★ 「×」はフォーカスを受け取らない。</b>ほかの操作はどれもメニューにあり、
+     * <b>ここだけがマウス専用だった</b>——配った {@code v0.1.2} の {@code docs/RELEASE_NOTES.md}
+     * 「既知の制限」が「次の版で直す」と約束した穴である。
+     *
+     * <p><b>キーの並びは利用者が打つものそのままである。</b>F10 でメニューバーへ入り、
+     * 「ツール」まで右へ、開いて「ファイルを外す」まで下へ、その中の 2 つ目を選んで、
+     * 確認を Enter で承認する（OK が既定のボタンである）。
+     */
+    @Test
+    void キーボードだけでメニューから外せる(@TempDir Path dir, FxRobot robot) throws Exception {
+        openTwo(robot, dir);
+
+        robot.type(KeyCode.F10);
+        robot.type(KeyCode.RIGHT, 2); // ファイル → ページ → ツール
+        robot.type(KeyCode.DOWN); // 開いて「PDF を追加…」
+        robot.type(KeyCode.DOWN); // 「ファイルを外す」
+        robot.type(KeyCode.RIGHT); // 開いて a.pdf
+        robot.type(KeyCode.DOWN); // b.pdf
+        robot.type(KeyCode.ENTER);
+        waitForNode(robot, "#remove-source-ok");
+        robot.type(KeyCode.ENTER);
+
+        waitFor(() -> statusText(robot).equals("2 / 2 ページ"));
+        // 「×」の側と同じく、どのファイルが外れたかは書き出して確かめる。
+        assertEquals(List.of("A1", "A2"), pageTexts(saveAs(robot, dir.resolve("out.pdf"))));
+    }
+
+    /**
+     * メニューの項目は「×」と同じ番号で、同じ名前を持つ。
+     *
+     * <p><b>★ 位置で決まるので、繰り下がった先まで見る</b>——「×」の側の
+     * {@link #外したファイルのidが一覧に残らない} と同じ理由である。
+     */
+    @Test
+    void メニューの項目は一覧と同じファイルを指す(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+        addFiles(robot, TestPdfs.withText(dir.resolve("b.pdf"), "B1"), TestPdfs.withText(dir.resolve("c.pdf"), "C1"));
+
+        robot.clickOn("#source-remove-0");
+        clickWhenReady(robot, "#remove-source-ok");
+        waitFor(() -> statusText(robot).equals("2 / 2 ページ（2 ファイル）"));
+
+        assertEquals(
+                "b.pdf を外す…",
+                menuItem(robot, "menu-remove-source-0").orElseThrow().getText());
+        assertEquals(
+                "c.pdf を外す…",
+                menuItem(robot, "menu-remove-source-1").orElseThrow().getText());
+        assertTrue(menuItem(robot, "menu-remove-source-2").isEmpty(), "外したぶんの項目がメニューに残っている");
+    }
+
+    /**
+     * 1 ファイルしか開いていなければ押せない。
+     *
+     * <p>一覧を出さないのと同じ条件である。外すと何も残らない操作を、メニューからだけ押せては困る。
+     */
+    @Test
+    void 一つしか開いていなければメニューから外せない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+
+        MenuItem menu = menuItem(robot, "menu-remove-source").orElseThrow();
+        assertTrue(menu.isDisable(), "1 ファイルなのに「ファイルを外す」が押せる");
+        assertTrue(((Menu) menu).getItems().isEmpty());
+
+        addFiles(robot, TestPdfs.withText(dir.resolve("b.pdf"), "B1"));
+        assertFalse(menu.isDisable(), "2 ファイルになったのに「ファイルを外す」が押せない");
+    }
+
     /** A（2 ページ）と B（1 ページ）を開く。作法は {@link DesktopUiTest#openTwoFiles} が持つ。 */
     private void openTwo(FxRobot robot, Path dir) throws Exception {
         assertEquals("3 / 3 ページ（2 ファイル）", openTwoFiles(robot, dir));
@@ -139,6 +217,26 @@ class SourceLegendUiTest extends DesktopUiTest {
     private void addFiles(FxRobot robot, Path... paths) throws Exception {
         addFixtures(robot, paths);
         waitForNode(robot, "#source-remove-0");
+    }
+
+    /**
+     * メニューの項目を id で探す。
+     *
+     * <p><b>{@code MenuItem} は {@code Node} ではないので、{@code lookup} では掴めない</b>
+     * （{@code .claude/rules/ui-tests.md}）。メニューバーから辿る。
+     */
+    private static Optional<MenuItem> menuItem(FxRobot robot, String id) {
+        MenuBar bar = robot.lookup(".menu-bar").queryAs(MenuBar.class);
+        return bar.getMenus().stream()
+                .flatMap(SourceLegendUiTest::withDescendants)
+                .filter(item -> id.equals(item.getId()))
+                .findFirst();
+    }
+
+    private static Stream<MenuItem> withDescendants(MenuItem item) {
+        return item instanceof Menu menu
+                ? Stream.concat(Stream.of(item), menu.getItems().stream().flatMap(SourceLegendUiTest::withDescendants))
+                : Stream.of(item);
     }
 
     /** 節点に付いた、支援技術から読まれる名前。 */

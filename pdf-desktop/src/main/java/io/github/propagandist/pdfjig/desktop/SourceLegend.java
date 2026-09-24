@@ -8,6 +8,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.FlowPane;
@@ -60,13 +62,31 @@ final class SourceLegend {
     private final List<Button> removeButtons = new ArrayList<>();
 
     /**
+     * 「×」と同じ操作をメニューから届かせる（#127）。
+     *
+     * <p><b>★ 「×」はフォーカスを受け取らない</b>（{@link #chip}）。<b>ほかの操作はどれもメニューにあり</b>、
+     * Alt／F10 で辿れる。<b>ここだけがマウス専用だった。</b>巡回に戻すとファイルの数だけ Tab が増えるので、
+     * <b>メニューのほうに揃える。</b>
+     *
+     * <p><b>★ 項目は「×」と同じ場所で作り直す。</b>番号も処理も押せない条件も「×」と同じものを使う——
+     * 別に組むと、<b>片方だけ直した日に、同じ操作が経路によって違う文書に当たる。</b>
+     */
+    private final Menu removeMenu = new Menu("ファイルを外す");
+
+    /** いま出ているメニューの項目。「×」と同じ理由で、束ねずに書き換える。 */
+    private final List<MenuItem> removeItems = new ArrayList<>();
+
+    /**
      * @param removeBlocked ファイルを外せない間 {@code true} になるもの。この一覧だけでは
      *                      決まらない（走っている仕事があるかを持っているのは画面の側である）
      */
     SourceLegend(ObservableBooleanValue removeBlocked) {
         this.removeBlocked = removeBlocked;
-        removeBlocked.addListener(
-                (observable, was, blocked) -> removeButtons.forEach(button -> button.setDisable(blocked)));
+        removeBlocked.addListener((observable, was, blocked) -> {
+            removeButtons.forEach(button -> button.setDisable(blocked));
+            removeItems.forEach(item -> item.setDisable(blocked));
+        });
+        removeMenu.setId("menu-remove-source");
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
         hide();
@@ -75,6 +95,11 @@ final class SourceLegend {
     /** 画面に置くための節点。 */
     Node node() {
         return root;
+    }
+
+    /** 「ファイルを外す」のメニュー。並べる場所は {@link Actions#menuBar()} が決める。 */
+    Menu removeMenu() {
+        return removeMenu;
     }
 
     /** ファイルを外すときに呼ぶ処理を差す。 */
@@ -101,9 +126,14 @@ final class SourceLegend {
 
         root.getChildren().clear();
         removeButtons.clear();
+        removeMenu.getItems().clear();
+        removeItems.clear();
         for (int sourceIndex = 0; sourceIndex < session.sourceCount(); sourceIndex++) {
-            root.getChildren().add(chip(sourceIndex, session.sourceName(sourceIndex), counts[sourceIndex]));
+            String name = session.sourceName(sourceIndex);
+            root.getChildren().add(chip(sourceIndex, name, counts[sourceIndex]));
+            removeMenu.getItems().add(removeItem(sourceIndex, name));
         }
+        removeMenu.setDisable(false);
 
         root.setVisible(true);
         root.setManaged(true);
@@ -112,6 +142,10 @@ final class SourceLegend {
     private void hide() {
         root.getChildren().clear();
         removeButtons.clear();
+        removeMenu.getItems().clear();
+        removeItems.clear();
+        // 1 ファイルなら外すものが無い。一覧を出さないのと同じ条件で押させない。
+        removeMenu.setDisable(true);
         root.setVisible(false);
         // 場所も空けない。1 ファイルのときに帯だけが残ると、何かがあると思わせる。
         root.setManaged(false);
@@ -170,5 +204,21 @@ final class SourceLegend {
         HBox chip = new HBox(6, swatch, label, count, remove);
         chip.setAlignment(Pos.CENTER_LEFT);
         return chip;
+    }
+
+    /**
+     * 「×」と同じ操作のメニュー項目。
+     *
+     * <p><b>確認はここで取らない。</b>{@code onRemove} の先（{@code MainWindow#removeSource}）が
+     * 消える量を見せて取る——「×」と同じ窓を通る。
+     */
+    private MenuItem removeItem(int sourceIndex, String name) {
+        // ★ 名前を入れる。「×」の accessibleText と同じ理由である——同じ項目が並ぶと区別が付かない。
+        MenuItem item = new MenuItem(name + " を外す…");
+        item.setId("menu-remove-source-" + sourceIndex);
+        item.setOnAction(event -> onRemove.accept(sourceIndex));
+        item.setDisable(removeBlocked.get());
+        removeItems.add(item);
+        return item;
     }
 }

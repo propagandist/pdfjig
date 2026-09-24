@@ -34,6 +34,7 @@ record Actions(
         Action clearBreaks,
         Action reset,
         Action add,
+        Menu removeSources,
         Action split,
         Action splitPages,
         Action protect,
@@ -60,6 +61,9 @@ record Actions(
                         "ツール",
                         null,
                         add.menuItem(),
+                        // ★ 「追加」の隣に置く。一覧の「×」と同じ操作で、キーボードから届く唯一の道である（#127）。
+                        //   中身はファイルを開くたびに変わるので、組むのは SourceLegend である。
+                        removeSources,
                         split.menuItem(),
                         splitPages.menuItem(),
                         new SeparatorMenuItem(),
