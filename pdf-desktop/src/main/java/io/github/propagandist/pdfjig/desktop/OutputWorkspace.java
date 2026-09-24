@@ -264,6 +264,9 @@ final class OutputWorkspace implements AutoCloseable {
                     });
         } catch (IOException | UncheckedIOException e) {
             // 片づけられなくても、これから書くものの成否は変わらない。
+            // ★ Files.list は、返した後の反復で起きた失敗を UncheckedIOException で包む。
+            //   IOException を継承しないので、並記しないとここを素通りし、後始末の失敗が
+            //   保存そのものの失敗として利用者に出る。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
         return List.copyOf(kept);
@@ -301,20 +304,22 @@ final class OutputWorkspace implements AutoCloseable {
      *   <li><b>控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）
      * </ul>
      *
-     * <p><b>★★ 中は 1 階層だけ消し、降りない</b>（#125）。pdfjig が作業場所に作るのは
-     * {@link #NAME} / {@link #REPLACED} / {@link #HELD} の 3 つのファイルだけである。
+     * <p><b>★★ 中は pdfjig が作る 3 つの名前だけを消す</b>（#125）——{@link #NAME} / {@link #REPLACED} /
+     * {@link #HELD}。<b>一覧を取らない。</b>
      * <ul>
      *   <li><b>{@link Files#walk} は使わない。</b>既定で {@code FOLLOW_LINKS} を付けていなくても、
      *       Windows のディレクトリジャンクションを降りる——出力先に書ける第三者が作業場所の中に
      *       ジャンクションを置けば、次の保存がその先を消していた
-     *   <li><b>自分で辿る形（調べてから降りる）も採らない。</b>調べてから開くまでの間に
-     *       ジャンクションへすり替えられると、同じことが起きる。<b>Windows の NIO には
-     *       ハンドルを起点に辿る手（{@code SecureDirectoryStream}）が無い。</b>
-     *       再帰は深さを第三者に決めさせ、{@code StackOverflowError} で保存ごと落ちた
+     *   <li><b>辿る形も、一覧を取って 1 階層だけ消す形も採らない。</b>作業場所そのものを、調べた後で
+     *       ジャンクションへすり替えられると、<b>その後の消去はどれも指す先で起きる</b>——途中の階層の
+     *       リンクは OS が必ず辿る。一覧を取って消すと、<b>第三者が中に置いた名前（{@code report.xlsx} など）が、
+     *       指す先で消える</b>。Windows の NIO にはハンドルを起点に消す手（{@code SecureDirectoryStream}）が無い。
+     *       辿る形は、再帰の深さを第三者に決めさせて {@code StackOverflowError} で保存ごと落ちた
      *       （7,000 階層前後。#125 の {@code /code-review max} で再現）
-     *   <li><b>子は {@link Files#deleteIfExists} で消す。</b>リンクなら、消えるのはリンクそのものである
-     *       （JDK の {@code implDelete} はリンクを辿らずに属性を読む）。<b>中身のあるディレクトリは
-     *       消せずに残り、記録される</b>——pdfjig が作らないものであり、残るのは正しい
+     *   <li><b>決まった名前だけなら、すり替えに勝たれても消えうるのはその 3 つの名前だけで、
+     *       第三者は名前を選べない。</b>
+     *   <li><b>ほかのものがあれば、作業場所は消せずに残り、記録される</b>——pdfjig が作らないもので
+     *       あり、正体の分からないものを消さない側へ倒す（{@code CLAUDE.md} 優先順位 1）
      * </ul>
      *
      * <p><b>残ったことを記録しない。</b>残すのは正しい振る舞いであって失敗ではなく、
@@ -331,19 +336,9 @@ final class OutputWorkspace implements AutoCloseable {
         if (holdsTheOnlyCopy(directory)) {
             return true;
         }
-        // ★ 一覧は取り切ってから消す。開いたまま消すと、並びの途中で消えたものを数えることになる。
-        List<Path> children;
-        try (Stream<Path> entries = Files.list(directory)) {
-            children = entries.toList();
-        } catch (IOException | UncheckedIOException e) {
-            // 消せなくても、保存の成否は変わらない。
-            // ★ Files.list は、返した後の反復で起きた失敗を UncheckedIOException で包む。
-            //   IOException を継承しないので、並記しないとここを素通りする——置き換えが
-            //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
-            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-            return false;
-        }
-        children.forEach(OutputWorkspace::deleteQuietly);
+        deleteQuietly(directory.resolve(NAME));
+        deleteQuietly(directory.resolve(REPLACED));
+        deleteQuietly(directory.resolve(HELD));
         deleteQuietly(directory);
         return false;
     }

@@ -158,7 +158,8 @@ class OutputWorkspaceTest {
      * 付けていなくても、Windows のジャンクションを降りる。<b>競合を要らない</b>——置いておけば、
      * 次の保存で必ず走る（#125 の本文）。
      *
-     * <p><b>ジャンクションそのものは片づき、作業場所も残らない。</b>消えるのはリンクであって、指す先ではない。
+     * <p><b>ジャンクションも作業場所も残る</b>——片づけるのは pdfjig が作る 3 つの名前だけである。
+     * 一覧を取って消す形は、作業場所ごとすり替えられると、第三者が選んだ名前を指す先で消す（#125 の門）。
      */
     @Test
     @EnabledOnOs(OS.WINDOWS)
@@ -174,8 +175,14 @@ class OutputWorkspaceTest {
 
         OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {}).close();
 
-        assertEquals("消えてはならない", Files.readString(precious), "作業場所の外を消している（#125）");
-        assertFalse(Files.exists(leftover, LinkOption.NOFOLLOW_LINKS), "ジャンクションごと作業場所が残っている");
+        try {
+            assertEquals("消えてはならない", Files.readString(precious), "作業場所の外を消している（#125）");
+            // ★ 作業場所は残る。中のジャンクションは pdfjig が作らないもので、正体の分からないものは消さない。
+            assertTrue(Files.exists(leftover.resolve("link"), LinkOption.NOFOLLOW_LINKS), "知らないものを消している");
+        } finally {
+            // ★ 残したまま終えない。@TempDir の後始末は walkFileTree で、ジャンクションを降りる。
+            Files.deleteIfExists(leftover.resolve("link"));
+        }
     }
 
     /**
@@ -209,14 +216,14 @@ class OutputWorkspaceTest {
     }
 
     /**
-     * 作業場所の中のディレクトリには降りない。中身があれば残す（#125）。
+     * 作業場所の中の、pdfjig が作らないものには触らない（#125）。
      *
-     * <p><b>pdfjig が作業場所に作るのはファイルだけである。</b>ディレクトリがあるなら第三者が置いたもので、
-     * 中を辿ると深さを決められ（再帰が溢れて保存ごと落ちた）、調べてから開くまでに
-     * ジャンクションへすり替えられる。<b>降りない。</b>中身のあるものは消せずに残り、作業場所も残る。
+     * <p><b>pdfjig が作業場所に作るのは 3 つのファイルだけである。</b>ほかのものがあるなら第三者が置いたもので、
+     * 中を辿ると深さを決められ（再帰が溢れて保存ごと落ちた）、一覧を取って消すと、作業場所ごと
+     * すり替えられたときに、置いた名前が指す先で消える。<b>触らない。</b>作業場所も残る。
      */
     @Test
-    @DisplayName("作業場所の中のディレクトリには降りない。中身があれば残す")
+    @DisplayName("作業場所の中の、pdfjig が作らないものには触らない")
     void doesNotDescendIntoADirectoryInsideTheWorkspace(@TempDir Path directory) throws IOException {
         Path out = Files.createDirectory(directory.resolve("out"));
         Path leftover = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})
@@ -227,9 +234,12 @@ class OutputWorkspaceTest {
                         .resolve("x.txt"),
                 "中身");
 
+        Path named = Files.writeString(leftover.resolve("report.xlsx"), "名前を選んで置いたもの");
+
         OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {}).close();
 
         assertTrue(Files.exists(planted), "作業場所の中のディレクトリを降りて消している");
+        assertTrue(Files.exists(named), "pdfjig が作らない名前を消している——すり替えられると、この名前が指す先で消える");
     }
 
     /** 出力先の外にある、消えてはならないファイル。 */
@@ -440,9 +450,12 @@ class OutputWorkspaceTest {
     @Test
     @DisplayName("前の書き出しが残した作業場所を、次の書き出しで片づける")
     void discardsWhatAnEarlierRunLeftBehind(@TempDir Path directory) throws IOException {
-        // 保存中にウィンドウを閉じると JVM ごと落ち、後始末が走らないまま残る。
-        Path abandoned = Files.createDirectory(directory.resolve(".pdfjig-abandoned"));
-        Files.createFile(abandoned.resolve("out.pdf"));
+        // 保存中に JVM ごと落ち、後始末が走らないまま残った形を作る——開いて書き、閉じない。
+        // ★ 名前も中身も手で組まない。片づけるのは pdfjig が作る名前だけなので（#125）、
+        //   手で組んだ中身だと、残った理由が「片づけていない」のか「知らない名前だから」なのか読めない。
+        OutputWorkspace left = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
+        Path abandoned = left.file().getParent();
+        Files.writeString(left.file(), "書きかけ");
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertFalse(Files.exists(abandoned), "残ったものを片づけないと、利用者には正体の分からない隠しものが増えていく");
