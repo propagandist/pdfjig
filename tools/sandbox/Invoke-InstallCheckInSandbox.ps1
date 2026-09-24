@@ -34,6 +34,15 @@ param(
     # ★ わざと違う値を渡すと落ちる。検知が空振りしていないことを、そうやって確かめる。
     [string] $ExpectedUpgradeCode,
 
+    # 期待する範囲（machine / userUnmanaged / userManaged）。★ 既定は置かない——正本は
+    # tools/smoke/InstallCheck.ps1 である。入れ替えて渡すと落ちる（#158）。
+    # 綴りだけはここでも弾く——中で弾かれると、Sandbox が起ききってから数分後に分かる。
+    [ValidateSet('machine', 'userUnmanaged', 'userManaged')]
+    [string] $ExpectedMsiContext,
+
+    [ValidateSet('machine', 'userUnmanaged', 'userManaged')]
+    [string] $ExpectedExeContext,
+
     # Sandbox に渡すメモリ。ホストのコミットにそのまま乗る（SandboxHost.ps1 の
     # Assert-HostHasHeadroom）。
     [int] $MemoryInMB = 4096,
@@ -94,6 +103,12 @@ if ($ExeSilentArgs) {
 }
 if ($ExpectedUpgradeCode) {
     $logon += (' -ExpectedUpgradeCode "' + $ExpectedUpgradeCode + '"')
+}
+if ($ExpectedMsiContext) {
+    $logon += (' -ExpectedMsiContext "' + $ExpectedMsiContext + '"')
+}
+if ($ExpectedExeContext) {
+    $logon += (' -ExpectedExeContext "' + $ExpectedExeContext + '"')
 }
 
 $null = New-SandboxConfigFile `

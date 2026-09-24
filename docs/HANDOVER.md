@@ -1216,10 +1216,16 @@ GitHub の windows ランナーは画面が見えないのに uiTest が通る�
 | 消して残らない（ファイル / ショートカット / レジストリ） | 残骸なし |
 | EXE がサイレントで入る | **`/qn` が効く**（実測）。`%LOCALAPPDATA%\PDFjig` に入る |
 | EXE も消して残らない | 残骸なし |
+| **MSI はマシン単位、EXE はユーザー単位で入る**（#158） | Windows Installer の `Context` が `machine` ／ `userUnmanaged`（**2026-09-25 実測**。対象は `v0.1.2` の配布物） |
 
 **★ 検知が空振りしていないことも確かめてある。** わざと違う UpgradeCode を渡すと落ちる
-（`-ExpectedUpgradeCode` で差し替えられる）。**通ることだけを見ても、
-検知できる保証にはならない。**
+（`-ExpectedUpgradeCode` で差し替えられる）。**範囲も同じ**——`-ExpectedExeContext machine` と
+`-ExpectedMsiContext userUnmanaged` を渡すと、それぞれ落ちる（**2026-09-25 実測**）。
+**通ることだけを見ても、検知できる保証にはならない。**
+
+**★★ 範囲はアンインストール情報の hive では見分けられない。** **EXE はユーザー単位で入っても
+`HKLM:\…\Uninstall` にキーを作る**（#158。msiexec のログは `Assignment=0` を示す）。
+**そのキーが他の利用者の「アプリと機能」に出るかは見ていない**——1 台に 2 アカウントの実機が要る。
 
 **★ 確かめられていないことがある。** Sandbox の既定ユーザー `WDAGUtilityAccount` は
 Administrators のメンバーなので、**「標準ユーザーの環境で入るか」は分からない**。

@@ -21,11 +21,15 @@
 #>
 [CmdletBinding()]
 param(
-    # ★ どちらも既定を置かない。渡されたものだけ通す——既定は InstallCheck.ps1 が持つ。
+    # ★ どれも既定を置かない。渡されたものだけ通す——既定は InstallCheck.ps1 が持つ。
     #   ここにも既定を置くと、あちらを直しても Sandbox 経由では効かない形になる。
     [string] $ExeSilentArgs,
 
-    [string] $ExpectedUpgradeCode
+    [string] $ExpectedUpgradeCode,
+
+    [string] $ExpectedMsiContext,
+
+    [string] $ExpectedExeContext
 )
 
 Set-StrictMode -Version Latest
@@ -44,6 +48,8 @@ try {
     }
     if ($ExeSilentArgs) { $arguments['ExeSilentArgs'] = $ExeSilentArgs }
     if ($ExpectedUpgradeCode) { $arguments['ExpectedUpgradeCode'] = $ExpectedUpgradeCode }
+    if ($ExpectedMsiContext) { $arguments['ExpectedMsiContext'] = $ExpectedMsiContext }
+    if ($ExpectedExeContext) { $arguments['ExpectedExeContext'] = $ExpectedExeContext }
 
     & 'C:\src\tools\smoke\InstallCheck.ps1' @arguments
     $code = 0
