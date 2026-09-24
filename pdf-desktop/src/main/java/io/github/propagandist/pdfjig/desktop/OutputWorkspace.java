@@ -6,7 +6,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -70,8 +72,12 @@ final class OutputWorkspace implements AutoCloseable {
 
     private final Path workspace;
 
-    private OutputWorkspace(Path workspace) {
+    /** 用意する前に、同じフォルダで見つけた控え（{@link #abandonedCopies}）。 */
+    private final List<Path> abandoned;
+
+    private OutputWorkspace(Path workspace, List<Path> abandoned) {
         this.workspace = workspace;
+        this.abandoned = abandoned;
     }
 
     /**
@@ -81,12 +87,28 @@ final class OutputWorkspace implements AutoCloseable {
      */
     static OutputWorkspace nextTo(Path output) {
         Path directory = output.toAbsolutePath().getParent();
-        discardAbandoned(directory);
+        List<Path> abandoned = discardAbandoned(directory);
         try {
-            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX));
+            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX), abandoned);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
+    }
+
+    /**
+     * 用意する前に、同じフォルダで見つけた控え。見つからなければ空。
+     *
+     * <p><b>★★ 前の書き出しがアプリごと落ちて残した、元の唯一の実体である</b>（#138）。
+     * 電源断・強制終了・ログオフでは {@code close} も {@code catch} も走らないので、
+     * <b>{@link #failing} の形では原理的に届かない。</b>見つけられるのは次に同じフォルダへ書き出すときで、
+     * <b>見つけているのに黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる。</b>
+     *
+     * <p><b>返すのは控えのファイルそのものの場所である</b>（{@link #failing} が載せるものと同じ形）。
+     * <b>控えが実在するものだけを返す</b>——印だけを見ると、無事に元へ戻ったものを
+     * 「ここにしか無い」と伝えうる（{@link #failing} と同じ理由）。
+     */
+    List<Path> abandonedCopies() {
+        return abandoned;
     }
 
     /** 書き込み先。まだ存在しない。 */
@@ -209,17 +231,24 @@ final class OutputWorkspace implements AutoCloseable {
      * 「保存が落ちた → 直して保存し直す」という<b>いちばんありそうな流れの中で、
      * 唯一残っていた元が消える。</b>
      */
-    private static void discardAbandoned(Path directory) {
+    private static List<Path> discardAbandoned(Path directory) {
+        List<Path> kept = new ArrayList<>();
         try (Stream<Path> entries = Files.list(directory)) {
             // 名前で絞ってから種別を見る。isDirectory は 1 件ごとに stat を投げるので、
             // 逆にすると出力先フォルダの全エントリぶん走る。絞り込みの意味は変わらない。
             entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
                     .filter(Files::isDirectory)
-                    .forEach(OutputWorkspace::discard);
+                    .forEach(entry -> {
+                        // ★ 残したものは拾う（#138）。関門は discard の側に置いたままにする。
+                        if (discard(entry) && Files.isRegularFile(entry.resolve(REPLACED))) {
+                            kept.add(entry.resolve(REPLACED));
+                        }
+                    });
         } catch (IOException | UncheckedIOException e) {
             // 片づけられなくても、これから書くものの成否は変わらない。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
+        return List.copyOf(kept);
     }
 
     /**
@@ -253,10 +282,13 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>残ったことを記録しない。</b>残すのは正しい振る舞いであって失敗ではなく、
      * ログに書くのは失敗したことだけである（{@code docs/SPEC.md} §10.4）。
      * <b>そこへ至る失敗は既に記録されている</b>（{@code DocumentWriter#restore}）。
+     * <b>★ 利用者へ伝えるのは呼ぶ側である</b>（{@link #abandonedCopies}。#138）。
+     *
+     * @return 控えを抱えていて、残したなら {@code true}
      */
-    private static void discard(Path directory) {
+    private static boolean discard(Path directory) {
         if (holdsTheOnlyCopy(directory)) {
-            return;
+            return true;
         }
         try (Stream<Path> entries = Files.walk(directory)) {
             entries.sorted(Comparator.reverseOrder()).forEach(OutputWorkspace::deleteQuietly);
@@ -267,6 +299,7 @@ final class OutputWorkspace implements AutoCloseable {
             //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
+        return false;
     }
 
     private static void deleteQuietly(Path path) {

@@ -72,7 +72,7 @@ class KeptCopyReportTest {
             ReplacedFileKeptException kept = assertThrows(
                     ReplacedFileKeptException.class,
                     () -> DocumentWriter.assemble(
-                            Sources.ofPaths(List.of(source)), List.of(PageSelection.of(1)), output, null));
+                            Sources.ofPaths(List.of(source)), List.of(PageSelection.of(1)), output, null, found -> {}));
 
             assertTrue(Files.notExists(output), "入れ替えに失敗したのに出力先に何かある。前提が変わっている");
             assertTrue(Files.exists(kept.kept()), "在り処として載せたパスに何も無い。利用者は探しに行って見つけられない（#124）");

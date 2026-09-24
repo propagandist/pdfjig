@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Warning;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 import javafx.scene.control.Alert;
@@ -64,6 +65,44 @@ final class Messages {
         String message =
                 warnings.stream().distinct().map(Warning::defaultMessage).collect(Collectors.joining("\n"));
         show(AlertType.WARNING, message);
+    }
+
+    /**
+     * 前の書き出しが残した控えを伝える（#138）。1 つも無ければ何も出さない。
+     *
+     * <p><b>★★ 見つけているのに黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる</b>
+     * ——配った {@code v0.1.2} の {@code docs/RELEASE_NOTES.md}「既知の制限」が
+     * 「次の版で伝える形にする」と約束した穴である。
+     *
+     * <p><b>★ 消すまで毎回出る。</b>黙らせる手は置かない——置くと、唯一の控えが見えなくなる形に戻る。
+     *
+     * @param copies 見つけた控え（{@code OutputWorkspace#abandonedCopies}）
+     */
+    void abandonedCopies(List<Path> copies) {
+        if (copies.isEmpty()) {
+            return;
+        }
+        Logs.warn(LogEvent.ABANDONED_COPY_FOUND);
+        show(AlertType.WARNING, describeAbandoned(copies));
+    }
+
+    /**
+     * 前の書き出しが残した控えを、画面に出す文言に直す。
+     *
+     * <p><b>見つけたものを全部並べる。</b>選んで黙る理由が無い（#138）。
+     *
+     * <p><b>★ 「元の名前を付け直して」とは言い切らない。</b>{@link #describe} の回と違い、
+     * <b>落ちたのが置き換えの前か後かが分からない</b>——後なら、出力先には新しいほうが既にある。
+     * <b>確かめる順を言う。</b>
+     *
+     * @param copies 見つけた控え。空でないこと
+     * @return 画面に出す文言
+     */
+    static String describeAbandoned(List<Path> copies) {
+        return "前の保存が途中で終わり、保存する前のファイルが次の場所に残っています。\n\n"
+                + copies.stream().map(Path::toString).collect(Collectors.joining("\n"))
+                + "\n\n出力先に同じ名前のファイルが無い、または開けないなら、これを取り出して"
+                + "元の名前を付け直してください。確かめたあと、そのフォルダは消してかまいません。";
     }
 
     /**

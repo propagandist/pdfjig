@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.HostServices;
@@ -644,13 +645,19 @@ public final class MainWindow {
             // ★★ 入力の鍵と、掛ける側の鍵の両方を渡す。どちらも仕事の枠が閉じる。
             owned.addAll(keysOf(inputs.all()));
 
+            // ★★ 前の書き出しが残した控えは、この書き出しの成否に関わらず伝える（#138）。
+            //   書き出しのスレッドで積まれ、画面のスレッドで読まれる。
+            List<Path> abandoned = new CopyOnWriteArrayList<>();
+
             handedOver = true;
-            boolean started = run(
+            boolean started = tasks.run(
                     owned,
                     () -> {
                         // ★ 書き出す前に見る。後では「これから何を置き換えるのか」が読めなくなる。
                         boolean replaced = DocumentWriter.replacesAnyOf(sources, output);
-                        return new SaveOutcome(replaced, DocumentWriter.assemble(inputs, pages, output, protection));
+                        return new SaveOutcome(
+                                replaced,
+                                DocumentWriter.assemble(inputs, pages, output, protection, abandoned::addAll));
                     },
                     outcome -> {
                         markSaved(saving, sources, pages);
@@ -674,7 +681,13 @@ public final class MainWindow {
                             //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
                             //   必ず出る警告であり、例外的な経路ではない。
                             messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts, asked));
+                            // ★ 後に出す。いまの書き出しで起きたことが先で、前の書き出しの跡は後である。
+                            messages.abandonedCopies(abandoned);
                         }
+                    },
+                    failure -> {
+                        messages.failure(failure);
+                        messages.abandonedCopies(abandoned);
                     });
             // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
             // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。

@@ -9,6 +9,7 @@ import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,6 +52,27 @@ class MessagesTest {
                     message,
                     "元がどこに残っているのかを言っていない。利用者には「ファイルが消えた」としか見えない（#124）");
         }
+    }
+
+    /**
+     * 前の書き出しが残した控えを、全部並べて出す（#138）。
+     *
+     * <p><b>丸ごと一致で見る。</b>{@code describe} の回と同じ理由である。
+     * <b>「元の名前を付け直して」と言い切らない</b>のは、落ちたのが置き換えの前か後かが分からないからで、
+     * <b>後なら出力先には新しいほうが既にある。</b>
+     */
+    @Test
+    @DisplayName("前の書き出しが残した控えを、全部並べて出す")
+    void listsEveryCopyAPreviousWriteLeftBehind(@TempDir Path directory) {
+        Path first = directory.resolve(".pdfjig-1").resolve("replaced.pdf");
+        Path second = directory.resolve(".pdfjig-2").resolve("replaced.pdf");
+
+        assertEquals(
+                "前の保存が途中で終わり、保存する前のファイルが次の場所に残っています。\n\n"
+                        + first + "\n" + second
+                        + "\n\n出力先に同じ名前のファイルが無い、または開けないなら、これを取り出して"
+                        + "元の名前を付け直してください。確かめたあと、そのフォルダは消してかまいません。",
+                Messages.describeAbandoned(List.of(first, second)));
     }
 
     /**
