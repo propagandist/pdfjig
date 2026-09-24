@@ -97,6 +97,9 @@ class EditingGateUiTest extends DesktopUiTest {
         startHeldSave(robot, held, output);
 
         assertTrue(button(robot, "#source-remove-0").isDisabled(), "保存が走っている間に「×」が押せる");
+        // ★ メニューの側も同じ門を通る（#127）。サブメニューごと押せないことを見る——
+        //   子だけが無効だと、「ツール」の中でここだけ押せる見た目のまま残る。
+        assertTrue(menuItem(robot, "menu-remove-source").orElseThrow().isDisable(), "保存が走っている間に「ファイルを外す」が押せる");
 
         robot.clickOn("#source-remove-0");
         assertTrue(dialogButton(robot, "#remove-source-ok").isEmpty(), "押せてしまい、確認まで出ている");
@@ -223,6 +226,7 @@ class EditingGateUiTest extends DesktopUiTest {
         assertEquals(TWO_FILE_PAGES, pageTexts(output));
 
         assertFalse(button(robot, "#source-remove-0").isDisabled(), "保存が済んでも「×」が押せない");
+        assertFalse(menuItem(robot, "menu-remove-source").orElseThrow().isDisable(), "保存が済んでも「ファイルを外す」が押せない");
 
         robot.clickOn("#thumbnail-tile-0");
         robot.type(KeyCode.DELETE);

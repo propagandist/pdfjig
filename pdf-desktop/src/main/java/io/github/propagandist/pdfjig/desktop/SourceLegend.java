@@ -3,11 +3,16 @@ package io.github.propagandist.pdfjig.desktop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntConsumer;
+import javafx.beans.binding.BooleanExpression;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.FlowPane;
@@ -60,13 +65,38 @@ final class SourceLegend {
     private final List<Button> removeButtons = new ArrayList<>();
 
     /**
+     * 「×」と同じ操作をメニューから届かせる（#127）。
+     *
+     * <p><b>★ 「×」はフォーカスを受け取らない</b>（{@link #chip}）。<b>ほかの操作はどれもメニューにあり</b>、
+     * Alt／F10 で辿れる。<b>ここだけがマウス専用だった。</b>巡回に戻すとファイルの数だけ Tab が増えるので、
+     * <b>メニューのほうに揃える。</b>
+     *
+     * <p><b>★ 項目は「×」と同じ場所で作り直す。</b>番号も処理も押せない条件も「×」と同じものを使う——
+     * 別に組むと、<b>片方だけ直した日に、同じ操作が経路によって違う文書に当たる。</b>
+     */
+    private final Menu removeMenu = new Menu("ファイルを外す");
+
+    /** いま出ているメニューの項目。「×」と同じ理由で、束ねずに書き換える。 */
+    private final List<MenuItem> removeItems = new ArrayList<>();
+
+    /** 外せるファイルが並んでいるか。一覧を出しているのと同じ条件である。 */
+    private final BooleanProperty shown = new SimpleBooleanProperty(false);
+
+    /**
      * @param removeBlocked ファイルを外せない間 {@code true} になるもの。この一覧だけでは
      *                      決まらない（走っている仕事があるかを持っているのは画面の側である）
      */
     SourceLegend(ObservableBooleanValue removeBlocked) {
         this.removeBlocked = removeBlocked;
-        removeBlocked.addListener(
-                (observable, was, blocked) -> removeButtons.forEach(button -> button.setDisable(blocked)));
+        removeBlocked.addListener((observable, was, blocked) -> {
+            removeButtons.forEach(button -> button.setDisable(blocked));
+            removeItems.forEach(item -> item.setDisable(blocked));
+        });
+        removeMenu.setId("menu-remove-source");
+        // ★ サブメニューそのものも押させない。子だけを無効にすると、走っている間「ツール」の中で
+        //   ここだけが押せる見た目のまま残る——押しても何も起きないのと、押せないのは違う（#114）。
+        //   束ねてよいのはこれが 1 つしか無いからである（「×」と項目は作り直すので束ねない）。
+        removeMenu.disableProperty().bind(shown.not().or(BooleanExpression.booleanExpression(removeBlocked)));
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
         hide();
@@ -75,6 +105,11 @@ final class SourceLegend {
     /** 画面に置くための節点。 */
     Node node() {
         return root;
+    }
+
+    /** 「ファイルを外す」のメニュー。並べる場所は {@link Actions#menuBar()} が決める。 */
+    Menu removeMenu() {
+        return removeMenu;
     }
 
     /** ファイルを外すときに呼ぶ処理を差す。 */
@@ -99,22 +134,33 @@ final class SourceLegend {
 
         int[] counts = countsPerSource(session);
 
-        root.getChildren().clear();
-        removeButtons.clear();
+        clear();
         for (int sourceIndex = 0; sourceIndex < session.sourceCount(); sourceIndex++) {
-            root.getChildren().add(chip(sourceIndex, session.sourceName(sourceIndex), counts[sourceIndex]));
+            String name = session.sourceName(sourceIndex);
+            root.getChildren().add(chip(sourceIndex, name, counts[sourceIndex]));
+            removeMenu.getItems().add(removeItem(sourceIndex, name));
         }
+        shown.set(true);
 
         root.setVisible(true);
         root.setManaged(true);
     }
 
     private void hide() {
-        root.getChildren().clear();
-        removeButtons.clear();
+        clear();
+        // 1 ファイルなら外すものが無い。一覧を出さないのと同じ条件で押させない。
+        shown.set(false);
         root.setVisible(false);
         // 場所も空けない。1 ファイルのときに帯だけが残ると、何かがあると思わせる。
         root.setManaged(false);
+    }
+
+    /** 「×」とメニューの項目を捨てる。どちらも同じ並びから作るので、捨てるのも一緒にする。 */
+    private void clear() {
+        root.getChildren().clear();
+        removeButtons.clear();
+        removeMenu.getItems().clear();
+        removeItems.clear();
     }
 
     private static int[] countsPerSource(DocumentSession session) {
@@ -170,5 +216,26 @@ final class SourceLegend {
         HBox chip = new HBox(6, swatch, label, count, remove);
         chip.setAlignment(Pos.CENTER_LEFT);
         return chip;
+    }
+
+    /**
+     * 「×」と同じ操作のメニュー項目。
+     *
+     * <p><b>確認はここで取らない。</b>{@code onRemove} の先（{@code MainWindow#removeSource}）が
+     * 消える量を見せて取る——「×」と同じ窓を通る。
+     */
+    private MenuItem removeItem(int sourceIndex, String name) {
+        // ★ 名前を入れる。「×」の accessibleText と同じ理由である——同じ項目が並ぶと区別が付かない。
+        MenuItem item = new MenuItem(name + " を外す…");
+        // ★★ ファイル名をニーモニックとして読ませない。MenuItem は既定で "_" を印として食うので、
+        //   scan_01.pdf が scan01.pdf に見え、別のファイルと同じ名前に化けうる——
+        //   取り消せない操作の対象を取り違えさせる（CLAUDE.md 優先順位 2）。
+        //   一覧の Label は既定で読まないので、あちらには起きない。
+        item.setMnemonicParsing(false);
+        item.setId("menu-remove-source-" + sourceIndex);
+        item.setOnAction(event -> onRemove.accept(sourceIndex));
+        item.setDisable(removeBlocked.get());
+        removeItems.add(item);
+        return item;
     }
 }
