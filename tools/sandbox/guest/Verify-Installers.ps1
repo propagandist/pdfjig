@@ -25,7 +25,11 @@ param(
     #   ここにも既定を置くと、あちらを直しても Sandbox 経由では効かない形になる。
     [string] $ExeSilentArgs,
 
-    [string] $ExpectedUpgradeCode
+    [string] $ExpectedUpgradeCode,
+
+    [string] $ExpectedMsiContext,
+
+    [string] $ExpectedExeContext
 )
 
 Set-StrictMode -Version Latest
@@ -44,6 +48,8 @@ try {
     }
     if ($ExeSilentArgs) { $arguments['ExeSilentArgs'] = $ExeSilentArgs }
     if ($ExpectedUpgradeCode) { $arguments['ExpectedUpgradeCode'] = $ExpectedUpgradeCode }
+    if ($ExpectedMsiContext) { $arguments['ExpectedMsiContext'] = $ExpectedMsiContext }
+    if ($ExpectedExeContext) { $arguments['ExpectedExeContext'] = $ExpectedExeContext }
 
     & 'C:\src\tools\smoke\InstallCheck.ps1' @arguments
     $code = 0

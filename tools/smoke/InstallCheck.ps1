@@ -49,6 +49,18 @@ param(
     #   通ることだけを見ても、検知できる保証にはならない。
     [string] $ExpectedUpgradeCode = '{3210BCE4-3635-4EFC-8EC1-DC77881091BB}',
 
+    # MSI / EXE が入る範囲。Windows Installer 自身に訊いた値と照合する（Get-InstallContexts）。
+    # MSI は情報システム部門による一括配布向けなのでマシン単位、EXE は管理者権限の要らない
+    # ユーザー単位である（pdf-desktop/build.gradle.kts の packageMsi / packageExe）。
+    #
+    # ★ ここも独立に置いた期待値である。入れ替えて渡すと落ちる——それで空振りしていない
+    #   ことを確かめる（#158）。
+    [ValidateSet('machine', 'userUnmanaged', 'userManaged')]
+    [string] $ExpectedMsiContext = 'machine',
+
+    [ValidateSet('machine', 'userUnmanaged', 'userManaged')]
+    [string] $ExpectedExeContext = 'userUnmanaged',
+
     # ★★ 使い捨てでない機械で走らせるときの明示の同意。
     #   既定では断る（下の Assert-DisposableHost）。
     [switch] $AllowNonDisposableHost
@@ -143,7 +155,14 @@ function Assert-InstallerSucceeded([int] $Code, [string] $What) {
     }
 }
 
-<# アンインストール情報のある場所を全部見る。マシン単位とユーザー単位で置き場が違う。 #>
+<#
+    アンインストール情報のある場所を全部見る。
+
+    ★★ ここで入った範囲を見分けないこと。**ユーザー単位で入れても HKLM に作られる**
+      （#158、2026-09-25 実測。msiexec のログは Assignment=0 と UserData\<SID> を示すのに、
+      キーは HKLM:\…\Uninstall にあった）。範囲は Get-InstallContexts が見る。
+      ここが答えるのは「アンインストール情報があるか」だけである。
+#>
 function Get-UninstallEntries([string] $ProductCode) {
     $roots = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -154,6 +173,27 @@ function Get-UninstallEntries([string] $ProductCode) {
     foreach ($root in $roots) {
         $path = Join-Path $root $ProductCode
         if (Test-Path $path) { $found += $path }
+    }
+    return @($found)
+}
+
+<#
+    その製品がどの範囲に入っているかを Windows Installer に訊く。
+
+    返すのは 'machine' / 'userUnmanaged' / 'userManaged' の並びである。入っていなければ空。
+    ProductsEx の第 3 引数 7 は 3 つの範囲をすべて見る指定であり、ユーザー SID の空文字は
+    「いまの利用者」を指す。
+#>
+function Get-InstallContexts([string] $ProductCode) {
+    $names = @{ 1 = 'userManaged'; 2 = 'userUnmanaged'; 4 = 'machine' }
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $products = $installer.GetType().InvokeMember(
+        'ProductsEx', 'GetProperty', $null, $installer, @($ProductCode, '', 7))
+    $found = @()
+    foreach ($product in $products) {
+        $context = [int] $product.GetType().InvokeMember(
+            'Context', 'GetProperty', $null, $product, $null)
+        $found += $names[$context]
     }
     return @($found)
 }
@@ -175,7 +215,8 @@ function Get-StartMenuShortcuts {
 }
 
 <# 入った状態を検める。入った実行ファイルの場所を返す。 #>
-function Assert-Installed([string] $ExpectedRoot, [string] $ProductCode, [string] $What) {
+function Assert-Installed(
+    [string] $ExpectedRoot, [string] $ProductCode, [string] $ExpectedContext, [string] $What) {
     $exe = Join-Path $ExpectedRoot 'PDFjig.exe'
     if (-not (Test-Path $exe)) {
         throw "$What : $exe が無い"
@@ -196,6 +237,15 @@ function Assert-Installed([string] $ExpectedRoot, [string] $ProductCode, [string
         throw "$What : アンインストール情報が無い（$ProductCode）"
     }
     Write-Log ('  アンインストール情報: {0}' -f ($entries -join ' / '))
+
+    # ★ 入れ先のフォルダでは範囲を見分けられない。ユーザー単位の MSI でも、入れ先の指定次第で
+    #   %ProgramFiles% に置けるし、登録の置き場は上のとおり当てにならない（#158）。
+    $contexts = @(Get-InstallContexts $ProductCode)
+    if ($contexts.Count -ne 1 -or $contexts[0] -ne $ExpectedContext) {
+        throw ('{0} : 入った範囲が想定と違う。想定 {1} / 実際 [{2}]' -f
+            $What, $ExpectedContext, ($contexts -join ', '))
+    }
+    Write-Log ('  範囲: {0}' -f $contexts[0])
 
     return $exe
 }
@@ -225,6 +275,10 @@ function Assert-Removed([string[]] $Roots, [string] $ProductCode, [string] $What
     $entries = @(Get-UninstallEntries $ProductCode)
     if ($entries.Count -gt 0) {
         $leftovers += ('アンインストール情報が残っている: {0}' -f ($entries -join ' / '))
+    }
+    $contexts = @(Get-InstallContexts $ProductCode)
+    if ($contexts.Count -gt 0) {
+        $leftovers += ('Windows Installer に登録が残っている: {0}' -f ($contexts -join ', '))
     }
     if ($leftovers.Count -gt 0) {
         throw ("$What : 消したのに残った —— " + ($leftovers -join ' / '))
@@ -264,7 +318,7 @@ $c = Invoke-Installer 'msiexec.exe' @(
     '/i', $msi[0].FullName, '/qn', '/norestart',
     '/l*v', (Join-Path $Out 'msi-install.log')) 'MSI を入れる'
 Assert-InstallerSucceeded $c 'MSI のインストール'
-$installedExe = Assert-Installed $machineRoot $productCode 'MSI'
+$installedExe = Assert-Installed $machineRoot $productCode $ExpectedMsiContext 'MSI'
 
 Write-Log '  起動を確かめる'
 Assert-AppLaunches $installedExe 90 $Out 'msi'
@@ -296,7 +350,7 @@ Assert-Removed @($machineRoot, $userRoot) $productCode 'MSI'
 Write-Log '--- EXE ---'
 $c = Invoke-Installer $exe[0].FullName ($ExeSilentArgs -split ' ') 'EXE を入れる'
 Assert-InstallerSucceeded $c 'EXE のインストール'
-$installedExe = Assert-Installed $userRoot $productCode 'EXE'
+$installedExe = Assert-Installed $userRoot $productCode $ExpectedExeContext 'EXE'
 
 Write-Log '  起動を確かめる'
 Assert-AppLaunches $installedExe 90 $Out 'exe'
