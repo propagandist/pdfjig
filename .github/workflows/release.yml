@@ -35,6 +35,28 @@ jobs:
     # 書き換えるので消さないこと（理由は .github/dependabot.yml）。
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 下の「タグが develop から辿れるか」に develop の履歴が要る。
+          # リポジトリは 1 MB に満たない（2026-09-25 実測）ので、全部取っても重くない。
+          fetch-depth: 0
+
+      # ★★ 配るものは、PR と code scanning を通ったコミットからしか作らない（#155）。
+      #   develop はその 2 つを ruleset で要求しているので、develop から辿れれば門は通っている。
+      #   **タグにはその門が無い**——ruleset が止められるのはタグを作る・動かす・消す操作だけで、
+      #   どのコミットに打つかは縛れない。だから打つ先はここで確かめる。
+      #
+      # ★ workflow_dispatch には掛けない。あちらは release.yml 自身をマージ前にブランチの上で
+      #   試す経路であり（#44）、draft を作るだけでタグを作らない。
+      - name: タグが develop から辿れるか
+        if: github.event_name == 'push'
+        run: |
+          git merge-base --is-ancestor "$env:GITHUB_SHA" origin/develop
+          # 1 は「辿れない」、それ以外の非 0 は git 自身の失敗。どちらも通さない。
+          if ($LASTEXITCODE -ne 0) {
+            throw ("タグ $env:GITHUB_REF_NAME のコミット $env:GITHUB_SHA は develop から辿れない" +
+              "（終了コード $LASTEXITCODE）。PR を通っていないコミットからは配らない。")
+          }
+          "develop から辿れる: $env:GITHUB_SHA"
 
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
