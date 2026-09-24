@@ -3,7 +3,6 @@ package io.github.propagandist.pdfjig.desktop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntConsumer;
-import javafx.beans.binding.BooleanExpression;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableBooleanValue;
@@ -96,7 +95,7 @@ final class SourceLegend {
         // ★ サブメニューそのものも押させない。子だけを無効にすると、走っている間「ツール」の中で
         //   ここだけが押せる見た目のまま残る——押しても何も起きないのと、押せないのは違う（#114）。
         //   束ねてよいのはこれが 1 つしか無いからである（「×」と項目は作り直すので束ねない）。
-        removeMenu.disableProperty().bind(shown.not().or(BooleanExpression.booleanExpression(removeBlocked)));
+        removeMenu.disableProperty().bind(shown.not());
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
         hide();
@@ -231,7 +230,6 @@ final class SourceLegend {
         //   scan_01.pdf が scan01.pdf に見え、別のファイルと同じ名前に化けうる——
         //   取り消せない操作の対象を取り違えさせる（CLAUDE.md 優先順位 2）。
         //   一覧の Label は既定で読まないので、あちらには起きない。
-        item.setMnemonicParsing(false);
         item.setId("menu-remove-source-" + sourceIndex);
         item.setOnAction(event -> onRemove.accept(sourceIndex));
         item.setDisable(removeBlocked.get());
