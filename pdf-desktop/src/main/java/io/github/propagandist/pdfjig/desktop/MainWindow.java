@@ -691,6 +691,8 @@ public final class MainWindow {
                         }
                     },
                     failure -> {
+                        // ★★ 成功の側と同じ理由で、控えの窓は最後に必ず出す。
+                        //   messages::failure に戻すと、失敗した保存でだけ黙る（#138）。
                         try {
                             messages.failure(failure);
                         } finally {
@@ -1255,15 +1257,7 @@ public final class MainWindow {
      * Consumer, Consumer)}。#146 / #193）。
      */
     private <T> boolean run(Sources owned, Supplier<T> work, Consumer<T> onSucceeded) {
-        return run(keysOf(owned.all()), work, onSucceeded);
-    }
-
-    /**
-     * 鍵を抱えた仕事を頼む。<b>鍵の出どころが 1 つとは限らない経路のためにある</b>——
-     * 書き出しは<b>入力の鍵と、掛ける側の鍵の両方</b>を抱える（{@link #save}）。
-     */
-    private <T> boolean run(List<Password> owned, Supplier<T> work, Consumer<T> onSucceeded) {
-        return tasks.run(owned, work, onSucceeded, messages::failure);
+        return tasks.run(keysOf(owned.all()), work, onSucceeded, messages::failure);
     }
 
     /**

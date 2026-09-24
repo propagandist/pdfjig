@@ -299,6 +299,6 @@ class DocumentWriterTest {
      * （{@code OutputWorkspaceTest}）。
      */
     private static OutputWorkspace workspaceFor(Path target) {
-        return OutputWorkspace.nextTo(target);
+        return OutputWorkspace.nextTo(target, found -> {});
     }
 }

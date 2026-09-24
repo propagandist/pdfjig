@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -42,6 +43,9 @@ final class OutputWorkspace implements AutoCloseable {
 
     /** 作業場所の名前の頭。残ったものを次の書き出しで見つけるための目印でもある。 */
     private static final String PREFIX = ".pdfjig-";
+
+    /** pdfjig が作る作業場所の名前の形。{@link Files#createTempDirectory} は頭の後ろに数字だけを付ける。 */
+    private static final Pattern OURS = Pattern.compile(Pattern.quote(PREFIX) + "\\d+");
 
     /** 作業場所の中に置くファイルの名前。中は自分のものなので固定でよい。 */
     private static final String NAME = "output.pdf";
@@ -78,17 +82,6 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * 出力先の隣に作業場所を用意する。前の書き出しが残した控えは、見つけても知らせない。
-     *
-     * @param output 最終的な出力先。その隣に作る
-     */
-    static OutputWorkspace nextTo(Path output) {
-        // ★ もう一方の nextTo を呼ばない。呼ぶと「nextTo を呼べるのは DocumentWriter だけ」の
-        //   規則（ArchitectureTest）に、ここ自身が掛かる。
-        return prepare(output, found -> {});
-    }
-
-    /**
      * 出力先の隣に作業場所を用意し、前の書き出しが残した控えを知らせる。
      *
      * <p><b>★★ 控えは、前の書き出しがアプリごと落ちて残した元の唯一の実体である</b>（#138）。
@@ -108,14 +101,14 @@ final class OutputWorkspace implements AutoCloseable {
      * 極めて短い</b>ので、見分ける仕掛けは置いていない。伝える文言が「開いて確かめる」よう促すのは
      * そのためでもある（{@code Messages#describeAbandoned}）。
      *
+     * <p><b>★★ 知らせない版を置かない。</b>置くと、作業場所を開く口が 2 つ目に足された日に
+     * 短いほうが選ばれ、<b>そこだけ黙る</b>——{@link #failing} を呼ぶ側の {@code catch} に置かない
+     * のと同じ理由である。知らせなくてよい呼び出し（テスト）は、何もしない受け取り口を渡す。
+     *
      * @param output    最終的な出力先。その隣に作る
      * @param abandoned 同じフォルダで見つけた控えを受け取る。見つからなければ呼ばれない
      */
     static OutputWorkspace nextTo(Path output, Consumer<List<Path>> abandoned) {
-        return prepare(output, abandoned);
-    }
-
-    private static OutputWorkspace prepare(Path output, Consumer<List<Path>> abandoned) {
         Path directory = output.toAbsolutePath().getParent();
         List<Path> found = discardAbandoned(directory);
         if (!found.isEmpty()) {
@@ -257,7 +250,13 @@ final class OutputWorkspace implements AutoCloseable {
                     .filter(Files::isDirectory)
                     .forEach(entry -> {
                         // ★ 残したものは拾う（#138）。関門は discard の側に置いたままにする。
-                        if (discard(entry) && Files.isRegularFile(entry.resolve(REPLACED))) {
+                        // ★ 知らせるのは pdfjig が作る形の名前だけにする（createTempDirectory は
+                        //   PREFIX の後ろに数字だけを付ける）。フォルダに書ける第三者が
+                        //   .pdfjig-何でも を置けば、その名前がそのまま窓に出て、
+                        //   pdfjig が「あなたの元のファイル」と請け合うことになる。
+                        if (discard(entry)
+                                && OURS.matcher(entry.getFileName().toString()).matches()
+                                && Files.isRegularFile(entry.resolve(REPLACED))) {
                             kept.add(entry.resolve(REPLACED));
                         }
                     });

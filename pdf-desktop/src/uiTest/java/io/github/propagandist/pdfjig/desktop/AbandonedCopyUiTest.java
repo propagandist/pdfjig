@@ -16,7 +16,7 @@ import org.testfx.framework.junit5.Start;
 import org.testfx.framework.junit5.Stop;
 
 /**
- * 前の書き出しがアプリごと落ちて残した控えを、次の書き出しで伝える（#138）。
+ * 前の書き出しがアプリごと落ちて残した控えを、次の保存で伝える（#138）。
  *
  * <p><b>★★ 電源断・強制終了・ログオフでは、失敗に在り処を載せる形（#124）が届かない。</b>
  * {@code close} も {@code catch} も走らないためである。<b>見つけられるのは次に同じフォルダへ
@@ -41,14 +41,17 @@ class AbandonedCopyUiTest extends DesktopUiTest {
     }
 
     /**
-     * 書き出しが済んだあとに、控えの在り処を窓で伝える。
+     * 控えの在り処を窓で伝える。書き出しも控えも変えない。
      *
-     * <p><b>書き出しは邪魔しない。</b>控えの有無に関係なく書き出しは進むので、窓は後から出る。
-     * <b>控えそのものにも触らない</b>——伝えるだけで、消すのは利用者である。
+     * <p><b>★ 窓が出る時機（書き出しの後か最中か）は、ここでは見分けられない。</b>書き出しは
+     * 窓を待たずに進むので、最中に出す形に変えても同じように通る。<b>時機は人が見る</b>
+     * （{@code docs/HANDOVER.md} 4-4 の 10 番の ③）。
+     *
+     * <p><b>控えそのものにも触らない</b>——伝えるだけで、消すのは利用者である。
      */
     @Test
-    void 前の書き出しが残した控えを書き出しの後に伝える(@TempDir Path dir, FxRobot robot) throws Exception {
-        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-crashed"));
+    void 前の書き出しが残した控えの在り処を伝える(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-1234567890"));
         Files.createFile(crashed.resolve("held"));
         // ★ 本文は ASCII にする。TestPdfs は標準フォントで書くので、日本語を渡すと投げる。
         Path kept = TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
