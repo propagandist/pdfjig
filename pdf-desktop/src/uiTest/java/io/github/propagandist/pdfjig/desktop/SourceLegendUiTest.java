@@ -187,10 +187,15 @@ class SourceLegendUiTest extends DesktopUiTest {
         assertTrue(menuItem(robot, "menu-remove-source-2").isEmpty(), "外したぶんの項目がメニューに残っている");
 
         // ★★ 文言が合っていても、押した先が古い番号を掴んでいれば別のファイルが外れる。押して確かめる。
-        // ★★ 待たない形で押す。押した先の確認の窓は showAndWait の入れ子ループに入るので、
-        //   interact で待つと窓が閉じるまで戻らず、閉じる手もここから出せない——
-        //   CI の uiTest が 15 分の上限まで止まった（2026-09-25 実測）。
-        robot.interactNoWait(second::fire);
+        // ★★ 押し方はキーボードの筋と同じにする。MenuItem#fire を直に呼ぶ形は、CI の uiTest を
+        //   2 度とも 15 分の上限まで止めた（interact / interactNoWait のどちらでも。2026-09-25 実測）。
+        robot.type(KeyCode.F10);
+        robot.type(KeyCode.RIGHT, 2); // ファイル → ページ → ツール
+        robot.type(KeyCode.DOWN); // 開いて「PDF を追加…」
+        robot.type(KeyCode.DOWN); // 「ファイルを外す」
+        robot.type(KeyCode.RIGHT); // 開いて b.pdf
+        robot.type(KeyCode.DOWN); // c.pdf
+        robot.type(KeyCode.ENTER);
         clickWhenReady(robot, "#remove-source-ok");
         waitFor(() -> statusText(robot).equals("1 / 1 ページ"));
         assertEquals(List.of("B1"), pageTexts(saveAs(robot, dir.resolve("out.pdf"))));
