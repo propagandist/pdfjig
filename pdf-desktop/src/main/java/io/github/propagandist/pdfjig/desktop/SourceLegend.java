@@ -3,6 +3,9 @@ package io.github.propagandist.pdfjig.desktop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntConsumer;
+import javafx.beans.binding.BooleanExpression;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -76,6 +79,9 @@ final class SourceLegend {
     /** いま出ているメニューの項目。「×」と同じ理由で、束ねずに書き換える。 */
     private final List<MenuItem> removeItems = new ArrayList<>();
 
+    /** 外せるファイルが並んでいるか。一覧を出しているのと同じ条件である。 */
+    private final BooleanProperty shown = new SimpleBooleanProperty(false);
+
     /**
      * @param removeBlocked ファイルを外せない間 {@code true} になるもの。この一覧だけでは
      *                      決まらない（走っている仕事があるかを持っているのは画面の側である）
@@ -87,6 +93,10 @@ final class SourceLegend {
             removeItems.forEach(item -> item.setDisable(blocked));
         });
         removeMenu.setId("menu-remove-source");
+        // ★ サブメニューそのものも押させない。子だけを無効にすると、走っている間「ツール」の中で
+        //   ここだけが押せる見た目のまま残る——押しても何も起きないのと、押せないのは違う（#114）。
+        //   束ねてよいのはこれが 1 つしか無いからである（「×」と項目は作り直すので束ねない）。
+        removeMenu.disableProperty().bind(shown.not().or(BooleanExpression.booleanExpression(removeBlocked)));
         root.getStyleClass().add("source-legend");
         root.setAlignment(Pos.CENTER_LEFT);
         hide();
@@ -124,31 +134,33 @@ final class SourceLegend {
 
         int[] counts = countsPerSource(session);
 
-        root.getChildren().clear();
-        removeButtons.clear();
-        removeMenu.getItems().clear();
-        removeItems.clear();
+        clear();
         for (int sourceIndex = 0; sourceIndex < session.sourceCount(); sourceIndex++) {
             String name = session.sourceName(sourceIndex);
             root.getChildren().add(chip(sourceIndex, name, counts[sourceIndex]));
             removeMenu.getItems().add(removeItem(sourceIndex, name));
         }
-        removeMenu.setDisable(false);
+        shown.set(true);
 
         root.setVisible(true);
         root.setManaged(true);
     }
 
     private void hide() {
+        clear();
+        // 1 ファイルなら外すものが無い。一覧を出さないのと同じ条件で押させない。
+        shown.set(false);
+        root.setVisible(false);
+        // 場所も空けない。1 ファイルのときに帯だけが残ると、何かがあると思わせる。
+        root.setManaged(false);
+    }
+
+    /** 「×」とメニューの項目を捨てる。どちらも同じ並びから作るので、捨てるのも一緒にする。 */
+    private void clear() {
         root.getChildren().clear();
         removeButtons.clear();
         removeMenu.getItems().clear();
         removeItems.clear();
-        // 1 ファイルなら外すものが無い。一覧を出さないのと同じ条件で押させない。
-        removeMenu.setDisable(true);
-        root.setVisible(false);
-        // 場所も空けない。1 ファイルのときに帯だけが残ると、何かがあると思わせる。
-        root.setManaged(false);
     }
 
     private static int[] countsPerSource(DocumentSession session) {
@@ -215,6 +227,11 @@ final class SourceLegend {
     private MenuItem removeItem(int sourceIndex, String name) {
         // ★ 名前を入れる。「×」の accessibleText と同じ理由である——同じ項目が並ぶと区別が付かない。
         MenuItem item = new MenuItem(name + " を外す…");
+        // ★★ ファイル名をニーモニックとして読ませない。MenuItem は既定で "_" を印として食うので、
+        //   scan_01.pdf が scan01.pdf に見え、別のファイルと同じ名前に化けうる——
+        //   取り消せない操作の対象を取り違えさせる（CLAUDE.md 優先順位 2）。
+        //   一覧の Label は既定で読まないので、あちらには起きない。
+        item.setMnemonicParsing(false);
         item.setId("menu-remove-source-" + sourceIndex);
         item.setOnAction(event -> onRemove.accept(sourceIndex));
         item.setDisable(removeBlocked.get());

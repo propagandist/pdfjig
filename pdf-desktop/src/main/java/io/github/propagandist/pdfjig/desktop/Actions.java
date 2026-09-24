@@ -63,6 +63,8 @@ record Actions(
                         add.menuItem(),
                         // ★ 「追加」の隣に置く。一覧の「×」と同じ操作で、キーボードから届く唯一の道である（#127）。
                         //   中身はファイルを開くたびに変わるので、組むのは SourceLegend である。
+                        // ★★ これだけは定義ではなく、生きている節点そのものである。menuBar() を 2 度呼ぶと、
+                        //   JavaFX は 2 つ目のバーへ黙って移し、1 つ目から消える。呼ぶのは画面を組む 1 度だけにする。
                         removeSources,
                         split.menuItem(),
                         splitPages.menuItem(),

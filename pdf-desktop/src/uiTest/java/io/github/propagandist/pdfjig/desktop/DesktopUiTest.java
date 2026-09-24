@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -22,6 +23,9 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -339,6 +343,26 @@ abstract class DesktopUiTest {
 
     static Button button(FxRobot robot, String id) {
         return robot.lookup(id).queryButton();
+    }
+
+    /**
+     * メニューの項目を id で探す。
+     *
+     * <p><b>{@code MenuItem} は {@code Node} ではないので、{@code lookup} では掴めない</b>
+     * （{@code .claude/rules/ui-tests.md}）。メニューバーから辿る。
+     */
+    static Optional<MenuItem> menuItem(FxRobot robot, String id) {
+        MenuBar bar = robot.lookup(".menu-bar").queryAs(MenuBar.class);
+        return bar.getMenus().stream()
+                .flatMap(DesktopUiTest::withDescendants)
+                .filter(item -> id.equals(item.getId()))
+                .findFirst();
+    }
+
+    private static Stream<MenuItem> withDescendants(MenuItem item) {
+        return item instanceof Menu menu
+                ? Stream.concat(Stream.of(item), menu.getItems().stream().flatMap(DesktopUiTest::withDescendants))
+                : Stream.of(item);
     }
 
     static String statusText(FxRobot robot) {

@@ -7,10 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.stream.Stream;
 import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
@@ -185,10 +182,33 @@ class SourceLegendUiTest extends DesktopUiTest {
         assertEquals(
                 "b.pdf を外す…",
                 menuItem(robot, "menu-remove-source-0").orElseThrow().getText());
-        assertEquals(
-                "c.pdf を外す…",
-                menuItem(robot, "menu-remove-source-1").orElseThrow().getText());
+        MenuItem second = menuItem(robot, "menu-remove-source-1").orElseThrow();
+        assertEquals("c.pdf を外す…", second.getText());
         assertTrue(menuItem(robot, "menu-remove-source-2").isEmpty(), "外したぶんの項目がメニューに残っている");
+
+        // ★★ 文言が合っていても、押した先が古い番号を掴んでいれば別のファイルが外れる。押して確かめる。
+        robot.interact(second::fire);
+        clickWhenReady(robot, "#remove-source-ok");
+        waitFor(() -> statusText(robot).equals("1 / 1 ページ"));
+        assertEquals(List.of("B1"), pageTexts(saveAs(robot, dir.resolve("out.pdf"))));
+    }
+
+    /**
+     * ファイル名の {@code _} が消えない。
+     *
+     * <p><b>★★ {@code MenuItem} は既定で {@code _} をニーモニックの印として食う。</b>
+     * {@code scan_01.pdf} が {@code scan01.pdf} に見え、別のファイルと同じ名前に化けうる——
+     * 取り消せない操作の対象を取り違えさせる。<b>{@code getText()} は元の文字列を返すので、
+     * 文言を比べても化けたことは見えない。</b>読ませていないことを直に見る。
+     */
+    @Test
+    void ファイル名の下線をニーモニックとして読まない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("scan_01.pdf"), "A1"));
+        addFiles(robot, TestPdfs.withText(dir.resolve("scan01.pdf"), "B1"));
+
+        MenuItem item = menuItem(robot, "menu-remove-source-0").orElseThrow();
+        assertEquals("scan_01.pdf を外す…", item.getText());
+        assertFalse(item.isMnemonicParsing(), "ファイル名の _ がニーモニックとして読まれる");
     }
 
     /**
@@ -217,26 +237,6 @@ class SourceLegendUiTest extends DesktopUiTest {
     private void addFiles(FxRobot robot, Path... paths) throws Exception {
         addFixtures(robot, paths);
         waitForNode(robot, "#source-remove-0");
-    }
-
-    /**
-     * メニューの項目を id で探す。
-     *
-     * <p><b>{@code MenuItem} は {@code Node} ではないので、{@code lookup} では掴めない</b>
-     * （{@code .claude/rules/ui-tests.md}）。メニューバーから辿る。
-     */
-    private static Optional<MenuItem> menuItem(FxRobot robot, String id) {
-        MenuBar bar = robot.lookup(".menu-bar").queryAs(MenuBar.class);
-        return bar.getMenus().stream()
-                .flatMap(SourceLegendUiTest::withDescendants)
-                .filter(item -> id.equals(item.getId()))
-                .findFirst();
-    }
-
-    private static Stream<MenuItem> withDescendants(MenuItem item) {
-        return item instanceof Menu menu
-                ? Stream.concat(Stream.of(item), menu.getItems().stream().flatMap(SourceLegendUiTest::withDescendants))
-                : Stream.of(item);
     }
 
     /** 節点に付いた、支援技術から読まれる名前。 */
