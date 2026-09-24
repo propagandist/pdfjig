@@ -9,6 +9,7 @@ import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,7 +35,7 @@ class MessagesTest {
     @Test
     @DisplayName("控えが残ったなら、その場所を出す")
     void tellsWhereTheOriginalIsKept(@TempDir Path directory) throws IOException {
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
             RuntimeException failure =
@@ -54,6 +55,31 @@ class MessagesTest {
     }
 
     /**
+     * 前の書き出しが残した控えを、全部並べて出す（#138）。
+     *
+     * <p><b>丸ごと一致で見る。</b>{@code describe} の回と同じ理由である。
+     * <b>「元の名前を付け直して」と言い切らない</b>のは、落ちたのが置き換えの前か後かが分からないからで、
+     * <b>後なら元の名前には新しいほうが既にある。</b>
+     * <b>「要らなければ消してよい」とも言わない</b>——共有フォルダなら、別の利用者の唯一の控えでありうる。
+     */
+    @Test
+    @DisplayName("前の書き出しが残した控えを、全部並べて出す")
+    void listsEveryCopyAPreviousWriteLeftBehind(@TempDir Path directory) {
+        Path first = directory.resolve(".pdfjig-1").resolve("replaced.pdf");
+        Path second = directory.resolve(".pdfjig-2").resolve("replaced.pdf");
+
+        assertEquals(
+                "前の保存が途中で終わったときの、保存する前のファイルが次の場所に残っています。\n\n"
+                        + first + "\n" + second
+                        + "\n\nどのファイルのものかは、開いて中身で確かめてください。"
+                        + "元の名前のファイルが既にあるなら、それは保存が済んだ新しいほうかもしれません。"
+                        + "上書きする前に中身を比べてください。"
+                        + "\n\n自分のものだと確かめて、要るものを取り出したら、そのフォルダは消してかまいません。"
+                        + "自分のものでなければ、消さずにおいてください。",
+                Messages.describeAbandoned(List.of(first, second)));
+    }
+
+    /**
      * pdfjig の失敗でない原因を包んでも、その中身は出さない。
      *
      * <p><b>★★ 包む相手は {@code PdfjigException} とは限らない。</b>
@@ -63,7 +89,7 @@ class MessagesTest {
     @Test
     @DisplayName("pdfjig の失敗でない原因を包んでも、その中身は出さない")
     void keepsAForeignCauseOutOfTheKeptMessage(@TempDir Path directory) throws IOException {
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
             RuntimeException failure = workspace

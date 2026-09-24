@@ -6,13 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.nio.file.ExtendedOpenOption;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +44,7 @@ class OutputWorkspaceTest {
         // 出力先は、ほかの誰かも書けるフォルダでありうる。
         Files.createFile(directory.resolve("someone-else.txt"));
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertEquals(
                     List.of(), namesIn(workspace.file().getParent()), "書き込み先の隣に他人のものがあるなら、その名前は他人にも用意できる（CWE-377）");
         }
@@ -49,7 +53,7 @@ class OutputWorkspaceTest {
     @Test
     @DisplayName("退避先は、まだ存在しない")
     void offersASetAsidePathThatDoesNotExistYet(@TempDir Path directory) {
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertFalse(Files.exists(workspace.replaced()));
         }
     }
@@ -70,7 +74,7 @@ class OutputWorkspaceTest {
     void keepsTheWorkspaceThatHoldsTheOnlyCopy(@TempDir Path directory) throws IOException {
         Path kept;
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace.holdOriginal();
             kept = workspace.replaced();
             Files.writeString(kept, "元のファイル");
@@ -79,12 +83,75 @@ class OutputWorkspaceTest {
         assertEquals("元のファイル", Files.readString(kept), "元がここにしか無いのに片づけている（#119）");
     }
 
+    /**
+     * 前の書き出しが残した控えを、次の書き出しが見つけて知らせる（#138）。
+     *
+     * <p><b>★★ アプリごと落ちた回には、失敗に在り処を載せる形が届かない。</b>{@code close} も
+     * {@code catch} も走らないためである。<b>見つけられるのは次に同じフォルダへ書き出すときで、
+     * そこで黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる。</b>
+     *
+     * <p><b>控えが実在するものだけを知らせる。</b>印だけ残って控えの無いもの（退避の前に落ちた回）を
+     * 知らせると、無事に出力先にあるものを「ここにしか無い」と伝える——{@code failing} と同じ理由である。
+     */
+    @Test
+    @DisplayName("前の書き出しが残した控えを、次の書き出しが見つけて知らせる")
+    void reportsTheCopyAPreviousWriteLeftBehind(@TempDir Path directory) throws IOException {
+        Path kept;
+        try (OutputWorkspace crashed = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            crashed.holdOriginal();
+            kept = crashed.replaced();
+            Files.writeString(kept, "元のファイル");
+        }
+        try (OutputWorkspace markedOnly = OutputWorkspace.nextTo(directory.resolve("other.pdf"), found -> {})) {
+            // 印を立てたところで落ちた。元はまだ出力先にある。
+            markedOnly.holdOriginal();
+        }
+
+        List<List<Path>> found = new ArrayList<>();
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
+        assertEquals(List.of(List.of(kept)), found, "見つけた控えを知らせていない（#138）");
+        assertEquals("元のファイル", Files.readString(kept), "知らせただけでなく、片づけてもいない");
+    }
+
+    /**
+     * 置き換えが済んだ作業場所は、控えが消せずに残っていても知らせない。
+     *
+     * <p><b>★★ 知らせてよいのは印（{@code held}）があるものだけである。</b>印を外した後の控えは
+     * 1 世代前であって「ここにしか無い」ものではない。<b>それを知らせると、成功した保存を
+     * 「途中で終わった」と伝える。</b>
+     *
+     * <p><b>★ 控えを消せない状態を作る。</b>作業場所ごと消えてしまうと、判定を緩めても
+     * 何も見つからず、<b>この検めは落ちようがない</b>（#138 の門で出た）。
+     * 削除を共有しない開き方で握っておけば、片づけは控えを消せずに作業場所を残す。
+     * <b>Windows でだけ作れる状態である。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("置き換えが済んだ作業場所は、控えが消せずに残っていても知らせない")
+    void doesNotReportACopyThatIsNoLongerHeld(@TempDir Path directory) throws IOException {
+        Path copy;
+        OutputWorkspace done = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
+        done.holdOriginal();
+        copy = done.replaced();
+        Files.writeString(copy, "元のファイル");
+        done.releaseOriginal();
+
+        try (FileChannel held = FileChannel.open(copy, StandardOpenOption.READ, ExtendedOpenOption.NOSHARE_DELETE)) {
+            done.close();
+            assertTrue(held.isOpen() && Files.exists(copy), "控えを消せない状態になっていない。前提が変わっている");
+
+            List<List<Path>> found = new ArrayList<>();
+            OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
+            assertEquals(List.of(), found, "置き換えが済んだ作業場所を「途中で終わった」と伝えている");
+        }
+    }
+
     @Test
     @DisplayName("抱えるのをやめれば、片づく")
     void discardsOnceItStopsHolding(@TempDir Path directory) throws IOException {
         Path workspace;
 
-        try (OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace = place.file().getParent();
             place.holdOriginal();
             Files.writeString(place.replaced(), "元のファイル");
@@ -110,7 +177,7 @@ class OutputWorkspaceTest {
     @Test
     @DisplayName("控えが実在するときだけ、失敗に在り処を載せる")
     void putsTheKeptPlaceOnTheFailureOnlyWhenTheCopyIsThere(@TempDir Path directory) throws IOException {
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             PdfjigException failed = new PdfjigException(ErrorCode.IO_FAILURE);
             assertTrue(workspace.failing(failed).isEmpty(), "何も退避していないのに控えの在り処を載せている");
 
@@ -142,7 +209,7 @@ class OutputWorkspaceTest {
     @Test
     @DisplayName("控えの在り処を、例外のメッセージには入れない")
     void keepsTheKeptPlaceOutOfTheMessage(@TempDir Path directory) throws IOException {
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
 
@@ -166,7 +233,7 @@ class OutputWorkspaceTest {
     @Test
     @DisplayName("Error でも、控えの在り処は載る")
     void putsTheKeptPlaceOnAnErrorToo(@TempDir Path directory) throws IOException {
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
             OutOfMemoryError failed = new OutOfMemoryError();
@@ -196,7 +263,7 @@ class OutputWorkspaceTest {
     @DisplayName("控えを消せなくても、抱えるのはやめられる")
     void stopsHoldingEvenWhenTheCopyCannotBeDeleted(@TempDir Path directory) throws IOException {
         // try-with-resources にしない。掴んでいる最中に片づけさせるのがこのテストである。
-        OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
+        OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
         Path workspace = place.file().getParent();
         Path kept = place.replaced();
         place.holdOriginal();
@@ -212,7 +279,7 @@ class OutputWorkspaceTest {
         }
 
         // 掴みが外れた後。閉じ込められていなければ、次の書き出しが片づけ直せる。
-        try (OutputWorkspace next = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace next = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertTrue(Files.exists(next.file().getParent()));
         }
         assertFalse(Files.exists(workspace), "控えを消せなかっただけで、片づけが永久に閉じている（#119）");
@@ -230,7 +297,7 @@ class OutputWorkspaceTest {
     void keepsAnAbandonedCopyOnTheNextWrite(@TempDir Path directory) throws IOException {
         Path kept = abandonedCopyIn(directory);
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertEquals("元のファイル", Files.readString(kept), "唯一残っていた元を、次の保存が消している（#119）");
             assertTrue(Files.exists(workspace.file().getParent()));
         }
@@ -240,7 +307,7 @@ class OutputWorkspaceTest {
     @DisplayName("書き込み先は、まだ存在しない")
     void offersAPathThatDoesNotExistYet(@TempDir Path directory) {
         // pdf-core は既存の出力を拒む（ErrorCode.OUTPUT_ALREADY_EXISTS）。
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertFalse(Files.exists(workspace.file()));
         }
     }
@@ -249,7 +316,7 @@ class OutputWorkspaceTest {
     @DisplayName("書きかけで終わっても、出力先に何も残らない")
     void leavesNothingBehindWhenTheWriteFails(@TempDir Path directory) throws IOException {
         Path written;
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             written = workspace.file();
             // 書き出しが途中で失敗した状態を作る。置き換えには進まない。
             Files.writeString(written, "書きかけ");
@@ -266,7 +333,7 @@ class OutputWorkspaceTest {
         Path abandoned = Files.createDirectory(directory.resolve(".pdfjig-abandoned"));
         Files.createFile(abandoned.resolve("out.pdf"));
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertFalse(Files.exists(abandoned), "残ったものを片づけないと、利用者には正体の分からない隠しものが増えていく");
             assertTrue(Files.exists(workspace.file().getParent()), "片づけが自分の作業場所まで消してはならない");
         }
@@ -279,7 +346,7 @@ class OutputWorkspaceTest {
         // 名前の頭は同じだが、こちらが作るのはディレクトリだけである。ファイルは他人のもの。
         Path lookalike = Files.createFile(directory.resolve(".pdfjig-not-a-directory"));
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertTrue(Files.exists(otherDirectory));
             assertTrue(Files.exists(lookalike));
             assertTrue(Files.exists(workspace.file().getParent()));
@@ -297,7 +364,7 @@ class OutputWorkspaceTest {
      * @return 抱えられている控え
      */
     private static Path abandonedCopyIn(Path directory) throws IOException {
-        OutputWorkspace abandoned = OutputWorkspace.nextTo(directory.resolve("out.pdf"));
+        OutputWorkspace abandoned = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
         abandoned.holdOriginal();
         return Files.writeString(abandoned.replaced(), "元のファイル");
     }

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.PageSelection;
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.io.IOException;
@@ -72,7 +73,7 @@ class KeptCopyReportTest {
             ReplacedFileKeptException kept = assertThrows(
                     ReplacedFileKeptException.class,
                     () -> DocumentWriter.assemble(
-                            Sources.ofPaths(List.of(source)), List.of(PageSelection.of(1)), output, null));
+                            Sources.ofPaths(List.of(source)), List.of(PageSelection.of(1)), output, null, found -> {}));
 
             assertTrue(Files.notExists(output), "入れ替えに失敗したのに出力先に何かある。前提が変わっている");
             assertTrue(Files.exists(kept.kept()), "在り処として載せたパスに何も無い。利用者は探しに行って見つけられない（#124）");
@@ -85,19 +86,55 @@ class KeptCopyReportTest {
     }
 
     /**
+     * 作業場所を作れずに投げても、前の書き出しが残した控えは知らせる（#138）。
+     *
+     * <p><b>★★ 作れずに投げる回こそ、利用者がやり直している回である。</b>
+     * 知らせるのを作った後に置くと、そこで見つけたものが黙って落ちる——
+     * #138 の門の 2 段目が出し、{@code OutputWorkspace#nextTo} で先に知らせる形に直した。
+     */
+    @Test
+    @DisplayName("作業場所を作れずに投げても、前の書き出しが残した控えは知らせる")
+    void reportsAnAbandonedCopyEvenWhenTheWorkspaceCannotBeCreated(@TempDir Path directory) throws IOException {
+        Path kept;
+        try (OutputWorkspace crashed = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            crashed.holdOriginal();
+            kept = crashed.replaced();
+            Files.writeString(kept, "元のファイル");
+        }
+
+        List<List<Path>> found = new ArrayList<>();
+        AclEntry denial = denyAddingFoldersTo(directory);
+        try {
+            assertThrows(PdfjigException.class, () -> OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add));
+            assertEquals(List.of(List.of(kept)), found, "作れずに投げた回に、見つけた控えを落としている（#138）");
+        } finally {
+            allowAgain(directory, denial);
+        }
+    }
+
+    /**
      * 出力先フォルダに<b>ファイルを</b>足せなくする。フォルダを足すことは拒まない。
      *
      * <p><b>★ 継承の旗を立てない。</b>立てると作業場所の中にも降りてしまい、
      * <b>退避そのものが落ちて</b>作りたい状態にならない。
      */
     private static AclEntry denyAddingFilesTo(Path directory) throws IOException {
+        // ADD_FILE と WRITE_DATA は同じ定数である（どちらも FILE_ADD_FILE）。
+        return deny(directory, AclEntryPermission.ADD_FILE);
+    }
+
+    /** 出力先フォルダにフォルダを足せなくする。作業場所を作れない回を作る。 */
+    private static AclEntry denyAddingFoldersTo(Path directory) throws IOException {
+        return deny(directory, AclEntryPermission.ADD_SUBDIRECTORY);
+    }
+
+    private static AclEntry deny(Path directory, AclEntryPermission permission) throws IOException {
         AclFileAttributeView view = Files.getFileAttributeView(directory, AclFileAttributeView.class);
         UserPrincipal owner = view.getOwner();
         AclEntry denial = AclEntry.newBuilder()
                 .setType(AclEntryType.DENY)
                 .setPrincipal(owner)
-                // ADD_FILE と WRITE_DATA は同じ定数である（どちらも FILE_ADD_FILE）。
-                .setPermissions(Set.of(AclEntryPermission.ADD_FILE))
+                .setPermissions(Set.of(permission))
                 .build();
 
         List<AclEntry> acl = new ArrayList<>(view.getAcl());

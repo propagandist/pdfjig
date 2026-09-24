@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.desktop;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Warning;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 import javafx.scene.control.Alert;
@@ -64,6 +65,59 @@ final class Messages {
         String message =
                 warnings.stream().distinct().map(Warning::defaultMessage).collect(Collectors.joining("\n"));
         show(AlertType.WARNING, message);
+    }
+
+    /**
+     * 前の書き出しが残した控えを伝える（#138）。1 つも無ければ何も出さない。
+     *
+     * <p><b>★★ 見つけているのに黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる</b>
+     * ——配った {@code v0.1.2} の {@code docs/RELEASE_NOTES.md}「既知の制限」が
+     * 「次の版で伝える形にする」と約束した穴である。
+     *
+     * <p><b>★ 消すまで毎回出る。</b>黙らせる手は置かない——置くと、唯一の控えが見えなくなる形に戻る。
+     *
+     * <p><b>★ ログには書かない。</b>失敗ではなく（{@code docs/SPEC.md} §10.4）、消すまで毎回出るので、
+     * <b>書くと同じ行が保存のたびに積まれ、本物の失敗を世代の外へ押し出す。</b>在り処は画面が持つ。
+     *
+     * @param copies 見つけた控え（{@code OutputWorkspace#nextTo(Path, java.util.function.Consumer)}）
+     */
+    void abandonedCopies(List<Path> copies) {
+        if (copies.isEmpty()) {
+            return;
+        }
+        show(AlertType.WARNING, describeAbandoned(copies));
+    }
+
+    /**
+     * 前の書き出しが残した控えを、画面に出す文言に直す。
+     *
+     * <p><b>見つけたものを全部並べる。</b>選んで黙る理由が無い（#138）。
+     *
+     * <p><b>★★ どのファイルの控えかは言えない。</b>控えの名前は必ず {@code replaced.pdf} で、
+     * 作業場所は出力先の名前を持たない（{@code OutputWorkspace} の {@code REPLACED}）。
+     * <b>しかもこの窓は、いまの保存が出力先を書いた後に出る</b>——「出力先と比べて」と促すと、
+     * <b>別のファイルの控えなのに「出力先はある」と読ませ、唯一の控えを消させうる。</b>
+     * <b>だから開いて中身で確かめるよう促す。</b>{@link #describe} の回と文言が違うのは、
+     * あちらは「いま保存しようとしたファイルの元」だと分かっているからである。
+     *
+     * <p><b>★★ 置き換えが済んだ後に落ちた回もある。</b>そのとき元の名前には<b>保存が済んだ新しいほう</b>が
+     * 既にあり、控えは 1 世代前である。<b>名前を付け直せと言い切ると、新しいほうを上書きさせる。</b>
+     *
+     * <p><b>★★ 誰の控えかも分からない。</b>共有フォルダなら、別の利用者の唯一の控えでありうる。
+     * <b>「要らなければ消してよい」とは言わない</b>——中身を見て要らないと思っても、
+     * それは自分にとって要らないだけである。<b>消してよいのは、自分のものだと分かったときだけにする。</b>
+     *
+     * @param copies 見つけた控え。空でないこと
+     * @return 画面に出す文言
+     */
+    static String describeAbandoned(List<Path> copies) {
+        return "前の保存が途中で終わったときの、保存する前のファイルが次の場所に残っています。\n\n"
+                + copies.stream().map(Path::toString).collect(Collectors.joining("\n"))
+                + "\n\nどのファイルのものかは、開いて中身で確かめてください。"
+                + "元の名前のファイルが既にあるなら、それは保存が済んだ新しいほうかもしれません。"
+                + "上書きする前に中身を比べてください。"
+                + "\n\n自分のものだと確かめて、要るものを取り出したら、そのフォルダは消してかまいません。"
+                + "自分のものでなければ、消さずにおいてください。";
     }
 
     /**

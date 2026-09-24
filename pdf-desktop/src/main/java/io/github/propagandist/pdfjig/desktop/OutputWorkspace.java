@@ -6,8 +6,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -39,6 +43,9 @@ final class OutputWorkspace implements AutoCloseable {
 
     /** 作業場所の名前の頭。残ったものを次の書き出しで見つけるための目印でもある。 */
     private static final String PREFIX = ".pdfjig-";
+
+    /** pdfjig が作る作業場所の名前の形。{@link Files#createTempDirectory} は頭の後ろに数字だけを付ける。 */
+    private static final Pattern OURS = Pattern.compile(Pattern.quote(PREFIX) + "\\d+");
 
     /** 作業場所の中に置くファイルの名前。中は自分のものなので固定でよい。 */
     private static final String NAME = "output.pdf";
@@ -75,13 +82,38 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * 出力先の隣に作業場所を用意する。
+     * 出力先の隣に作業場所を用意し、前の書き出しが残した控えを知らせる。
      *
-     * @param output 最終的な出力先。その隣に作る
+     * <p><b>★★ 控えは、前の書き出しがアプリごと落ちて残した元の唯一の実体である</b>（#138）。
+     * 電源断・強制終了・ログオフでは {@code close} も {@code catch} も走らないので、
+     * <b>{@link #failing} の形では原理的に届かない。</b>見つけられるのは次に同じフォルダへ書き出すときで、
+     * <b>見つけているのに黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる。</b>
+     *
+     * <p><b>知らせるのは控えのファイルそのものの場所である</b>（{@link #failing} が載せるものと同じ形）。
+     * <b>控えが実在するものだけを知らせる</b>——印だけを見ると、無事に元へ戻ったものを
+     * 「ここにしか無い」と伝えうる（{@link #failing} と同じ理由）。
+     *
+     * <p><b>★ 作業場所を作る前に知らせる。</b>作れずに投げる回こそ、利用者がやり直している回である
+     * ——後に置くと、そこで見つけたものが黙って落ちる。
+     *
+     * <p><b>★ 別の窓がいま使っている作業場所も拾いうる。</b>元をどけてから入れ替えるまでの間
+     * （{@code DocumentWriter#move}）は、落ちた後と同じ形をしている。<b>その間は 2 本の改名だけで
+     * 極めて短い</b>ので、見分ける仕掛けは置いていない。伝える文言が「開いて確かめる」よう促すのは
+     * そのためでもある（{@code Messages#describeAbandoned}）。
+     *
+     * <p><b>★★ 知らせない版を置かない。</b>置くと、作業場所を開く口が 2 つ目に足された日に
+     * 短いほうが選ばれ、<b>そこだけ黙る</b>——{@link #failing} を呼ぶ側の {@code catch} に置かない
+     * のと同じ理由である。知らせなくてよい呼び出し（テスト）は、何もしない受け取り口を渡す。
+     *
+     * @param output    最終的な出力先。その隣に作る
+     * @param abandoned 同じフォルダで見つけた控えを受け取る。見つからなければ呼ばれない
      */
-    static OutputWorkspace nextTo(Path output) {
+    static OutputWorkspace nextTo(Path output, Consumer<List<Path>> abandoned) {
         Path directory = output.toAbsolutePath().getParent();
-        discardAbandoned(directory);
+        List<Path> found = discardAbandoned(directory);
+        if (!found.isEmpty()) {
+            abandoned.accept(found);
+        }
         try {
             return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX));
         } catch (IOException e) {
@@ -209,17 +241,30 @@ final class OutputWorkspace implements AutoCloseable {
      * 「保存が落ちた → 直して保存し直す」という<b>いちばんありそうな流れの中で、
      * 唯一残っていた元が消える。</b>
      */
-    private static void discardAbandoned(Path directory) {
+    private static List<Path> discardAbandoned(Path directory) {
+        List<Path> kept = new ArrayList<>();
         try (Stream<Path> entries = Files.list(directory)) {
             // 名前で絞ってから種別を見る。isDirectory は 1 件ごとに stat を投げるので、
             // 逆にすると出力先フォルダの全エントリぶん走る。絞り込みの意味は変わらない。
             entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
                     .filter(Files::isDirectory)
-                    .forEach(OutputWorkspace::discard);
+                    .forEach(entry -> {
+                        // ★ 残したものは拾う（#138）。関門は discard の側に置いたままにする。
+                        // ★ 知らせるのは pdfjig が作る形の名前だけにする（createTempDirectory は
+                        //   PREFIX の後ろに数字だけを付ける）。フォルダに書ける第三者が
+                        //   .pdfjig-何でも を置けば、その名前がそのまま窓に出て、
+                        //   pdfjig が「あなたの元のファイル」と請け合うことになる。
+                        if (discard(entry)
+                                && OURS.matcher(entry.getFileName().toString()).matches()
+                                && Files.isRegularFile(entry.resolve(REPLACED))) {
+                            kept.add(entry.resolve(REPLACED));
+                        }
+                    });
         } catch (IOException | UncheckedIOException e) {
             // 片づけられなくても、これから書くものの成否は変わらない。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
+        return List.copyOf(kept);
     }
 
     /**
@@ -253,10 +298,13 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>残ったことを記録しない。</b>残すのは正しい振る舞いであって失敗ではなく、
      * ログに書くのは失敗したことだけである（{@code docs/SPEC.md} §10.4）。
      * <b>そこへ至る失敗は既に記録されている</b>（{@code DocumentWriter#restore}）。
+     * <b>★ 利用者へ伝えるのは呼ぶ側である</b>（{@link #nextTo(Path, Consumer)}。#138）。
+     *
+     * @return 控えを抱えていて、残したなら {@code true}
      */
-    private static void discard(Path directory) {
+    private static boolean discard(Path directory) {
         if (holdsTheOnlyCopy(directory)) {
-            return;
+            return true;
         }
         try (Stream<Path> entries = Files.walk(directory)) {
             entries.sorted(Comparator.reverseOrder()).forEach(OutputWorkspace::deleteQuietly);
@@ -267,6 +315,7 @@ final class OutputWorkspace implements AutoCloseable {
             //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
+        return false;
     }
 
     private static void deleteQuietly(Path path) {
