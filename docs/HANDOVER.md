@@ -574,6 +574,12 @@ gh api "repos/propagandist/pdfjig/code-scanning/alerts?ref=refs/heads/develop&st
 `release.yml` の「バージョンを決める」が `^\d+\.\d+\.\d+$` で弾く（MSI の ProductVersion が
 数値しか受け付けないため）。**通したいワークフローの入口で落ちるので、何も確かめられない。**
 
+★★ **捨てタグも `develop` から辿れるコミットに打つこと。** `release.yml` の入口が、
+**辿れないタグを落とす**（#155）。**2026-09-25 実測**——ブランチの上に `v0.0.5` を打つと
+「タグが develop から辿れるか」で落ち、**JDK の用意より前に止まって draft もできなかった。**
+**辿れる側で通ることは、まだ見ていない**——変更が `develop` に入ってから打つ次の捨てタグで見る。
+**ワークフロー自体をマージ前に試すときは、下の `workflow_dispatch` を使う**（こちらには掛けていない）。
+
 ★ `workflow_dispatch` は代わりにならない。**タグ名からバージョンを切り出す経路
 （`github.ref_name` の `-replace '^v', ''`）を通らない**ので、そこだけが本番で初めて走る。
 
