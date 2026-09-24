@@ -85,13 +85,13 @@ final class DocumentWriter {
      * <b>正しく赤くなる</b>（2026-09-15 実測）——<b>あの規則は「頼めるのは
      * {@code MainWindow} だけ」を見ており、緩めるとここから頼む道が開く。</b>
      *
-     * @param sources    元のファイルと、鍵の要るものについてはその鍵
-     * @param pages      書き出すページの指定
-     * @param output     書き出し先
      * <p><b>★★ 前の書き出しが残した控えを見つけたら、書く前に知らせる</b>（#138）。
      * <b>成否より先に渡す</b>——この書き出しが失敗しても、見つけたことは変わらない。
      * <b>伝えるのは受け取った側である</b>（書き出しは画面を持たない）。
      *
+     * @param sources    元のファイルと、鍵の要るものについてはその鍵
+     * @param pages      書き出すページの指定
+     * @param output     書き出し先
      * @param protection 掛ける保護。<b>{@code null} なら掛けない</b>
      * @param abandoned  同じフォルダで見つけた控えを受け取る。見つからなければ呼ばれない。
      *                   <b>書き出しのスレッドで呼ばれる</b>
@@ -106,10 +106,7 @@ final class DocumentWriter {
         List<Warning> warnings = Collections.synchronizedList(new ArrayList<>());
         PageOperations operations = new PdfBoxPageOperations(warnings::add);
 
-        try (OutputWorkspace workspace = OutputWorkspace.nextTo(output)) {
-            if (!workspace.abandonedCopies().isEmpty()) {
-                abandoned.accept(workspace.abandonedCopies());
-            }
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(output, abandoned)) {
             // ★ catch を内側に置く。try-with-resources の catch にすると close の失敗まで拾い、
             //   書けているのに「失敗しました」と出す——呼ぶ側はそこで寄せ直しを飛ばすので、
             //   次の保存で同じ変換が二重に掛かる（#118）。

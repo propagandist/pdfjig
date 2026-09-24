@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
@@ -80,17 +81,17 @@ class OutputWorkspaceTest {
     }
 
     /**
-     * 前の書き出しが残した控えを、次の書き出しが見つけて返す（#138）。
+     * 前の書き出しが残した控えを、次の書き出しが見つけて知らせる（#138）。
      *
      * <p><b>★★ アプリごと落ちた回には、失敗に在り処を載せる形が届かない。</b>{@code close} も
      * {@code catch} も走らないためである。<b>見つけられるのは次に同じフォルダへ書き出すときで、
      * そこで黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる。</b>
      *
-     * <p><b>控えが実在するものだけを返す。</b>印だけ残って控えの無いもの（退避の前に落ちた回）を
-     * 返すと、無事に出力先にあるものを「ここにしか無い」と伝える——{@code failing} と同じ理由である。
+     * <p><b>控えが実在するものだけを知らせる。</b>印だけ残って控えの無いもの（退避の前に落ちた回）を
+     * 知らせると、無事に出力先にあるものを「ここにしか無い」と伝える——{@code failing} と同じ理由である。
      */
     @Test
-    @DisplayName("前の書き出しが残した控えを、次の書き出しが見つけて返す")
+    @DisplayName("前の書き出しが残した控えを、次の書き出しが見つけて知らせる")
     void reportsTheCopyAPreviousWriteLeftBehind(@TempDir Path directory) throws IOException {
         Path kept;
         try (OutputWorkspace crashed = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
@@ -103,14 +104,14 @@ class OutputWorkspaceTest {
             markedOnly.holdOriginal();
         }
 
-        try (OutputWorkspace next = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
-            assertEquals(List.of(kept), next.abandonedCopies(), "見つけた控えを返していない（#138）");
-        }
-        assertEquals("元のファイル", Files.readString(kept), "返しただけでなく、片づけてもいない");
+        List<List<Path>> found = new ArrayList<>();
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
+        assertEquals(List.of(List.of(kept)), found, "見つけた控えを知らせていない（#138）");
+        assertEquals("元のファイル", Files.readString(kept), "知らせただけでなく、片づけてもいない");
     }
 
     @Test
-    @DisplayName("控えが無ければ、何も返さない")
+    @DisplayName("控えが無ければ、何も知らせない")
     void reportsNothingWhenNothingIsKept(@TempDir Path directory) throws IOException {
         try (OutputWorkspace done = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
             done.holdOriginal();
@@ -118,9 +119,9 @@ class OutputWorkspaceTest {
             done.releaseOriginal();
         }
 
-        try (OutputWorkspace next = OutputWorkspace.nextTo(directory.resolve("out.pdf"))) {
-            assertEquals(List.of(), next.abandonedCopies());
-        }
+        List<List<Path>> found = new ArrayList<>();
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
+        assertEquals(List.of(), found, "無いのに知らせている。受け取る側は空の窓を出すことになる");
     }
 
     @Test

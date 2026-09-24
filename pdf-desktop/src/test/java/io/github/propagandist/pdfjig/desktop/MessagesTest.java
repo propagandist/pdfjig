@@ -68,10 +68,11 @@ class MessagesTest {
         Path second = directory.resolve(".pdfjig-2").resolve("replaced.pdf");
 
         assertEquals(
-                "前の保存が途中で終わり、保存する前のファイルが次の場所に残っています。\n\n"
+                "前の保存が途中で終わったときの、保存する前のファイルが次の場所に残っています。\n\n"
                         + first + "\n" + second
-                        + "\n\n出力先に同じ名前のファイルが無い、または開けないなら、これを取り出して"
-                        + "元の名前を付け直してください。確かめたあと、そのフォルダは消してかまいません。",
+                        + "\n\nどのファイルのものかは、開いて中身で確かめてください。"
+                        + "要るなら取り出して、元の名前を付け直してください。"
+                        + "確かめて要らなければ、そのフォルダは消してかまいません。",
                 Messages.describeAbandoned(List.of(first, second)));
     }
 

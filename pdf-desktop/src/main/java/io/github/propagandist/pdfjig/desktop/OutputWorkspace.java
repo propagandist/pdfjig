@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -72,43 +73,59 @@ final class OutputWorkspace implements AutoCloseable {
 
     private final Path workspace;
 
-    /** 用意する前に、同じフォルダで見つけた控え（{@link #abandonedCopies}）。 */
-    private final List<Path> abandoned;
-
-    private OutputWorkspace(Path workspace, List<Path> abandoned) {
+    private OutputWorkspace(Path workspace) {
         this.workspace = workspace;
-        this.abandoned = abandoned;
     }
 
     /**
-     * 出力先の隣に作業場所を用意する。
+     * 出力先の隣に作業場所を用意する。前の書き出しが残した控えは、見つけても知らせない。
      *
      * @param output 最終的な出力先。その隣に作る
      */
     static OutputWorkspace nextTo(Path output) {
-        Path directory = output.toAbsolutePath().getParent();
-        List<Path> abandoned = discardAbandoned(directory);
-        try {
-            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX), abandoned);
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
-        }
+        // ★ もう一方の nextTo を呼ばない。呼ぶと「nextTo を呼べるのは DocumentWriter だけ」の
+        //   規則（ArchitectureTest）に、ここ自身が掛かる。
+        return prepare(output, found -> {});
     }
 
     /**
-     * 用意する前に、同じフォルダで見つけた控え。見つからなければ空。
+     * 出力先の隣に作業場所を用意し、前の書き出しが残した控えを知らせる。
      *
-     * <p><b>★★ 前の書き出しがアプリごと落ちて残した、元の唯一の実体である</b>（#138）。
+     * <p><b>★★ 控えは、前の書き出しがアプリごと落ちて残した元の唯一の実体である</b>（#138）。
      * 電源断・強制終了・ログオフでは {@code close} も {@code catch} も走らないので、
      * <b>{@link #failing} の形では原理的に届かない。</b>見つけられるのは次に同じフォルダへ書き出すときで、
      * <b>見つけているのに黙ると、利用者から見えるのは出力先に増えた {@code .pdfjig-*} だけになる。</b>
      *
-     * <p><b>返すのは控えのファイルそのものの場所である</b>（{@link #failing} が載せるものと同じ形）。
-     * <b>控えが実在するものだけを返す</b>——印だけを見ると、無事に元へ戻ったものを
+     * <p><b>知らせるのは控えのファイルそのものの場所である</b>（{@link #failing} が載せるものと同じ形）。
+     * <b>控えが実在するものだけを知らせる</b>——印だけを見ると、無事に元へ戻ったものを
      * 「ここにしか無い」と伝えうる（{@link #failing} と同じ理由）。
+     *
+     * <p><b>★ 作業場所を作る前に知らせる。</b>作れずに投げる回こそ、利用者がやり直している回である
+     * ——後に置くと、そこで見つけたものが黙って落ちる。
+     *
+     * <p><b>★ 別の窓がいま使っている作業場所も拾いうる。</b>元をどけてから入れ替えるまでの間
+     * （{@code DocumentWriter#move}）は、落ちた後と同じ形をしている。<b>その間は 2 本の改名だけで
+     * 極めて短い</b>ので、見分ける仕掛けは置いていない。伝える文言が「開いて確かめる」よう促すのは
+     * そのためでもある（{@code Messages#describeAbandoned}）。
+     *
+     * @param output    最終的な出力先。その隣に作る
+     * @param abandoned 同じフォルダで見つけた控えを受け取る。見つからなければ呼ばれない
      */
-    List<Path> abandonedCopies() {
-        return abandoned;
+    static OutputWorkspace nextTo(Path output, Consumer<List<Path>> abandoned) {
+        return prepare(output, abandoned);
+    }
+
+    private static OutputWorkspace prepare(Path output, Consumer<List<Path>> abandoned) {
+        Path directory = output.toAbsolutePath().getParent();
+        List<Path> found = discardAbandoned(directory);
+        if (!found.isEmpty()) {
+            abandoned.accept(found);
+        }
+        try {
+            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX));
+        } catch (IOException e) {
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        }
     }
 
     /** 書き込み先。まだ存在しない。 */
@@ -282,7 +299,7 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>残ったことを記録しない。</b>残すのは正しい振る舞いであって失敗ではなく、
      * ログに書くのは失敗したことだけである（{@code docs/SPEC.md} §10.4）。
      * <b>そこへ至る失敗は既に記録されている</b>（{@code DocumentWriter#restore}）。
-     * <b>★ 利用者へ伝えるのは呼ぶ側である</b>（{@link #abandonedCopies}。#138）。
+     * <b>★ 利用者へ伝えるのは呼ぶ側である</b>（{@link #nextTo(Path, Consumer)}。#138）。
      *
      * @return 控えを抱えていて、残したなら {@code true}
      */

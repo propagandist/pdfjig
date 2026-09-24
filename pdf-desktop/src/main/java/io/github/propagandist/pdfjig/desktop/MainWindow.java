@@ -660,34 +660,42 @@ public final class MainWindow {
                                 DocumentWriter.assemble(inputs, pages, output, protection, abandoned::addAll));
                     },
                     outcome -> {
-                        markSaved(saving, sources, pages);
-                        // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
-                        //   出ている間は入れ子のイベントループに入る——後ろに置くと、
-                        //   利用者が閉じるまで寄せ直しが始まらない。
-                        //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
-                        //   これは例外的な経路ではない。
+                        // ★★ 何が投げても控えの窓は落とさない。唯一の控えを伝える機会は、
+                        //   次に同じフォルダへ書き出すまで来ない。
+                        //   ★ 最後に出す。いまの書き出しで起きたことが先で、前の書き出しの跡は後である。
                         try {
-                            if (outcome.replacedASource()) {
-                                // ★★ 分かれ目は「掛けたか」ではない。鍵が要らない出力なら
-                                //   寄せ直せる——そこで印を立てると、直せたのに編集を塞ぐ。
-                                if (needsAKey) {
-                                    markStale(StaleReason.OUTPUT_NEEDS_A_KEY);
-                                } else {
-                                    reopenAt(saving, sources, output, breaks, selected);
+                            markSaved(saving, sources, pages);
+                            // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
+                            //   出ている間は入れ子のイベントループに入る——後ろに置くと、
+                            //   利用者が閉じるまで寄せ直しが始まらない。
+                            //   複数の出どころから書き出すと文書情報の警告が必ず出るので、
+                            //   これは例外的な経路ではない。
+                            try {
+                                if (outcome.replacedASource()) {
+                                    // ★★ 分かれ目は「掛けたか」ではない。鍵が要らない出力なら
+                                    //   寄せ直せる——そこで印を立てると、直せたのに編集を塞ぐ。
+                                    if (needsAKey) {
+                                        markStale(StaleReason.OUTPUT_NEEDS_A_KEY);
+                                    } else {
+                                        reopenAt(saving, sources, output, breaks, selected);
+                                    }
                                 }
+                            } finally {
+                                // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
+                                //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
+                                //   必ず出る警告であり、例外的な経路ではない。
+                                messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts, asked));
                             }
                         } finally {
-                            // ★★ 寄せ直しが投げても警告を落とさない。書き出しは済んでおり、
-                            //   文書情報が落ちたことは伝えなければならない——出どころが 2 つ以上あれば
-                            //   必ず出る警告であり、例外的な経路ではない。
-                            messages.warnings(exceptWhatWasAsked(outcome.warnings(), consequence.preempts, asked));
-                            // ★ 後に出す。いまの書き出しで起きたことが先で、前の書き出しの跡は後である。
                             messages.abandonedCopies(abandoned);
                         }
                     },
                     failure -> {
-                        messages.failure(failure);
-                        messages.abandonedCopies(abandoned);
+                        try {
+                            messages.failure(failure);
+                        } finally {
+                            messages.abandonedCopies(abandoned);
+                        }
                     });
             // 書き出しは非同期で、成否は後から届く。始まったところで覚える——
             // 断られたときに覚えると、書いていない場所が「次に書き出す場所」になる。

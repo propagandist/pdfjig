@@ -76,13 +76,15 @@ final class Messages {
      *
      * <p><b>★ 消すまで毎回出る。</b>黙らせる手は置かない——置くと、唯一の控えが見えなくなる形に戻る。
      *
-     * @param copies 見つけた控え（{@code OutputWorkspace#abandonedCopies}）
+     * <p><b>★ ログには書かない。</b>失敗ではなく（{@code docs/SPEC.md} §10.4）、消すまで毎回出るので、
+     * <b>書くと同じ行が保存のたびに積まれ、本物の失敗を世代の外へ押し出す。</b>在り処は画面が持つ。
+     *
+     * @param copies 見つけた控え（{@code OutputWorkspace#nextTo(Path, java.util.function.Consumer)}）
      */
     void abandonedCopies(List<Path> copies) {
         if (copies.isEmpty()) {
             return;
         }
-        Logs.warn(LogEvent.ABANDONED_COPY_FOUND);
         show(AlertType.WARNING, describeAbandoned(copies));
     }
 
@@ -91,18 +93,22 @@ final class Messages {
      *
      * <p><b>見つけたものを全部並べる。</b>選んで黙る理由が無い（#138）。
      *
-     * <p><b>★ 「元の名前を付け直して」とは言い切らない。</b>{@link #describe} の回と違い、
-     * <b>落ちたのが置き換えの前か後かが分からない</b>——後なら、出力先には新しいほうが既にある。
-     * <b>確かめる順を言う。</b>
+     * <p><b>★★ どのファイルの控えかは言えない。</b>控えの名前は必ず {@code replaced.pdf} で、
+     * 作業場所は出力先の名前を持たない（{@code OutputWorkspace} の {@code REPLACED}）。
+     * <b>しかもこの窓は、いまの保存が出力先を書いた後に出る</b>——「出力先と比べて」と促すと、
+     * <b>別のファイルの控えなのに「出力先はある」と読ませ、唯一の控えを消させうる。</b>
+     * <b>だから開いて中身で確かめるよう促す。</b>{@link #describe} の回と文言が違うのは、
+     * あちらは「いま保存しようとしたファイルの元」だと分かっているからである。
      *
      * @param copies 見つけた控え。空でないこと
      * @return 画面に出す文言
      */
     static String describeAbandoned(List<Path> copies) {
-        return "前の保存が途中で終わり、保存する前のファイルが次の場所に残っています。\n\n"
+        return "前の保存が途中で終わったときの、保存する前のファイルが次の場所に残っています。\n\n"
                 + copies.stream().map(Path::toString).collect(Collectors.joining("\n"))
-                + "\n\n出力先に同じ名前のファイルが無い、または開けないなら、これを取り出して"
-                + "元の名前を付け直してください。確かめたあと、そのフォルダは消してかまいません。";
+                + "\n\nどのファイルのものかは、開いて中身で確かめてください。"
+                + "要るなら取り出して、元の名前を付け直してください。"
+                + "確かめて要らなければ、そのフォルダは消してかまいません。";
     }
 
     /**
