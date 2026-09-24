@@ -4,10 +4,13 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -246,8 +249,11 @@ final class OutputWorkspace implements AutoCloseable {
         try (Stream<Path> entries = Files.list(directory)) {
             // 名前で絞ってから種別を見る。isDirectory は 1 件ごとに stat を投げるので、
             // 逆にすると出力先フォルダの全エントリぶん走る。絞り込みの意味は変わらない。
+            // ★★ 入口もリンクを辿らずに見る（#125）。.pdfjig-* そのものがジャンクションだと、
+            //   Files::isDirectory はその先を「作業場所」と読み、片づけが指す先の中身を消す。
+            //   リンクは自分で作った作業場所ではないので、触らない。
             entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
-                    .filter(Files::isDirectory)
+                    .filter(OutputWorkspace::isPlainDirectory)
                     .forEach(entry -> {
                         // ★ 残したものは拾う（#138）。関門は discard の側に置いたままにする。
                         // ★ 知らせるのは pdfjig が作る形の名前だけにする（createTempDirectory は
@@ -306,16 +312,55 @@ final class OutputWorkspace implements AutoCloseable {
         if (holdsTheOnlyCopy(directory)) {
             return true;
         }
-        try (Stream<Path> entries = Files.walk(directory)) {
-            entries.sorted(Comparator.reverseOrder()).forEach(OutputWorkspace::deleteQuietly);
-        } catch (IOException | UncheckedIOException e) {
-            // 消せなくても、保存の成否は変わらない。
-            // ★ Files.walk と Files.list は、返した後の反復で起きた失敗を UncheckedIOException で
-            //   包む。IOException を継承しないので、並記しないとここを素通りする——置き換えが
-            //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
-            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-        }
+        deleteTree(directory);
         return false;
+    }
+
+    /**
+     * 中身ごと消す。<b>リンクは辿らない。</b>
+     *
+     * <p><b>★★ {@link Files#walk} を使わない</b>（#125）。既定で {@code FOLLOW_LINKS} を付けていなくても、
+     * <b>Windows のディレクトリジャンクションは降りる</b>——JDK がリンクと見なすのは
+     * {@code IO_REPARSE_TAG_SYMLINK} だけで、ジャンクション（{@code IO_REPARSE_TAG_MOUNT_POINT}）は
+     * ディレクトリとして返る。<b>出力先に書ける第三者が作業場所の中にジャンクションを置けば、
+     * 次の保存がその先を消す。</b>
+     *
+     * <p><b>降りるのは {@link #isPlainDirectory} だけである。</b>リンクはリンクそのものだけを消す
+     * ——消えるのは指す先ではない。
+     *
+     * <p>消せなくても保存は失敗させない（{@link Logs} には残す）。
+     */
+    private static void deleteTree(Path path) {
+        if (isPlainDirectory(path)) {
+            try (DirectoryStream<Path> children = Files.newDirectoryStream(path)) {
+                for (Path child : children) {
+                    deleteTree(child);
+                }
+            } catch (IOException | DirectoryIteratorException e) {
+                // 消せなくても、保存の成否は変わらない。
+                // ★ 反復の途中の失敗は DirectoryIteratorException で来る。IOException を継承しないので、
+                //   並記しないとここを素通りし、後始末の失敗が保存そのものの失敗として利用者に出る。
+                Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            }
+        }
+        deleteQuietly(path);
+    }
+
+    /**
+     * リンクを辿らずに見て、素のディレクトリであるか。<b>確かめられなければ {@code false}</b>——降りない側へ倒す。
+     *
+     * <p><b>★ {@code isOther} も見る。</b>ジャンクションは {@code NOFOLLOW_LINKS} で読んでも
+     * {@code isDirectory()} が {@code true} を返し、{@code isSymbolicLink()} は {@code false} である。
+     * <b>リパースポイントであることは {@code isOther()} にしか出ない</b>（JDK の {@code WindowsFileAttributes}）。
+     */
+    private static boolean isPlainDirectory(Path path) {
+        try {
+            BasicFileAttributes attributes =
+                    Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            return attributes.isDirectory() && !attributes.isSymbolicLink() && !attributes.isOther();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static void deleteQuietly(Path path) {

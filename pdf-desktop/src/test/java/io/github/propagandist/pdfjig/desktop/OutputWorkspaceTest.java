@@ -14,8 +14,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -144,6 +146,73 @@ class OutputWorkspaceTest {
             OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
             assertEquals(List.of(), found, "置き換えが済んだ作業場所を「途中で終わった」と伝えている");
         }
+    }
+
+    /**
+     * 作業場所の中のジャンクションを降りない（#125）。
+     *
+     * <p><b>★★ 出力先に書ける第三者が、作業場所の中に任意の場所を指すジャンクションを置けば、
+     * 次の保存がその先を消していた。</b>{@code Files.walk} は既定で {@code FOLLOW_LINKS} を
+     * 付けていなくても、Windows のジャンクションを降りる。
+     *
+     * <p><b>ジャンクションそのものは片づく。</b>消えるのはリンクであって、指す先ではない。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("作業場所の中のジャンクションを降りない")
+    void doesNotFollowAJunctionInsideTheWorkspace(@TempDir Path directory) throws Exception {
+        Path victim = Files.createDirectories(directory.resolve("victim").resolve("sub"));
+        Path precious = Files.writeString(victim.resolve("precious.txt"), "消えてはならない");
+
+        Path out = Files.createDirectory(directory.resolve("out"));
+        Path workspace;
+        try (OutputWorkspace place = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})) {
+            workspace = place.file().getParent();
+            junction(workspace.resolve("link"), victim);
+        }
+
+        assertEquals("消えてはならない", Files.readString(precious), "作業場所の外を消している（#125）");
+        assertFalse(Files.exists(workspace, LinkOption.NOFOLLOW_LINKS), "ジャンクションごと作業場所が残っている");
+    }
+
+    /**
+     * {@code .pdfjig-*} そのものがジャンクションでも、指す先を消さない（#125）。
+     *
+     * <p><b>★★ 入口でもリンクを辿っていた。</b>{@code Files::isDirectory} はジャンクションの先を
+     * 作業場所と読み、片づけが指す先の中身を消した（2026-09-25、コンパイル済みのクラスで再現）。
+     * <b>自分で作った作業場所ではないので、リンクそのものにも触らない。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName(".pdfjig-* そのものがジャンクションでも、指す先を消さない")
+    void doesNotFollowAWorkspaceThatIsAJunction(@TempDir Path directory) throws Exception {
+        Path victim = Files.createDirectories(directory.resolve("victim").resolve("sub"));
+        Path precious = Files.writeString(victim.resolve("precious.txt"), "消えてはならない");
+        Path out = Files.createDirectory(directory.resolve("out"));
+        Path planted = junction(out.resolve(".pdfjig-1234567890"), victim);
+
+        OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {}).close();
+
+        assertEquals("消えてはならない", Files.readString(precious), "ジャンクションの先を消している（#125）");
+        assertTrue(Files.exists(planted, LinkOption.NOFOLLOW_LINKS), "自分で作っていないリンクを消している");
+    }
+
+    /**
+     * ジャンクションを作る。<b>管理者権限は要らない</b>——だから第三者も置ける。
+     *
+     * <p><b>作れたものがジャンクションであることを確かめてから返す。</b>普通のディレクトリが
+     * できていると、この検めは落ちようがない。
+     */
+    private static Path junction(Path link, Path target) throws Exception {
+        Process made = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), target.toString())
+                .redirectErrorStream(true)
+                .start();
+        made.getInputStream().readAllBytes();
+        assertEquals(0, made.waitFor(), "ジャンクションを作れなかった");
+        BasicFileAttributes attributes =
+                Files.readAttributes(link, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        assertTrue(attributes.isOther(), "できたものがジャンクションではない。前提が変わっている");
+        return link;
     }
 
     @Test
