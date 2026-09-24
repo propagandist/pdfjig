@@ -4,8 +4,6 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.DirectoryIteratorException;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -247,13 +245,11 @@ final class OutputWorkspace implements AutoCloseable {
     private static List<Path> discardAbandoned(Path directory) {
         List<Path> kept = new ArrayList<>();
         try (Stream<Path> entries = Files.list(directory)) {
-            // 名前で絞ってから種別を見る。isDirectory は 1 件ごとに stat を投げるので、
-            // 逆にすると出力先フォルダの全エントリぶん走る。絞り込みの意味は変わらない。
-            // ★★ 入口もリンクを辿らずに見る（#125）。.pdfjig-* そのものがジャンクションだと、
-            //   Files::isDirectory はその先を「作業場所」と読み、片づけが指す先の中身を消す。
-            //   リンクは自分で作った作業場所ではないので、触らない。
+            // 名前で絞ってから discard に渡す。discard は 1 件ごとに属性を読むので、
+            // 逆にすると出力先フォルダの全エントリぶん走る。
+            // ★ リンクかどうかはここで見ない。discard の関門が見る（#125）——呼ぶ側に置くと、
+            //   close() のように discard を直に呼ぶ口が、その関門を通らない。
             entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
-                    .filter(OutputWorkspace::isPlainDirectory)
                     .forEach(entry -> {
                         // ★ 残したものは拾う（#138）。関門は discard の側に置いたままにする。
                         // ★ 知らせるのは pdfjig が作る形の名前だけにする（createTempDirectory は
@@ -295,11 +291,31 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
-     * ディレクトリを中身ごと消す。消せなくても保存は失敗させない（{@link Logs} には残す）。
+     * 作業場所を消す。消せなくても保存は失敗させない（{@link Logs} には残す）。
      *
-     * <p><b>★★ 控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）。
-     * <b>この関門を消す側の 1 か所に置く</b>——呼ぶ側それぞれに置くと、
+     * <p><b>★★ 関門は 2 つあり、どちらもここに置く</b>——呼ぶ側それぞれに置くと、
      * <b>3 つ目の呼び出しが足されたときに黙って素通りする。</b>
+     * <ul>
+     *   <li><b>作業場所がリンクなら触らない</b>（{@link #isOwnDirectory}。#125）。
+     *       自分で作ったものではなく、辿れば指す先を消す
+     *   <li><b>控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）
+     * </ul>
+     *
+     * <p><b>★★ 中は 1 階層だけ消し、降りない</b>（#125）。pdfjig が作業場所に作るのは
+     * {@link #NAME} / {@link #REPLACED} / {@link #HELD} の 3 つのファイルだけである。
+     * <ul>
+     *   <li><b>{@link Files#walk} は使わない。</b>既定で {@code FOLLOW_LINKS} を付けていなくても、
+     *       Windows のディレクトリジャンクションを降りる——出力先に書ける第三者が作業場所の中に
+     *       ジャンクションを置けば、次の保存がその先を消していた
+     *   <li><b>自分で辿る形（調べてから降りる）も採らない。</b>調べてから開くまでの間に
+     *       ジャンクションへすり替えられると、同じことが起きる。<b>Windows の NIO には
+     *       ハンドルを起点に辿る手（{@code SecureDirectoryStream}）が無い。</b>
+     *       再帰は深さを第三者に決めさせ、{@code StackOverflowError} で保存ごと落ちた
+     *       （7,000 階層前後。#125 の {@code /code-review max} で再現）
+     *   <li><b>子は {@link Files#deleteIfExists} で消す。</b>リンクなら、消えるのはリンクそのものである
+     *       （JDK の {@code implDelete} はリンクを辿らずに属性を読む）。<b>中身のあるディレクトリは
+     *       消せずに残り、記録される</b>——pdfjig が作らないものであり、残るのは正しい
+     * </ul>
      *
      * <p><b>残ったことを記録しない。</b>残すのは正しい振る舞いであって失敗ではなく、
      * ログに書くのは失敗したことだけである（{@code docs/SPEC.md} §10.4）。
@@ -309,55 +325,53 @@ final class OutputWorkspace implements AutoCloseable {
      * @return 控えを抱えていて、残したなら {@code true}
      */
     private static boolean discard(Path directory) {
+        if (!isOwnDirectory(directory)) {
+            return false;
+        }
         if (holdsTheOnlyCopy(directory)) {
             return true;
         }
-        deleteTree(directory);
+        // ★ 一覧は取り切ってから消す。開いたまま消すと、並びの途中で消えたものを数えることになる。
+        List<Path> children;
+        try (Stream<Path> entries = Files.list(directory)) {
+            children = entries.toList();
+        } catch (IOException | UncheckedIOException e) {
+            // 消せなくても、保存の成否は変わらない。
+            // ★ Files.list は、返した後の反復で起きた失敗を UncheckedIOException で包む。
+            //   IOException を継承しないので、並記しないとここを素通りする——置き換えが
+            //   済んだ後の後始末の失敗が、保存そのものの失敗として利用者に出る。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return false;
+        }
+        children.forEach(OutputWorkspace::deleteQuietly);
+        deleteQuietly(directory);
         return false;
     }
 
     /**
-     * 中身ごと消す。<b>リンクは辿らない。</b>
+     * リンクではない、ここにある実体のディレクトリか。<b>確かめられなければ {@code false}</b>——触らない側へ倒す。
      *
-     * <p><b>★★ {@link Files#walk} を使わない</b>（#125）。既定で {@code FOLLOW_LINKS} を付けていなくても、
-     * <b>Windows のディレクトリジャンクションは降りる</b>——JDK がリンクと見なすのは
-     * {@code IO_REPARSE_TAG_SYMLINK} だけで、ジャンクション（{@code IO_REPARSE_TAG_MOUNT_POINT}）は
-     * ディレクトリとして返る。<b>出力先に書ける第三者が作業場所の中にジャンクションを置けば、
-     * 次の保存がその先を消す。</b>
-     *
-     * <p><b>降りるのは {@link #isPlainDirectory} だけである。</b>リンクはリンクそのものだけを消す
-     * ——消えるのは指す先ではない。
-     *
-     * <p>消せなくても保存は失敗させない（{@link Logs} には残す）。
-     */
-    private static void deleteTree(Path path) {
-        if (isPlainDirectory(path)) {
-            try (DirectoryStream<Path> children = Files.newDirectoryStream(path)) {
-                for (Path child : children) {
-                    deleteTree(child);
-                }
-            } catch (IOException | DirectoryIteratorException e) {
-                // 消せなくても、保存の成否は変わらない。
-                // ★ 反復の途中の失敗は DirectoryIteratorException で来る。IOException を継承しないので、
-                //   並記しないとここを素通りし、後始末の失敗が保存そのものの失敗として利用者に出る。
-                Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-            }
-        }
-        deleteQuietly(path);
-    }
-
-    /**
-     * リンクを辿らずに見て、素のディレクトリであるか。<b>確かめられなければ {@code false}</b>——降りない側へ倒す。
-     *
-     * <p><b>★ {@code isOther} も見る。</b>ジャンクションは {@code NOFOLLOW_LINKS} で読んでも
-     * {@code isDirectory()} が {@code true} を返し、{@code isSymbolicLink()} は {@code false} である。
+     * <p><b>★ {@code isSymbolicLink} だけでは足りない。</b>ジャンクションは {@code NOFOLLOW_LINKS} で読んでも
+     * {@code isDirectory()} が {@code true}、{@code isSymbolicLink()} が {@code false} を返す。
      * <b>リパースポイントであることは {@code isOther()} にしか出ない</b>（JDK の {@code WindowsFileAttributes}）。
+     *
+     * <p><b>★ {@code isOther()} だけでも決めない。</b>リンクでないリパースポイントもある——
+     * クラウド同期のプレースホルダは、中身を持つ本物のディレクトリである。<b>弾くと作業場所が
+     * 片づかなくなり、控えも伝えられなくなる。</b>だから<b>実体の場所が自分の場所と同じか</b>で見る
+     * ——リンクなら指す先へ解決され、違う場所になる。
      */
-    private static boolean isPlainDirectory(Path path) {
+    private static boolean isOwnDirectory(Path path) {
         try {
             BasicFileAttributes attributes =
                     Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            return attributes.isDirectory() && !attributes.isSymbolicLink() && !attributes.isOther();
+            if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
+                return false;
+            }
+            if (!attributes.isOther()) {
+                return true;
+            }
+            Path here = path.toAbsolutePath().getParent().toRealPath().resolve(path.getFileName());
+            return path.toRealPath().equals(here);
         } catch (IOException e) {
             return false;
         }
