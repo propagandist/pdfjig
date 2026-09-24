@@ -35,6 +35,42 @@ jobs:
     # 書き換えるので消さないこと（理由は .github/dependabot.yml）。
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 下の「develop へ PR で入ったコミットか」に develop の履歴が要る。
+          # リポジトリは 1 MB に満たない（2026-09-25 実測）ので、全部取っても重くない。
+          fetch-depth: 0
+
+      # ★★ 配るものは、develop へ PR で入ったコミットからしか作らない（#155）。
+      #   **タグにはその門が無い**——ruleset が止められるのはタグを作る・動かす・消す操作だけで、
+      #   どのコミットに打つかは縛れない。だから打つ先はここで確かめる。
+      #
+      # ★ 見るのは第 1 親の列である。develop へは --no-ff で入るので、列に載るのは
+      #   PR のマージコミットになる。**「祖先か」では足りない**——PR ブランチの途中のコミットも
+      #   祖先になるが、それ単体では PR の検査を通っていない。
+      #
+      # ★★ **ruleset を置いた 2026-09-06 より前の列は、直接 push を含む。** 古いコミットに
+      #   打てば、ここは通る。そこまでは縛っていない（docs/HANDOVER.md「まだ止まらないもの」）。
+      #
+      # ★ workflow_dispatch は落とさない。release.yml 自身をマージ前にブランチの上で試す経路で
+      #   ある（#44）。**成果物は作って検めるが、列に載っていなければ draft は作らない**——
+      #   draft は公開 1 回で配れる形であり、それを検査の外のコミットから作らない。
+      - name: develop へ PR で入ったコミットか
+        id: gate
+        run: |
+          $firstParents = @(git rev-list --first-parent origin/develop)
+          if ($LASTEXITCODE -ne 0) {
+            throw "git rev-list が失敗した（終了コード $LASTEXITCODE）。origin/develop が無い可能性がある。"
+          }
+          $onDevelop = $firstParents -contains $env:GITHUB_SHA
+          "on_develop=$($onDevelop.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($onDevelop) {
+            "develop の第 1 親の列に載っている: $env:GITHUB_SHA"
+          } elseif ($env:GITHUB_EVENT_NAME -eq 'push') {
+            throw ("タグ $env:GITHUB_REF_NAME のコミット $env:GITHUB_SHA は develop の第 1 親の列に無い。" +
+              "PR を通っていないコミットからは配らない。")
+          } else {
+            "develop の第 1 親の列に無い: $env:GITHUB_SHA。成果物は作って検めるが、draft は作らない。"
+          }
 
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -202,10 +238,16 @@ jobs:
       # draft で作る。実機で MSI / EXE / ZIP を触ってから公開したい。
       # 壊れた成果物を公開すると、取り下げても既に取得された可能性が残る。
       # ★ 上の確認より後に置いてある。入れて消すのが落ちたら draft は作られない。
+      # ★ 検査の外のコミットからは作らない（上の「develop へ PR で入ったコミットか」。#155）。
+      # ★ target_commitish を渡す。workflow_dispatch ではタグがまだ無く、公開した瞬間に
+      #   タグが作られる。渡さないと既定ブランチの**公開した時点の先頭**に打たれ、
+      #   成果物を作ったコミットと食い違う。tag push ではタグが既にあるので効かない。
       - name: ドラフトリリースを作る
+        if: steps.gate.outputs.on_develop == 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           draft: true
+          target_commitish: ${{ github.sha }}
           name: PDFjig ${{ steps.version.outputs.version }}
           tag_name: v${{ steps.version.outputs.version }}
           body_path: docs/RELEASE_NOTES.md
