@@ -193,7 +193,8 @@ function Get-InstallContexts([string] $ProductCode) {
     foreach ($product in $products) {
         $context = [int] $product.GetType().InvokeMember(
             'Context', 'GetProperty', $null, $product, $null)
-        $found += $names[$context]
+        # 知らない値は数のまま出す。名前へ引けずに空になると、失敗の文言から実際の値が消える。
+        $found += $(if ($names.ContainsKey($context)) { $names[$context] } else { "context=$context" })
     }
     return @($found)
 }
@@ -335,7 +336,13 @@ if ($entries.Count -ne 1) {
     throw ('2 度目のインストールでアンインストール情報が {0} 件になった。上書きになっていない。' -f
         $entries.Count)
 }
-Write-Log '  上書きになった（アンインストール情報は 1 件のまま）'
+# ★ 上の件数だけでは足りない。別の範囲に 2 つ目が登録されても、キーは同じ HKLM に落ちて
+#   1 件のまま数えられる（#158）。
+$contexts = @(Get-InstallContexts $productCode)
+if ($contexts.Count -ne 1) {
+    throw ('2 度目のインストールで登録が {0} 件になった: [{1}]' -f $contexts.Count, ($contexts -join ', '))
+}
+Write-Log '  上書きになった（アンインストール情報も登録も 1 件のまま）'
 
 # ── 消す ────────────────────────────────────────────────────────────────
 Write-Log '--- MSI を消す ---'

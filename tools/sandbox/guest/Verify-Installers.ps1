@@ -21,7 +21,7 @@
 #>
 [CmdletBinding()]
 param(
-    # ★ どちらも既定を置かない。渡されたものだけ通す——既定は InstallCheck.ps1 が持つ。
+    # ★ どれも既定を置かない。渡されたものだけ通す——既定は InstallCheck.ps1 が持つ。
     #   ここにも既定を置くと、あちらを直しても Sandbox 経由では効かない形になる。
     [string] $ExeSilentArgs,
 
