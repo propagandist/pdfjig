@@ -50,7 +50,8 @@ class AbandonedCopyUiTest extends DesktopUiTest {
     void 前の書き出しが残した控えを書き出しの後に伝える(@TempDir Path dir, FxRobot robot) throws Exception {
         Path crashed = Files.createDirectory(dir.resolve(".pdfjig-crashed"));
         Files.createFile(crashed.resolve("held"));
-        Path kept = TestPdfs.withText(crashed.resolve("replaced.pdf"), "元");
+        // ★ 本文は ASCII にする。TestPdfs は標準フォントで書くので、日本語を渡すと投げる。
+        Path kept = TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
 
         openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
         Path output = saveAs(robot, dir.resolve("out.pdf"));
@@ -62,6 +63,6 @@ class AbandonedCopyUiTest extends DesktopUiTest {
         clickWhenReady(robot, "#message-ok");
 
         assertEquals(List.of("A1"), pageTexts(output), "書き出しそのものが邪魔されている");
-        assertEquals(List.of("元"), pageTexts(kept), "伝えただけでなく、控えに触っている");
+        assertEquals(List.of("OLD"), pageTexts(kept), "伝えただけでなく、控えに触っている");
     }
 }
