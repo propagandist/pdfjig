@@ -1061,7 +1061,7 @@ POI のルールが空振りしていない              FAILED   ← ガード�
 
 #### そのために本体へ入れた変更
 
-**守るべき規則は `CLAUDE.md` に置いてある**（「命名」「JavaFX」「テスト」の各節）。
+**守るべき規則は `.claude/rules/` に置いてある**（`desktop-ui.md`「画面の id と JavaFX」、`ui-tests.md`「画面のテスト」「不安定なテストの扱い」）。
 id の付け方、`setAccessibleText` の対象、不安定なテストをどこまで吸収してよいかは、
 そちらが正である。ここに残すのは、なぜそれが要ったかだけである。
 
@@ -1416,7 +1416,7 @@ Java 側（`indent_size = 4` / `max_line_length = 120`）は IDE に palantir �
 Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotlessCheck` を走らせて、
 崩れていれば `spotlessApply` を自動実行して push を中断する。**採らなかった。**
 
-- 検査は既に 2 重にある——`CLAUDE.md` の規約（コミット前に `spotlessApply`）と、CI の
+- 検査は既に 2 重にある——`.claude/rules/build-and-format.md`「整形」の規約（コミット前に `spotlessApply`）と、CI の
   `spotlessCheck`（ubuntu で 1 分 10 秒で結果が出る）
 - ★ `.git/hooks` は git で共有されない。clone ごとに手で入れる必要があり、**入れ忘れると黙って
   効かない**。`uiTest` を「ワークフローの `if` ではなくソースセットで担保する」と決めたのと
