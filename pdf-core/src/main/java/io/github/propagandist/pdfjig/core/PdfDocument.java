@@ -57,7 +57,7 @@ public final class PdfDocument implements AutoCloseable {
      */
     public static PdfDocument open(Path path) {
         requireReadable(path);
-        // ★ 分類を細かくする材料がここには無い。開こうとして駄目だった、しか分からない。
+        // ★ 開く段の失敗と、中身の失敗は openFailure が分ける（#147）。それ以外は分ける材料が無い。
         //   包むのは「外へ出るのは PdfjigException だけ」という契約のためである
         //   ——包まないと、呼ぶ側の分岐がどれも当たらない（#144 / #178）。
         return guarded(ErrorCode.NOT_A_PDF, () -> {
@@ -336,26 +336,43 @@ public final class PdfDocument implements AutoCloseable {
      * <p><b>★ 関門は「開く前」しか見られない。</b>通った後に消えた・掴まれたものは {@link #openFailure} が分ける。
      */
     private static void requireReadable(Path path) {
-        if (!Files.isRegularFile(path)) {
-            throw new PdfjigException(ErrorCode.FILE_NOT_FOUND);
+        ErrorCode refused = whyUnopenable(path);
+        if (refused != null) {
+            throw new PdfjigException(refused);
         }
-        if (!Files.isReadable(path)) {
-            throw new PdfjigException(ErrorCode.FILE_UNREADABLE);
+    }
+
+    /**
+     * そのパスを開けない理由。開けそうなら {@code null}（#147）。関門と {@link #openFailure} が同じ見方をする。
+     *
+     * <ul>
+     *   <li><b>フォルダ</b>は {@link ErrorCode#FILE_NOT_FOUND}。<b>{@link Files#isRegularFile} で弾かない</b>——
+     *       Windows のリンクでないリパースポイントや、POSIX の特殊ファイルまで弾き、いままで開けたものが開けなくなる
+     *   <li><b>確かに無い</b>ものは {@link ErrorCode#FILE_NOT_FOUND}。<b>{@link Files#notExists} で見る</b>——
+     *       {@link Files#exists} は「確かめられない」を「無い」に潰す
+     *   <li><b>在るのに読めない</b>もの（ほかのアプリが掴んでいる・権限が無い）は {@link ErrorCode#FILE_UNREADABLE}
+     * </ul>
+     */
+    private static ErrorCode whyUnopenable(Path path) {
+        if (Files.isDirectory(path) || Files.notExists(path)) {
+            return ErrorCode.FILE_NOT_FOUND;
         }
+        return Files.isReadable(path) ? null : ErrorCode.FILE_UNREADABLE;
     }
 
     /**
      * 開けなかった理由を分ける（#147）。
      *
-     * <p><b>★★ 開く段で断られたのか、読んで PDF でなかったのかで分ける。</b>前者は
-     * {@link FileNotFoundException}（{@code RandomAccessFile} が開けなかった）か
-     * {@link FileSystemException}（NIO が開けなかった）で来る。<b>中身を読んで駄目だったものは素の
-     * {@link IOException} で来る</b>ので、そちらだけが {@link ErrorCode#NOT_A_PDF} である。
+     * <p><b>★★ 開く段で断られたのか、読んで PDF でなかったのかで分ける。</b>PDFBox 3 は {@code FileChannel#open} で
+     * 開く（{@code RandomAccessReadBufferedFile}。{@code DocumentWriter#move} の説明）ので、開く段の失敗は
+     * {@link FileSystemException} で来る。{@link FileNotFoundException} も同じに扱う——
+     * {@code RandomAccessFile} で開く版に変わっても分けられるように。<b>型では「無い」と「読めない」を
+     * 分けられないので、そのときの有無で分ける</b>（{@link #whyUnopenable}）。
+     * <b>ここへ来るのは関門を通った後に消えた・掴まれたときである。</b>
      *
-     * <p><b>★★ 開く段の失敗は、型では「無い」と「読めない」を分けられない。</b>
-     * {@link FileNotFoundException} は、無いときにも読めないときにも来る。
-     * <b>だから、その時点でファイルが在るかで分ける</b>——在れば「いま読めない」、無ければ「無い」。
-     * <b>ここへ来るのは関門を通った後に消えた・掴まれたときだけである</b>（{@link #requireReadable}）。
+     * <p><b>★ 既知の限界：読み進めている途中で読めなくなったものは分けられない。</b>ファイルの一部だけをほかのプロセスが
+     * 掴んでいる・共有フォルダが途中で切れる、といった失敗は素の {@link IOException} で来て、
+     * {@link ErrorCode#NOT_A_PDF} になる。中身が壊れていたのと、型で見分ける材料が無い。
      *
      * @param path   開こうとしたファイル
      * @param failed 開けなかった理由
@@ -363,8 +380,8 @@ public final class PdfDocument implements AutoCloseable {
      */
     static PdfjigException openFailure(Path path, IOException failed) {
         if (failed instanceof FileNotFoundException || failed instanceof FileSystemException) {
-            ErrorCode code = Files.isRegularFile(path) ? ErrorCode.FILE_UNREADABLE : ErrorCode.FILE_NOT_FOUND;
-            return PdfjigException.wrapping(code, failed);
+            ErrorCode code = whyUnopenable(path);
+            return PdfjigException.wrapping(code == null ? ErrorCode.FILE_UNREADABLE : code, failed);
         }
         return PdfjigException.wrapping(ErrorCode.NOT_A_PDF, failed);
     }

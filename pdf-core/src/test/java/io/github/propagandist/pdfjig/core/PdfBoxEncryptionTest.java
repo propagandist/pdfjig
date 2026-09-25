@@ -70,7 +70,7 @@ class PdfBoxEncryptionTest {
         }
 
         @Test
-        @DisplayName("読めないファイルは FILE_NOT_FOUND")
+        @DisplayName("無いファイルは FILE_NOT_FOUND")
         void missingFile() {
             Path missing = tempDir.resolve("does-not-exist.pdf");
 

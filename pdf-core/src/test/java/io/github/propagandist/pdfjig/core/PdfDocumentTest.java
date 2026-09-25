@@ -5,17 +5,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.nio.file.ExtendedOpenOption;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class PdfDocumentTest {
@@ -160,5 +165,25 @@ class PdfDocumentTest {
                 ErrorCode.NOT_A_PDF,
                 PdfDocument.openFailure(present, new IOException("Header doesn't contain versioninfo"))
                         .errorCode());
+    }
+
+    /**
+     * ほかのアプリが排他で開いているファイルは、「いま読めない」と言う（#147）。
+     *
+     * <p><b>直す前は「入力ファイルを開けません」だった</b>——無いと言われた利用者は、在るファイルを探し直す。
+     * Windows だけの振る舞いなので、Windows でだけ走らせる。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void aFileHeldByAnotherHandleIsUnreadableNotMissing(@TempDir Path dir) throws Exception {
+        Path held = TestPdfs.plain(dir.resolve("held.pdf"), 1);
+
+        try (FileChannel other = FileChannel.open(held, StandardOpenOption.READ, ExtendedOpenOption.NOSHARE_READ)) {
+            assertTrue(other.isOpen());
+            assertEquals(
+                    ErrorCode.FILE_UNREADABLE,
+                    assertThrows(PdfjigException.class, () -> PdfDocument.open(held))
+                            .errorCode());
+        }
     }
 }
