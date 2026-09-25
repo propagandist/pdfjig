@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.PageSelection;
+import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Source;
 import io.github.propagandist.pdfjig.core.Sources;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.io.IOException;
@@ -79,8 +81,76 @@ class KeptCopyReportTest {
             assertTrue(Files.exists(kept.kept()), "在り処として載せたパスに何も無い。利用者は探しに行って見つけられない（#124）");
             assertEquals(originalSize, Files.size(kept.kept()), "載せたパスにあるのが元のファイルではない");
             assertTrue(Messages.describe(kept).contains(kept.kept().toString()), "画面に出る文言に在り処が入っていない");
+            // ★ 鍵の要らない入力なら、書けた出力は残す（#184 の門）。編集を反映した中身はここにしか無い。
+            assertTrue(Files.exists(OutputWorkspace.writtenBeside(kept.kept())), "ふつうの出力まで消している");
+            assertTrue(kept.plaintext().isEmpty());
         } finally {
             // @TempDir が片づけられるように戻す。残すと後続のテストの一時領域も壊れる。
+            allowAgain(directory, denial);
+        }
+    }
+
+    /**
+     * 鍵の要る入力から平文で書けていたなら、元は残し、書けた出力は残さない（#184）。
+     *
+     * <p><b>利用者が読むのは「保存に失敗した」であり、平文は書かれていないと信じる。</b>
+     * {@code SECURITY.md}「対象範囲」2 番目に当たる。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("鍵の要る入力から平文で書けていたなら、書けた出力は残さない")
+    void dropsThePlaintextWhenTheOriginalIsKept(@TempDir Path directory) throws IOException {
+        Path output = directory.resolve("out.pdf");
+        TestPdfs.plain(output, 3);
+        Path source = TestPdfs.encrypted(directory.resolve("locked.pdf"), "key", 2);
+
+        AclEntry denial = denyAddingFilesTo(directory);
+        try (Password key = Password.copyOf("key")) {
+            ReplacedFileKeptException kept = assertThrows(
+                    ReplacedFileKeptException.class,
+                    () -> DocumentWriter.assemble(
+                            Sources.of(Source.of(source, key)),
+                            List.of(PageSelection.of(1)),
+                            output,
+                            null,
+                            found -> {}));
+
+            assertTrue(Files.exists(kept.kept()), "元を失っている（#119）");
+            assertTrue(Files.notExists(OutputWorkspace.writtenBeside(kept.kept())), "平文が作業場所に残っている（#184）");
+            assertTrue(kept.plaintext().isEmpty(), "消せたのに、残っていると伝えている");
+        } finally {
+            allowAgain(directory, denial);
+        }
+    }
+
+    /**
+     * 鍵の要る出どころを持っていても、書いたページがそこから来ていなければ、出力は残す（#184 の門）。
+     *
+     * <p><b>画面は開いている出どころの鍵を全部渡す。</b>鍵の要る PDF を足してそのページを全部消した文書でも
+     * 鍵が来るので、渡された鍵で決めると、<b>編集を反映した中身がそこにしか無いふつうの出力を消す。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("鍵の要る出どころから 1 ページも書いていなければ、出力は残す")
+    void keepsTheOutputWhenNoPageComesFromAKeyedSource(@TempDir Path directory) throws IOException {
+        Path output = directory.resolve("out.pdf");
+        TestPdfs.plain(output, 3);
+        Path plain = TestPdfs.plain(directory.resolve("plain.pdf"), 2);
+        Path locked = TestPdfs.encrypted(directory.resolve("locked.pdf"), "key", 2);
+
+        AclEntry denial = denyAddingFilesTo(directory);
+        try (Password key = Password.copyOf("key")) {
+            ReplacedFileKeptException kept = assertThrows(
+                    ReplacedFileKeptException.class,
+                    () -> DocumentWriter.assemble(
+                            Sources.of(Source.of(plain), Source.of(locked, key)),
+                            List.of(PageSelection.of(0, 1)),
+                            output,
+                            null,
+                            found -> {}));
+
+            assertTrue(Files.exists(OutputWorkspace.writtenBeside(kept.kept())), "平文の復号物ではない出力まで消している");
+        } finally {
             allowAgain(directory, denial);
         }
     }

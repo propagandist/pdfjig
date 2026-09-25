@@ -122,6 +122,15 @@ final class OutputWorkspace implements AutoCloseable {
         }
     }
 
+    /**
+     * 控えの隣にある、書けた出力の場所（テストが名前を写さないため。#184）。
+     *
+     * @param kept {@link ReplacedFileKeptException#kept()} が返す控え
+     */
+    static Path writtenBeside(Path kept) {
+        return kept.resolveSibling(NAME);
+    }
+
     /** 書き込み先。まだ存在しない。 */
     Path file() {
         return workspace.resolve(NAME);
@@ -201,14 +210,48 @@ final class OutputWorkspace implements AutoCloseable {
      * 「書き出しの失敗」にしてしまうと、<b>書けているのに失敗として出る</b>——
      * 呼ぶ側はそこで寄せ直しを飛ばし、次の保存で同じ変換が二重に掛かる（#118）。
      *
-     * @param failed 起きた失敗
-     * @return 控えを抱えたままなら在り処を載せた例外。そうでなければ空
+     * <p><b>★★ 消し損ねた平文も、ここで在り処を載せる</b>（#184。{@link #dropWrittenOutput}）。
+     * <b>元を抱えていない失敗でも言う</b>（{@link PlaintextLeftException}）——元の控えがある回だけに
+     * 載せると、巻き戻せた回や退避の前の失敗で、平文は黙って残る。
+     * <b>平文を伝えない版は置かない</b>（{@link #nextTo} と同じ理由）。
+     *
+     * @param failed    起きた失敗
+     * @param plaintext 消し損ねた、復号した中身のファイル。残っていなければ {@code null}
+     * @return 控えを抱えたままか、平文を残したなら在り処を載せた例外。そうでなければ空
      */
-    Optional<RuntimeException> failing(Throwable failed) {
+    Optional<RuntimeException> failing(Throwable failed, Path plaintext) {
         Path copy = replaced();
-        return holdsTheOnlyCopy(workspace) && Files.exists(copy)
-                ? Optional.of(new ReplacedFileKeptException(copy, failed))
-                : Optional.empty();
+        if (holdsTheOnlyCopy(workspace) && Files.exists(copy)) {
+            return Optional.of(new ReplacedFileKeptException(copy, plaintext, failed));
+        }
+        return plaintext == null ? Optional.empty() : Optional.of(new PlaintextLeftException(plaintext, failed));
+    }
+
+    /**
+     * 書けた出力を消す。<b>書き出しを終えた持ち主だけが呼ぶ</b>（#184）。
+     *
+     * <p><b>★★ 呼ぶのは、出力が「鍵の要る入力を復号した中身で、開くのに鍵が要らない」ときだけである</b>
+     * （{@code DocumentWriter#assemble}）。置き換えにも巻き戻しにも失敗すると、ここには元と書けた出力の
+     * 両方が残る。利用者が読むのは「保存に失敗した」であり、<b>平文は書かれていないと信じる</b>
+     * （{@code SECURITY.md}「対象範囲」2 番目）。
+     *
+     * <p><b>★ ふつうの出力は消さない。</b>開いている文書へ上書き保存して失敗したとき、
+     * <b>編集を反映した中身はここにしか無い</b>——元を戻さない限り、保存し直すこともできない。
+     *
+     * <p><b>★ 前の書き出しの残り物には呼ばない</b>（{@link #discardAbandoned} は触らない）。
+     * 別の窓が退避と入れ替えの間にいると、<b>これから出力先へ移すものを消して、あちらの保存を失敗させる。</b>
+     *
+     * @return 消し損ねたなら、そのファイル。消せたか、もともと無ければ {@code null}
+     */
+    Path dropWrittenOutput() {
+        Path written = file();
+        try {
+            Files.deleteIfExists(written);
+            return null;
+        } catch (IOException e) {
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return written;
+        }
     }
 
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */

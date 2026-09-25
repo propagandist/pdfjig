@@ -38,8 +38,9 @@ class MessagesTest {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
-            RuntimeException failure =
-                    workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)).orElseThrow();
+            RuntimeException failure = workspace
+                    .failing(new PdfjigException(ErrorCode.IO_FAILURE), null)
+                    .orElseThrow();
 
             String message = Messages.describe(failure);
 
@@ -93,7 +94,7 @@ class MessagesTest {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
             RuntimeException failure = workspace
-                    .failing(new IllegalStateException("password=ひみつ C:\\Users\\someone\\秘密.pdf"))
+                    .failing(new IllegalStateException("password=ひみつ C:\\Users\\someone\\秘密.pdf"), null)
                     .orElseThrow();
 
             String message = Messages.describe(failure);
@@ -134,5 +135,30 @@ class MessagesTest {
         String message = Messages.describe(new IllegalStateException("password=ひみつ C:\\Users\\someone\\秘密.pdf"));
 
         assertEquals("操作に失敗しました。", message, "例外のメッセージを画面へ出している（INV-5）");
+    }
+
+    /** 消し損ねた平文があれば、在ることと場所を言う（#184）。利用者は平文は書かれていないと信じている。 */
+    @Test
+    void saysWhereThePlaintextWasLeft() {
+        Path kept = Path.of("C:", "work", ".pdfjig-1", "replaced.pdf");
+        Path plaintext = OutputWorkspace.writtenBeside(kept);
+
+        String message = Messages.describe(
+                new ReplacedFileKeptException(kept, plaintext, new PdfjigException(ErrorCode.IO_FAILURE)));
+
+        assertTrue(message.contains(plaintext.toString()), "消し損ねた平文の場所を言っていない: " + message);
+        assertTrue(message.contains("保護されていない"), "何が残っているのかを言っていない: " + message);
+    }
+
+    /** 元を抱えていない失敗でも、消し損ねた平文の在り処を言う（#184 の門）。 */
+    @Test
+    void saysWhereThePlaintextWasLeftWithoutAKeptOriginal() {
+        Path plaintext = Path.of("C:", "work", ".pdfjig-1", "output.pdf");
+
+        String message =
+                Messages.describe(new PlaintextLeftException(plaintext, new PdfjigException(ErrorCode.IO_FAILURE)));
+
+        assertTrue(message.contains(plaintext.toString()), "消し損ねた平文の場所を言っていない: " + message);
+        assertTrue(message.contains("保護されていない"), "何が残っているのかを言っていない: " + message);
     }
 }

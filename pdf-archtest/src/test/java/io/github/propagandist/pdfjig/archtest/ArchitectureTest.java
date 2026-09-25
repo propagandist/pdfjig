@@ -73,6 +73,9 @@ class ArchitectureTest {
     /** 控えの在り処を運ぶ型。作ってよいのは、抱えているかどうかを知っている作業場所だけである。 */
     private static final String KEPT_EXCEPTION = "io.github.propagandist.pdfjig.desktop.ReplacedFileKeptException";
 
+    /** 消し損ねた平文の在り処を運ぶ型（#184）。作ってよいのは作業場所だけである。 */
+    private static final String PLAINTEXT_EXCEPTION = "io.github.propagandist.pdfjig.desktop.PlaintextLeftException";
+
     /** PDFBox のパッケージ。この前置詞で始まる型を呼ぶことが、向こうのコードを走らせることである。 */
     private static final String PDFBOX = "org.apache.pdfbox";
 
@@ -474,6 +477,13 @@ class ArchitectureTest {
                 .should()
                 .callConstructorWhere(target(owner(name(KEPT_EXCEPTION))))
                 .because("印も控えも見ずに在り処を名乗れると、無事なファイルを「作業場所にしか無い」と" + "伝えることになる。作ってよいのは抱えているかどうかを知っている側だけである（#124）")
+                .check(classes);
+
+        noClasses()
+                .that(not(named(OUTPUT_WORKSPACE)))
+                .should()
+                .callConstructorWhere(target(owner(name(PLAINTEXT_EXCEPTION))))
+                .because("消せたかどうかを見ずに「平文が残っています」と名乗れると、無いものを探させることになる。" + "作ってよいのは消そうとした作業場所だけである（#184）")
                 .check(classes);
     }
 

@@ -161,11 +161,22 @@ final class Messages {
             return stockPhrase(kept.getCause())
                     + "\n\n元のファイルは次の場所に残っています。\n"
                     + kept.kept()
+                    // ★★ 消し損ねた平文は、片づけの案内より先に言う（#184 の門）。利用者は「保存に失敗した」と
+                    //   読み、平文は書かれていないと信じている。後に置くと、元を取り出したところで読むのをやめる。
+                    + kept.plaintext().map(Messages::plaintextNotice).orElse("")
                     // ★ 片づけまで案内する。この作業場所は控えを抱えた印が残ったままで、
                     //   pdfjig からはもう消せない——言わないと、利用者の隣に残り続ける。
                     + "\n\n取り出して、元の名前を付け直してください。そのあと、このフォルダは消してかまいません。";
         }
+        if (failure instanceof PlaintextLeftException left) {
+            return stockPhrase(left.getCause()) + plaintextNotice(left.plaintext());
+        }
         return stockPhrase(failure);
+    }
+
+    /** 消し損ねた平文の在り処（#184）。 */
+    private static String plaintextNotice(Path plaintext) {
+        return "\n\n★ パスワードで保護されていない中身のファイルが残っています。先に消してください。\n" + plaintext;
     }
 
     /**
