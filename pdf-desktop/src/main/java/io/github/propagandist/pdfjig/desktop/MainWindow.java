@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PageRange;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
@@ -876,12 +877,30 @@ public final class MainWindow {
         session.order().rotateAt(index, additional);
     }
 
+    /**
+     * 範囲を訊いて、その範囲だけを残す。
+     *
+     * <p><b>★★ 窓を挟んだ後に検め直す</b>（#133）。範囲は<b>訊いたときの枚数で</b>検めてあり、
+     * 窓の最中に文書が入れ替われば、<b>別の文書へ当たるか、枚数を越えて投げる。</b>
+     * 入れ替わっていたら黙って戻る——利用者が見た枚数はもう成り立たない（{@link #removeSource} と同じ）。
+     */
     private void keepRange() {
         if (session == null) {
             return;
         }
-        PageRangePrompt.ask(stage, session.order().size())
-                .ifPresent(range -> session.order().keepOnly(range));
+        DocumentSession target = session;
+        List<Path> sources = target.paths();
+        Optional<PageRange> range = PageRangePrompt.ask(stage, target.order().size());
+        if (range.isEmpty() || !stillHolds(target, sources)) {
+            return;
+        }
+        try {
+            target.order().keepOnly(range.get());
+        } catch (PdfjigException e) {
+            // 検め直した後なので届かないはずだが、届いたときに画面へ何も出ない形にはしない
+            // （配布物には標準エラーが無い。#133）。
+            messages.failure(e);
+        }
     }
 
     /**
@@ -899,8 +918,11 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
+        // ★ ファイル選択も入れ子のイベントループである（#133）。足す先が入れ替わっていたら黙って戻る。
+        DocumentSession target = session;
+        List<Path> sources = target.paths();
         Optional<List<Path>> chosen = dialogs.openPdfs(readingFolder().orElse(null));
-        if (chosen.isEmpty()) {
+        if (chosen.isEmpty() || !stillHolds(target, sources)) {
             return;
         }
 
@@ -931,15 +953,20 @@ public final class MainWindow {
 
     /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
     private void addWithPassword(Path path, boolean retry) {
+        DocumentSession target = session;
+        List<Path> sources = target.paths();
         Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
         // ★★ ここは同じスレッドの中で終わるので、持ち主のまま閉じる。中まで届かずに投げることが
-        //   あり（session は null になりうるし、窓を挟んだ後の検め直しを足せば早く戻る経路も
-        //   増える）、そこを通ってもこの close が消す（INV-5。#145）。
+        //   あり、窓を挟んだ後の検め直しで早く戻る経路もある。どれを通ってもこの close が消す（INV-5。#145）。
         try (Password password = entered.get()) {
-            session.add(path, password);
+            if (!stillHolds(target, sources)) {
+                // 鍵の窓の最中に入れ替わった（#133）。足す先が違うので、黙って戻る。
+                return;
+            }
+            target.add(path, password);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
                 addWithPassword(path, true);
@@ -1063,8 +1090,10 @@ public final class MainWindow {
         //   その間に文書が入れ替わりうる（#133）。★ 後で控えると、入れ替わった後の
         //   出どころ一覧へ入れ替わる前の出どころ番号を当てることになる——
         //   そこは素の IndexOutOfBoundsException になり、画面に何も出ない（#29 の門の 2 段目）。
-        //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
+        //   ★★ 控えるだけでは足りない（#133）。切り分けは控えた文書から作ってあるので、
+        //   入れ替わった後に書けば、別の文書のページが入ったファイルができる。窓をすべて挟んだ後に検め直す。
         DocumentSession writing = session;
+        List<Path> writingSources = writing.paths();
 
         Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
         if (directory.isEmpty()) {
@@ -1090,6 +1119,13 @@ public final class MainWindow {
             return;
         }
         Sources sources = keyed.get();
+        if (!stillHolds(writing, writingSources)) {
+            // ★ 鍵は渡しきっていない。持ち主はまだここである（INV-5）。
+            keysOf(sources.all()).forEach(Password::close);
+            // 書き出しの手前で止まるので、黙ると押した結果が読めない（#133。優先順位 2）。
+            messages.information("分割しませんでした。" + System.lineSeparator() + "確認の間に、開いている文書が変わりました。もう一度分割してください。");
+            return;
+        }
         Path outputDir = directory.get();
 
         if (run(
