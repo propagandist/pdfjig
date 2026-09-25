@@ -62,9 +62,7 @@ public final class PageOrder {
      * @return 手つかずの並び
      */
     public static PageOrder of(int sourcePageCount) {
-        if (sourcePageCount < 1) {
-            throw new PdfjigException(ErrorCode.EMPTY_RESULT);
-        }
+        requirePages(sourcePageCount);
         return new PageOrder(sourcePageCount);
     }
 
@@ -95,12 +93,23 @@ public final class PageOrder {
      * @param pageCount   その文書のページ数
      */
     public void append(int sourceIndex, int pageCount) {
-        if (pageCount < 1) {
-            throw new PdfjigException(ErrorCode.EMPTY_RESULT);
-        }
+        requirePages(pageCount);
         List<PageSelection> added = identityOrder(sourceIndex, pageCount);
         baseline.addAll(added);
         pages.addAll(added.stream().map(PageEntry::of).toList());
+    }
+
+    /**
+     * 並びに入れられるページ数か。<b>入れる前に検めたい側も、ここを呼ぶ</b>（{@code DocumentSession#adopt}。#148）
+     * ——規則を写すと、片方だけ直した日に食い違う。
+     *
+     * @param pageCount その文書のページ数
+     * @throws PdfjigException 1 枚も無い場合は {@link ErrorCode#EMPTY_DOCUMENT}
+     */
+    static void requirePages(int pageCount) {
+        if (pageCount < 1) {
+            throw new PdfjigException(ErrorCode.EMPTY_DOCUMENT);
+        }
     }
 
     /**
