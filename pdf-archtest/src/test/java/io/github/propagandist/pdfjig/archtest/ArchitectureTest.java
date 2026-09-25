@@ -17,6 +17,7 @@ import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaCodeUnitAccess;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -593,11 +594,22 @@ class ArchitectureTest {
 
         // ★★ 届いたか確かめられなかったとき、画面の保存は置き換えを止める。止める判定を外しても
         //   単体テスト（DocumentWriterTest）は判定そのものしか見ないので、呼んでいることはここで縛る。
-        boolean refuses = classes.get(DOCUMENT_WRITER).getMethods().stream()
+        // ★ 順序も見る。move の後で止めても、元は既に置き換わり、控えも手放している。
+        List<JavaMethodCall> calls = classes.get(DOCUMENT_WRITER).getMethods().stream()
                 .filter(method -> method.getName().equals("assemble"))
-                .flatMap(method -> method.getCallsFromSelf().stream())
-                .anyMatch(call -> call.getTarget().getName().equals("refuseToReplaceUnlessDurable"));
-        assertTrue(refuses, "画面の保存が、届いたか確かめられないまま置き換えうる（#219）");
+                .flatMap(method -> method.getMethodCallsFromSelf().stream())
+                .toList();
+        int refuse = calls.stream()
+                .filter(call -> call.getTarget().getName().equals("refuseToReplaceUnlessDurable"))
+                .mapToInt(JavaMethodCall::getLineNumber)
+                .min()
+                .orElse(Integer.MAX_VALUE);
+        int move = calls.stream()
+                .filter(call -> call.getTarget().getName().equals("move"))
+                .mapToInt(JavaMethodCall::getLineNumber)
+                .min()
+                .orElse(-1);
+        assertTrue(refuse < move, "画面の保存が、届いたか確かめる前に置き換えうる（#219）");
     }
 
     /**
