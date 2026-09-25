@@ -50,11 +50,12 @@ flowchart LR
 **版に入る差分は、PR を開けている間に 3 段を通す**（なぜこの形かは #65）。
 ★ **PR を出す前に `docs/GATE.md` を読む**——観点・`ultra` の条件・記録の書き方・出たものの行き先はあちらにある。
 
-1. **整える** — 重複・二重実装・責務のずれ。**差分の外へ広げない**
-2. **敵対的に読む** — **PR ごとに必ず `/code-review high`**。`/security-review` はマイルストーン単位
-3. **壊れ方をテストにする** — ★★ **修正前のコミットで赤にする**
+1. **整える** — 重複・二重実装・責務のずれ。**先に回す。差分の外へ広げない**
+2. **敵対的に読む** — **PR ごとに必ず `/code-review high`**。`/security-review` はマイルストーン単位（掛け方は `docs/GATE.md`）
+3. **壊れ方をテストにする** — 縛れる指摘はテストか ArchUnit へ。★★ **修正前のコミットで赤にする**
 
-**記録は PR 本文に 4 行**（`門:` ／ 整えた ／ 読んだ ／ テスト）。**0 件でも書く。**
+**記録は PR 本文に 4 行**（`門: <base>..<head>` ／ 整えた ／ 読んだ ／ テスト）。**0 件でも書く。範囲は直前に head へ更新する。**
+**★ 門を CI には載せない**——出力が毎回変わるので、緑が「見た」と読まれる。
 
 ## CI / ワークフロー
 
@@ -87,7 +88,8 @@ gh api repos/propagandist/.github/contents/docs/security-baseline.md --jq .conte
 
 ★ **読み替えと、このリポジトリで決めた扱いは `docs/SECURITY_NOTES.md` が持つ**
 （§3.3 の読み替え・`threat_model`・Copilot Autofix・`tools/` の軸・週次 cron・分類が増える日・法務）。
-**セキュリティの指摘・Code scanning を扱う前、週次 cron を足す前、個人データの流れを変える前に読む。**
+**セキュリティの指摘・Code scanning を扱う前、週次 cron を足す前、`pdf-core` を publish する前、
+個人データの流れ・外部へ出る先・保存期間を変える前（BYOK を含む）に読む。**
 
 ## 作業の型
 
@@ -121,8 +123,7 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
 
 **単位はリリース版で、題はタグと同じ `vX.Y.Z`。patch 版も作る。issue には必ず付ける。**
 **版に着手したら「vX.Y.Z をリリースする」issue を立てる**（見本は #61）。
-★ **付ける・版に着手する・閉じる前に `docs/MILESTONES.md` を読む**——どの版に付けるか・外さないこと・
-閉じる条件・その issue が持つものと持たないものは、あちらにある。
+★ **付ける・版に着手する・閉じる前に `docs/MILESTONES.md` を読む**（どの版に付けるか・外さないこと・閉じる条件・その issue の書き方）。
 
 ### ラベル
 
