@@ -3,7 +3,9 @@ package io.github.propagandist.pdfjig.core;
 import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guarded;
 import static io.github.propagandist.pdfjig.core.PdfBoxGuard.guardedRun;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.pdfbox.Loader;
@@ -48,7 +50,8 @@ public final class PdfDocument implements AutoCloseable {
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。暗号化されている場合は
      *                         {@link ErrorCode#PASSWORD_REQUIRED}、
-     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}。
+     *                         無い・ファイルではない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         在るのにいま読めない場合は {@link ErrorCode#FILE_UNREADABLE}（#147）。
      *                         それ以外はすべて {@link ErrorCode#NOT_A_PDF} になる——
      *                         <b>PDF でないこととは限らない。</b>原因を絞る材料が無い
      */
@@ -63,6 +66,8 @@ public final class PdfDocument implements AutoCloseable {
             } catch (InvalidPasswordException e) {
                 // ★ 絞れた失敗は内側で言い直す。wrapping が素通しするので、包みには塗り替えられない。
                 throw PdfjigException.wrapping(ErrorCode.PASSWORD_REQUIRED, e);
+            } catch (IOException e) {
+                throw openFailure(path, e);
             }
         });
     }
@@ -89,7 +94,8 @@ public final class PdfDocument implements AutoCloseable {
      * @return 開かれた文書
      * @throws PdfjigException 開けない場合。パスワード誤りは
      *                         {@link ErrorCode#INVALID_PASSWORD}、
-     *                         読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         無い・ファイルではない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         在るのにいま読めない場合は {@link ErrorCode#FILE_UNREADABLE}、
      *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}、
      *                         原因を絞れない場合は {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}
      */
@@ -112,7 +118,7 @@ public final class PdfDocument implements AutoCloseable {
             } catch (InvalidPasswordException e) {
                 throw PdfjigException.wrapping(ErrorCode.INVALID_PASSWORD, e);
             } catch (IOException e) {
-                throw PdfjigException.wrapping(ErrorCode.NOT_A_PDF, e);
+                throw openFailure(path, e);
             }
         });
     }
@@ -317,9 +323,49 @@ public final class PdfDocument implements AutoCloseable {
         guardedRun(ErrorCode.IO_FAILURE, () -> delegate.close());
     }
 
+    /**
+     * 開く前に、ファイルとして在って読めるかを見る。
+     *
+     * <p><b>★ {@link Files#isReadable} だけでは足りない</b>（#147）。<b>フォルダにも {@code true} を返す</b>ので、
+     * {@code report.pdf} という名前のフォルダが関門を通り、「PDF として読み取れません」に化けていた。
+     *
+     * <p><b>★ ほかのアプリが排他で開いているファイルは、ここで捕まる</b>——Windows の {@link Files#isReadable} は
+     * それに {@code false} を返す（2026-09-26 実測。{@code FileShare.None} で掴んだ正しい PDF）。
+     * <b>直す前はここで {@link ErrorCode#FILE_NOT_FOUND}（「入力ファイルを開けません」）になっていた。</b>
+     *
+     * <p><b>★ 関門は「開く前」しか見られない。</b>通った後に消えた・掴まれたものは {@link #openFailure} が分ける。
+     */
     private static void requireReadable(Path path) {
-        if (!Files.isReadable(path)) {
+        if (!Files.isRegularFile(path)) {
             throw new PdfjigException(ErrorCode.FILE_NOT_FOUND);
         }
+        if (!Files.isReadable(path)) {
+            throw new PdfjigException(ErrorCode.FILE_UNREADABLE);
+        }
+    }
+
+    /**
+     * 開けなかった理由を分ける（#147）。
+     *
+     * <p><b>★★ 開く段で断られたのか、読んで PDF でなかったのかで分ける。</b>前者は
+     * {@link FileNotFoundException}（{@code RandomAccessFile} が開けなかった）か
+     * {@link FileSystemException}（NIO が開けなかった）で来る。<b>中身を読んで駄目だったものは素の
+     * {@link IOException} で来る</b>ので、そちらだけが {@link ErrorCode#NOT_A_PDF} である。
+     *
+     * <p><b>★★ 開く段の失敗は、型では「無い」と「読めない」を分けられない。</b>
+     * {@link FileNotFoundException} は、無いときにも読めないときにも来る。
+     * <b>だから、その時点でファイルが在るかで分ける</b>——在れば「いま読めない」、無ければ「無い」。
+     * <b>ここへ来るのは関門を通った後に消えた・掴まれたときだけである</b>（{@link #requireReadable}）。
+     *
+     * @param path   開こうとしたファイル
+     * @param failed 開けなかった理由
+     * @return 呼ぶ側が投げる例外
+     */
+    static PdfjigException openFailure(Path path, IOException failed) {
+        if (failed instanceof FileNotFoundException || failed instanceof FileSystemException) {
+            ErrorCode code = Files.isRegularFile(path) ? ErrorCode.FILE_UNREADABLE : ErrorCode.FILE_NOT_FOUND;
+            return PdfjigException.wrapping(code, failed);
+        }
+        return PdfjigException.wrapping(ErrorCode.NOT_A_PDF, failed);
     }
 }
