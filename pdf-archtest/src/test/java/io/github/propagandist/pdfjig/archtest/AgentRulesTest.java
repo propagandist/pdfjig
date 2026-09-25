@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.archtest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -51,9 +52,14 @@ class AgentRulesTest {
 
     /**
      * {@code desktop-ui.md「JavaFX」} や、Javadoc の code タグ・バッククォートで包んだ形。
-     * <b>折り返しを挟んでもよい</b>（文書は 80〜100 桁で折り返す）。節名の中の改行は許さない。
+     * <b>折り返しを挟んでもよい</b>（文書は 80〜100 桁で折り返す）。コメントの行頭（{@code *} {@code //} {@code #}）も
+     * 挟んでよい。節名の中の改行は許さない。{@code x.md の「…」} のように助詞を挟んだ形は拾わない。
      */
-    private static final Pattern SECTION_REFERENCE = Pattern.compile("([a-z][a-z-]*)\\.md[`}]?\\s*「([^」\\n]+)」");
+    private static final Pattern SECTION_REFERENCE =
+            Pattern.compile("([a-z][a-z-]*)\\.md[`}]?\\s*(?:(?://|\\*|#)\\s*)?「([^」\\n]+)」");
+
+    /** 中身を読まないもの。読んでも参照は無く、復号の手間だけが掛かる。 */
+    private static final Pattern BINARY = Pattern.compile(".*\\.(jar|png|ico|icns|jpg|gif|bmp|pdf|zip|ttf|otf)$");
 
     /** ここから先は過去の記録であり、当時の節名を指す。 */
     private static final String RECORD_HEADING = "### 決まったことの記録";
@@ -71,10 +77,13 @@ class AgentRulesTest {
         }
         assertTrue(here != null, "リポジトリの根（settings.gradle.kts）が見つからない");
         root = here;
+        // ソースの zip から build する人を落とさない。CI と手元の checkout には .git がある。
+        assumeTrue(Files.exists(root.resolve(".git")), "git の checkout ではないので検証しない");
 
         Process git = new ProcessBuilder("git", "ls-files", "-z")
                 .directory(root.toFile())
-                .redirectErrorStream(true)
+                // 警告が -z の出力に混ざると、先頭のパスが壊れる。
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
                 .start();
         String listing = new String(git.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertEquals(0, git.waitFor(), "git ls-files が失敗した: " + listing);
@@ -119,8 +128,9 @@ class AgentRulesTest {
      * ファイル読み取りを全滅させる</b>（CLAUDE.md「維持ルールの索引」）。
      *
      * <p><b>★ 照合は自前でする。</b>{@code java.nio} の {@code PathMatcher} は Windows で大小文字を
-     * 区別せず、{@code **}{@code /x} が根の {@code x} に当たらない。どちらも Claude Code の照合と食い違い、
-     * <b>手元でだけ緑になる</b>。
+     * 区別しないので、<b>手元と CI の ubuntu で結果が割れる</b>。ここでは大小を区別し、{@code **}{@code /} を
+     * 0 個以上のディレクトリとして読む形に固定した。<b>★ Claude Code の照合と同じかは確かめていない。</b>
+     * 分かるのは「この読み方で、追跡しているファイルに 1 つも当たらない glob がある」ことまでである。
      */
     @Test
     void everyGlobMatchesATrackedFile() {
@@ -135,7 +145,7 @@ class AgentRulesTest {
         });
     }
 
-    /** 自前の照合そのものが、Claude Code の読み方と揃っていること。 */
+    /** 自前の照合が、上で固定した読み方をしていること（Claude Code と同じかは見ていない）。 */
     @Test
     void globMatchingIsCaseSensitiveAndDoubleStarMatchesTheRoot() {
         assertTrue(globToRegex("**/CLAUDE.md").matcher("CLAUDE.md").matches());
@@ -156,8 +166,10 @@ class AgentRulesTest {
         String claude = read("CLAUDE.md");
         int start = claude.indexOf("## 維持ルールの索引");
         assertTrue(start >= 0, "CLAUDE.md に「維持ルールの索引」が無い");
+        int end = claude.indexOf("\n## ", start + 1);
         Set<String> indexed = new TreeSet<>();
-        Matcher row = Pattern.compile("(?m)^\\| `([a-z-]+\\.md)` \\|").matcher(claude.substring(start));
+        Matcher row = Pattern.compile("(?m)^\\| `([a-z-]+\\.md)` \\|")
+                .matcher(claude.substring(start, end < 0 ? claude.length() : end));
         while (row.find()) {
             indexed.add(row.group(1));
         }
@@ -170,10 +182,10 @@ class AgentRulesTest {
         List<String> broken = new ArrayList<>();
         int checked = 0;
         for (String file : tracked) {
-            String text = read(file);
-            if (text.indexOf('\0') >= 0) {
+            if (BINARY.matcher(file).matches()) {
                 continue;
             }
+            String text = read(file);
             if (file.equals("docs/HANDOVER.md")) {
                 int record = text.indexOf(RECORD_HEADING);
                 assertTrue(record >= 0, "docs/HANDOVER.md に「決まったことの記録」が無い");
@@ -225,11 +237,11 @@ class AgentRulesTest {
         boolean fence = false;
         boolean comment = false;
         for (String line : text.lines().toList()) {
-            if (line.stripLeading().startsWith("```")) {
+            if (!comment && line.stripLeading().startsWith("```")) {
                 fence = !fence;
                 continue;
             }
-            if (!fence && line.contains("<!--")) {
+            if (!fence && line.stripLeading().startsWith("<!--")) {
                 comment = true;
             }
             if (!fence && !comment) {

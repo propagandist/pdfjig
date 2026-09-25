@@ -30,10 +30,12 @@ val agentRulesTest by tasks.registering(Test::class) {
         .files(
             rootProject.fileTree(rootDir) {
                 // AgentRulesTest は git ls-files しか見ない。ここは追跡しないものの代表だけを外す。
-                exclude("**/build/**", "**/bin/**", "**/.gradle/**", ".git/**", ".claude/worktrees/**", "tmp/**")
+                exclude("**/build/**", "**/bin/**", "**/.gradle/**", ".git/**", ".claude/worktrees/**", "tmp/**", "dist/**")
             },
         ).withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("repositoryFiles")
+    // 見ているのは git ls-files なので、add / rm --cached だけの変更でも走り直させる。
+    inputs.files(rootProject.file(".git/index")).withPropertyName("gitIndex")
 }
 
 tasks.test {
