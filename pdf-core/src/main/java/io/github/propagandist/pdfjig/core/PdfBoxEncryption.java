@@ -99,7 +99,12 @@ public final class PdfBoxEncryption implements Encryption {
             //   save のほうであり、禁じられた文字に当たると PDFBox は本物のパスワードの文字と
             //   位置をメッセージに載せた IllegalArgumentException を投げる——IOException ではない。
             //   wrapping は型名しか残さないので、ここで包めば漏れない（#144 / INV-5）。
-            DurableSave.write(document, output);
+            if (!DurableSave.write(document, output)) {
+                // ★ 暗号化には警告を返す口が無い。届いたか確かめられないなら失敗にする——
+                //   呼ぶ側が置き換えに使うなら、置き換えを止めるのが正しい（#219）。
+                deleteQuietly(output);
+                throw new PdfjigException(ErrorCode.OUTPUT_NOT_DURABLE);
+            }
         } catch (IOException e) {
             // ★★ 書けなかったことを、パスワードのせいにしない。出力先が無い・ディスクが満杯
             //   といった失敗まで PASSWORD_OR_DOCUMENT_FAILURE に畳むと、利用者は打ち直す
@@ -130,7 +135,12 @@ public final class PdfBoxEncryption implements Encryption {
     private static void unprotectInto(PDDocument document, Path output) {
         try {
             document.setAllSecurityToBeRemoved(true);
-            DurableSave.write(document, output);
+            if (!DurableSave.write(document, output)) {
+                // ★ 暗号化には警告を返す口が無い。届いたか確かめられないなら失敗にする——
+                //   呼ぶ側が置き換えに使うなら、置き換えを止めるのが正しい（#219）。
+                deleteQuietly(output);
+                throw new PdfjigException(ErrorCode.OUTPUT_NOT_DURABLE);
+            }
         } catch (IOException | RuntimeException e) {
             deleteQuietly(output);
             // ★ 自分で分類した失敗は塗り替えない。PdfDocument#open が INVALID_PASSWORD を
