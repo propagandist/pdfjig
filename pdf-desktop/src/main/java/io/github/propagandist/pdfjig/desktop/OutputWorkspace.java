@@ -4,13 +4,17 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -76,10 +80,42 @@ final class OutputWorkspace implements AutoCloseable {
      */
     private static final String HELD = "held";
 
+    /**
+     * 作業中であることの錠（#139）。持ち主は作ってから閉じるまで、このファイルの錠を持ち続ける。
+     *
+     * <p><b>★★ 印（{@link #HELD}）だけでは、2 つ目の窓に対して守れない。</b>片づける側が「抱えていない」と見てから
+     * 消すまでの間に、持ち主が退避を済ませられる——<b>そのとき消えるのは利用者の元の唯一の実体である。</b>
+     * 片づける側は<b>錠を取れたものにだけ触る</b>。取れなければ、ほかの窓が作業中である。
+     *
+     * <p><b>★ 錠は落ちれば外れる。</b>{@code FileChannel#tryLock} の錠はプロセスが死ぬと OS が外すので、
+     * 落ちた後に残ったものは、次の書き出しが錠を取って片づけられる（#119 の経路は死なない）。
+     *
+     * <p><b>★★ 錠のファイルが無ければ、片づける側が作って取る。</b>錠を持たなかった版（{@code v0.1.2} 以前）が
+     * 落ちた後に残したものも片づけ、控えを知らせる（#138。配った {@code RELEASE_NOTES.md} が約束している）。
+     * 作りたての作業場所を先に取られた持ち主は、作り直す（{@link #nextTo}）——<b>元にはまだ触っていない。</b>
+     */
+    private static final String LOCK = "lock";
+
+    /** 錠を取れなかったときに、作業場所を作り直す回数。 */
+    private static final int ATTEMPTS = 3;
+
+    /**
+     * この JVM が持っている作業場所。<b>錠のファイルを開かずに「作業中」と分かる</b>（#139 の門）。
+     *
+     * <p><b>★ 同じ JVM から錠のファイルを開いて閉じてはならない。</b>POSIX の {@code fcntl} の錠は、
+     * <b>同じファイルのどの口を閉じても外れる</b>——片づける側が確かめて閉じた瞬間に、持ち主の錠が消える。
+     * Windows では外れないが、それに頼らない。
+     */
+    private static final Set<Path> HELD_BY_THIS_JVM = ConcurrentHashMap.newKeySet();
+
     private final Path workspace;
 
-    private OutputWorkspace(Path workspace) {
+    /** 作業中であることの錠。{@link #close} で外す。 */
+    private final FileChannel lock;
+
+    private OutputWorkspace(Path workspace, FileChannel lock) {
         this.workspace = workspace;
+        this.lock = lock;
     }
 
     /**
@@ -97,10 +133,10 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>★ 作業場所を作る前に知らせる。</b>作れずに投げる回こそ、利用者がやり直している回である
      * ——後に置くと、そこで見つけたものが黙って落ちる。
      *
-     * <p><b>★ 別の窓がいま使っている作業場所も拾いうる。</b>元をどけてから入れ替えるまでの間
-     * （{@code DocumentWriter#move}）は、落ちた後と同じ形をしている。<b>その間は 2 本の改名だけで
-     * 極めて短い</b>ので、見分ける仕掛けは置いていない。伝える文言が「開いて確かめる」よう促すのは
-     * そのためでもある（{@code Messages#describeAbandoned}）。
+     * <p><b>★ 別の窓がいま使っている作業場所は拾わない</b>（#139）。作業中の作業場所は錠を持っているので、
+     * 片づけも知らせもしない（{@link #LOCK}）。<b>知らせるのは錠を取れた、つまり持ち主が居ないものだけである。</b>
+     * 伝える文言が「開いて確かめる」よう促すのは、どのファイルの控えかまでは言えないためである
+     * （{@code Messages#describeAbandoned}）。
      *
      * <p><b>★★ 知らせない版を置かない。</b>置くと、作業場所を開く口が 2 つ目に足された日に
      * 短いほうが選ばれ、<b>そこだけ黙る</b>——{@link #failing} を呼ぶ側の {@code catch} に置かない
@@ -115,11 +151,31 @@ final class OutputWorkspace implements AutoCloseable {
         if (!found.isEmpty()) {
             abandoned.accept(found);
         }
-        try {
-            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX));
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        IOException last = null;
+        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+            Path created;
+            try {
+                created = Files.createTempDirectory(directory, PREFIX);
+            } catch (IOException e) {
+                throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+            }
+            // ★ 錠を取る前の一瞬は、ほかの窓の片づけが先に錠を取りうる（錠のファイルが無ければ作って取る）。
+            //   取られたら、その作業場所は片づけられる。作り直せばよい——元にはまだ触っていない。
+            HELD_BY_THIS_JVM.add(created.toAbsolutePath());
+            FileChannel channel = null;
+            try {
+                channel = FileChannel.open(created.resolve(LOCK), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                if (channel.tryLock() != null) {
+                    return new OutputWorkspace(created, channel);
+                }
+                last = new IOException("作業場所の錠を、ほかの窓に先に取られた");
+            } catch (IOException e) {
+                last = e;
+            }
+            closeQuietly(channel);
+            HELD_BY_THIS_JVM.remove(created.toAbsolutePath());
         }
+        throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, last);
     }
 
     /**
@@ -257,7 +313,19 @@ final class OutputWorkspace implements AutoCloseable {
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */
     @Override
     public void close() {
+        // ★ 錠を外してから片づける。片づけは錠を取り直して進む（discard）。
+        closeQuietly(lock);
+        HELD_BY_THIS_JVM.remove(workspace.toAbsolutePath());
         discard(workspace);
+    }
+
+    /**
+     * 錠だけを外し、片づけずに手放す。<b>JVM ごと落ちたときと同じ形を、テストで作るための口である</b>（#139）。
+     * 落ちると {@link #close} は走らないが、錠は OS が外す。
+     */
+    void abandon() {
+        closeQuietly(lock);
+        HELD_BY_THIS_JVM.remove(workspace.toAbsolutePath());
     }
 
     /**
@@ -273,12 +341,11 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>消すのは、こちらが作る名前のディレクトリだけである。</b> 同じ名前の頭を持つ
      * ふつうのファイルには触らない——こちらはディレクトリしか作らないので、それは他人のものである。
      *
-     * <p><b>2 つ目の窓が同じフォルダへ同時に書いている場合、その作業場所を消しうる。</b>
-     * 書きかけのファイルは開かれているため実際には消せないことが多いが、消せたとしても
-     * 起きるのは<b>あちらの保存が失敗すること</b>だけである。置き換えはまだ済んでいないので、
-     * あちらの元のファイルは失われない（{@code CLAUDE.md} 優先順位 1）。
-     * <b>★ ただし控えを抱えているものには触らない</b>（{@link #discard}）——
-     * あちらが既に退避まで進んでいたなら、消すのは<b>あちらの元のファイルそのもの</b>である。
+     * <p><b>★★ 2 つ目の窓が同じフォルダへ同時に書いていても、その作業場所には触らない</b>（#139）。
+     * <b>錠を取れたものにだけ触る</b>（{@link #LOCK}）——印を見てから消すまでの間に、あちらが退避を
+     * 済ませうるためである。そのとき消えるのは<b>あちらの元のファイルそのもの</b>である。
+     * <b>★ 作りたてで錠を取る前のものは、こちらが先に取りうる。</b>そのときあちらは作り直す（{@link #nextTo}）
+     * ——元にはまだ触っていないので、失われるものは無い。
      *
      * <p><b>★★ 落ちた後に残った控えを、次の書き出しが消さない</b>（#119 の受け入れ基準）。
      * ここは<b>次に同じフォルダへ書き出すときに走る</b>ので、素通しにすると
@@ -347,8 +414,8 @@ final class OutputWorkspace implements AutoCloseable {
      *   <li><b>控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）
      * </ul>
      *
-     * <p><b>★★ 中は pdfjig が作る 3 つの名前だけを消す</b>（#125）——{@link #NAME} / {@link #REPLACED} /
-     * {@link #HELD}。<b>一覧を取らない。</b>
+     * <p><b>★★ 中は pdfjig が作る 4 つの名前だけを消す</b>（#125。錠は #139）——{@link #NAME} / {@link #REPLACED} /
+     * {@link #HELD} / {@link #LOCK}。<b>一覧を取らない。</b>
      * <ul>
      *   <li><b>{@link Files#walk} は使わない。</b>既定で {@code FOLLOW_LINKS} を付けていなくても、
      *       Windows のディレクトリジャンクションを降りる——出力先に書ける第三者が作業場所の中に
@@ -359,7 +426,7 @@ final class OutputWorkspace implements AutoCloseable {
      *       指す先で消える</b>。Windows の NIO にはハンドルを起点に消す手（{@code SecureDirectoryStream}）が無い。
      *       辿る形は、再帰の深さを第三者に決めさせて {@code StackOverflowError} で保存ごと落ちた
      *       （7,000 階層前後。#125 の {@code /code-review max} で再現）
-     *   <li><b>決まった名前だけなら、すり替えに勝たれても消えうるのはその 3 つの名前だけで、
+     *   <li><b>決まった名前だけなら、すり替えに勝たれても消えうるのはその 4 つの名前だけで、
      *       第三者は名前を選べない。</b>
      *   <li><b>ほかのものがあれば、作業場所は消せずに残り、記録される</b>——pdfjig が作らないもので
      *       あり、正体の分からないものを消さない側へ倒す（{@code CLAUDE.md} 優先順位 1）
@@ -376,14 +443,58 @@ final class OutputWorkspace implements AutoCloseable {
         if (!isOwnDirectory(directory)) {
             return false;
         }
-        if (holdsTheOnlyCopy(directory)) {
-            return true;
+        // ★★ 錠を取れたものにだけ触る（#139）。取れなければ、ほかの窓が作業中である——
+        //   印を見てから消すまでの間に、あちらが退避を済ませうる。
+        //   ★ この JVM の作業中のものは、錠のファイルを開かずに見分ける（HELD_BY_THIS_JVM）。
+        if (HELD_BY_THIS_JVM.contains(directory.toAbsolutePath())) {
+            return false;
         }
-        deleteQuietly(directory.resolve(NAME));
-        deleteQuietly(directory.resolve(REPLACED));
-        deleteQuietly(directory.resolve(HELD));
-        deleteQuietly(directory);
-        return false;
+        // ★ 錠のファイルが無ければ作って取る。錠を持たなかった版の残り物も片づけ、控えを知らせる（#138）。
+        FileChannel channel;
+        try {
+            channel = FileChannel.open(directory.resolve(LOCK), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        } catch (IOException e) {
+            return false;
+        }
+        try {
+            if (channel.tryLock() == null) {
+                closeQuietly(channel);
+                return false;
+            }
+            if (holdsTheOnlyCopy(directory)) {
+                closeQuietly(channel);
+                return true;
+            }
+            boolean emptied = deleteQuietly(directory.resolve(NAME))
+                    & deleteQuietly(directory.resolve(REPLACED))
+                    & deleteQuietly(directory.resolve(HELD));
+            // ★★ 中を全部消せたときだけ、錠を持ったまま錠のファイルを消す（削除の予約）。手放した後に消すと、
+            //   その隙に作りたての持ち主が取り直した錠のファイルを消しうる。消し損ねたものが残るなら錠のファイルも
+            //   残す——次の書き出しが錠を取って片づけ直せる（#119）。
+            if (emptied) {
+                deleteQuietly(directory.resolve(LOCK));
+            }
+            closeQuietly(channel);
+            if (emptied) {
+                deleteQuietly(directory);
+            }
+            return false;
+        } catch (IOException | RuntimeException e) {
+            closeQuietly(channel);
+            return false;
+        }
+    }
+
+    private static void closeQuietly(FileChannel channel) {
+        if (channel == null) {
+            return;
+        }
+        try {
+            channel.close();
+        } catch (IOException e) {
+            // 錠の口を閉じ損ねただけで、片づけの成否とは別である（WORKSPACE_NOT_DISCARDED にしない）。
+            Logs.warn(LogEvent.OPERATION_FAILED, e);
+        }
     }
 
     /**
@@ -415,12 +526,15 @@ final class OutputWorkspace implements AutoCloseable {
         }
     }
 
-    private static void deleteQuietly(Path path) {
+    /** 消す。消せたか、もともと無ければ {@code true}。 */
+    private static boolean deleteQuietly(Path path) {
         try {
             Files.deleteIfExists(path);
+            return true;
         } catch (IOException e) {
             // 同上。出力先に .pdfjig-* が残るのは利用者から見えるので、理由を追える先を残す。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return false;
         }
     }
 }

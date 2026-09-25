@@ -49,8 +49,11 @@ class OutputWorkspaceTest {
         Files.createFile(directory.resolve("someone-else.txt"));
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            // ★ 錠のファイルだけは最初から在る（#139）。pdfjig が作ったもので、他人のものではない。
             assertEquals(
-                    List.of(), namesIn(workspace.file().getParent()), "書き込み先の隣に他人のものがあるなら、その名前は他人にも用意できる（CWE-377）");
+                    List.of("lock"),
+                    namesIn(workspace.file().getParent()),
+                    "書き込み先の隣に他人のものがあるなら、その名前は他人にも用意できる（CWE-377）");
         }
     }
 
@@ -264,10 +267,10 @@ class OutputWorkspaceTest {
         Path precious = preciousOutside(directory);
         Path out = Files.createDirectory(directory.resolve("out"));
         // ★ 名前を手で組まない。作った作業場所を空けて、同じ名前でジャンクションに差し替える。
-        Path planted = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})
-                .file()
-                .getParent();
-        Files.delete(planted);
+        OutputWorkspace made = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {});
+        Path planted = made.file().getParent();
+        // 閉じれば空けて消す。消えた名前をジャンクションで差し替える。
+        made.close();
         junction(planted, precious.getParent());
         try {
             OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {}).close();
@@ -283,7 +286,7 @@ class OutputWorkspaceTest {
     /**
      * 作業場所の中の、pdfjig が作らないものには触らない（#125）。
      *
-     * <p><b>pdfjig が作業場所に作るのは 3 つのファイルだけである。</b>ほかのものがあるなら第三者が置いたもので、
+     * <p><b>pdfjig が作業場所に作るのは 4 つのファイルだけである</b>（錠は #139）。ほかのものがあるなら第三者が置いたもので、
      * 中を辿ると深さを決められ（再帰が溢れて保存ごと落ちた）、一覧を取って消すと、作業場所ごと
      * すり替えられたときに、置いた名前が指す先で消える。<b>触らない。</b>作業場所も残る。
      */
@@ -523,6 +526,8 @@ class OutputWorkspaceTest {
         OutputWorkspace left = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
         Path abandoned = left.file().getParent();
         Files.writeString(left.file(), "書きかけ");
+        // 落ちると錠は OS が外す（#139）。閉じたままの窓と区別するため、錠だけを外す。
+        left.abandon();
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertFalse(Files.exists(abandoned), "残ったものを片づけないと、利用者には正体の分からない隠しものが増えていく");
@@ -556,6 +561,7 @@ class OutputWorkspaceTest {
      */
     private static Path abandonedCopyIn(Path directory) throws IOException {
         OutputWorkspace abandoned = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
+        abandoned.abandon();
         abandoned.holdOriginal();
         return Files.writeString(abandoned.replaced(), "元のファイル");
     }
@@ -587,5 +593,67 @@ class OutputWorkspaceTest {
                     .failing(new PdfjigException(ErrorCode.IO_FAILURE), null)
                     .isEmpty());
         }
+    }
+
+    /**
+     * 作業中の作業場所には、次の書き出しが触らない（#139）。
+     *
+     * <p><b>★★ 2 つ目の窓が同じフォルダへ書き出すと、1 つ目の作業場所は残り物と同じ形をしている。</b>
+     * 印を見てから消すまでの間に 1 つ目が退避を済ませると、<b>消えるのは利用者の元の唯一の実体である。</b>
+     * 本物の割り込みは作れないので、1 つ目を開いたまま 2 つ目を走らせ、中身が残ることを見る。
+     */
+    @Test
+    @DisplayName("作業中の作業場所には、次の書き出しが触らない")
+    void leavesAWorkspaceThatIsStillInUseAlone(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace first = OutputWorkspace.nextTo(directory.resolve("a.pdf"), found -> {})) {
+            Path written = Files.writeString(first.file(), "書いている最中");
+
+            try (OutputWorkspace second = OutputWorkspace.nextTo(directory.resolve("b.pdf"), found -> {})) {
+                assertTrue(Files.exists(written), "ほかの窓が作業中の作業場所を片づけている（#139）");
+                assertTrue(Files.exists(second.file().getParent()));
+            }
+
+            // 1 つ目はそのまま退避へ進める。
+            first.holdOriginal();
+            assertEquals("元のファイル", Files.readString(Files.writeString(first.replaced(), "元のファイル")));
+        }
+    }
+
+    /** 作業中の作業場所の控えを、前の書き出しが残したものとして知らせない（#139）。知らせると嘘になる。 */
+    @Test
+    @DisplayName("作業中の作業場所の控えを、残り物として知らせない")
+    void doesNotReportACopyThatAnotherWindowIsStillHolding(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace first = OutputWorkspace.nextTo(directory.resolve("a.pdf"), found -> {})) {
+            first.holdOriginal();
+            Path kept = Files.writeString(first.replaced(), "元のファイル");
+
+            List<List<Path>> found = new ArrayList<>();
+            OutputWorkspace.nextTo(directory.resolve("b.pdf"), found::add).close();
+
+            assertEquals(List.of(), found, "作業中の控えを、落ちた後の残り物として知らせている");
+            assertEquals("元のファイル", Files.readString(kept));
+            first.releaseOriginal();
+        }
+    }
+
+    /**
+     * 錠を持たなかった版が残した控えも、知らせる（#139 の門）。
+     *
+     * <p><b>{@code v0.1.2} 以前は錠のファイルを作らない。</b>錠のファイルが無いものに触らない形にすると、
+     * <b>配った {@code RELEASE_NOTES.md} が「次の版で知らせる」と約束した控えを、もう知らせられない。</b>
+     * 名前は手で組む——錠を作らない版の作業場所は、いまのコードからは作れない。
+     */
+    @Test
+    @DisplayName("錠を持たなかった版が残した控えも、知らせる")
+    void reportsACopyLeftByAVersionWithoutTheLock(@TempDir Path directory) throws IOException {
+        Path legacy = Files.createDirectory(directory.resolve(".pdfjig-1234567890"));
+        Files.createFile(legacy.resolve("held"));
+        Path kept = Files.writeString(legacy.resolve("replaced.pdf"), "元のファイル");
+
+        List<List<Path>> found = new ArrayList<>();
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
+
+        assertEquals(List.of(List.of(kept)), found, "錠の無い残り物の控えを知らせていない（#138）");
+        assertEquals("元のファイル", Files.readString(kept));
     }
 }

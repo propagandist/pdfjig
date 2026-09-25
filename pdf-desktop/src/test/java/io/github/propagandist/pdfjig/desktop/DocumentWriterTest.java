@@ -17,8 +17,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.DosFileAttributeView;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -303,8 +305,18 @@ class DocumentWriterTest {
      * {@link DocumentWriter#move} だけで、作業場所の後始末は別のテストが持つ
      * （{@code OutputWorkspaceTest}）。
      */
-    private static OutputWorkspace workspaceFor(Path target) {
-        return OutputWorkspace.nextTo(target, found -> {});
+    /** 作った作業場所。錠を持つので、テストの終わりに閉じる（#139）。 */
+    private final List<OutputWorkspace> opened = new ArrayList<>();
+
+    @AfterEach
+    void closeWorkspaces() {
+        opened.forEach(OutputWorkspace::abandon);
+    }
+
+    private OutputWorkspace workspaceFor(Path target) {
+        OutputWorkspace workspace = OutputWorkspace.nextTo(target, found -> {});
+        opened.add(workspace);
+        return workspace;
     }
 
     /**
