@@ -9,7 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.input.KeyCode;
@@ -238,26 +237,6 @@ class EditingGateUiTest extends DesktopUiTest {
     /** A（2 ページ）と B（1 ページ）を開く。作法は {@link DesktopUiTest#openTwoFiles} が持つ。 */
     private void openTwo(FxRobot robot, Path dir) throws Exception {
         assertEquals(TWO_FILES, openTwoFiles(robot, dir));
-    }
-
-    /**
-     * ダイアログのボタンが出てくるなら掴む。
-     *
-     * <p><b>★★ 「出ない」を 1 回の lookup で決めない。</b>{@code Alert#showAndWait} は
-     * 新しい窓を立てるので、<b>クリックの直後に見ると間に合わないことがある</b>——
-     * そこで空を返すと、<b>門が漏れているのに緑になる</b>（{@link #GRACE_SECONDS}）。
-     */
-    private static Optional<Node> dialogButton(FxRobot robot, String id) {
-        try {
-            WaitForAsyncUtils.waitFor(
-                    GRACE_SECONDS,
-                    TimeUnit.SECONDS,
-                    () -> robot.lookup(id).tryQuery().isPresent());
-        } catch (Exception neverShown) {
-            return Optional.empty();
-        }
-        WaitForAsyncUtils.waitForFxEvents();
-        return robot.lookup(id).tryQuery();
     }
 
     /**
