@@ -147,7 +147,10 @@ final class DocumentWriter {
      *                         {@link ErrorCode#OUTPUT_NOT_DURABLE}
      */
     static void refuseToReplaceUnlessDurable(List<Warning> warnings, Path output) {
-        if (warnings.contains(Warning.NOT_DURABLE) && Files.exists(output)) {
+        // ★ 無いと確信できるときだけ通す。Files.exists は「確かめられない」を「無い」に潰すので、
+        //   属性を読めないだけの既存ファイルを置き換えてしまう——退避の側（setAside）と同じ述語で見る。
+        //   ★ ここから move までの間に別の窓がその名前を作る競合は見ない（replaceWith と同じ扱い）。
+        if (warnings.contains(Warning.NOT_DURABLE) && !Files.notExists(output)) {
             throw new PdfjigException(ErrorCode.OUTPUT_NOT_DURABLE);
         }
     }
