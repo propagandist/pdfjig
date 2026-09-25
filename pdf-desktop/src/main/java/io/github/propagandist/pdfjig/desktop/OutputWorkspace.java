@@ -122,6 +122,15 @@ final class OutputWorkspace implements AutoCloseable {
         }
     }
 
+    /**
+     * 控えの隣にある、書けた出力の場所（テストが名前を写さないため。#184）。
+     *
+     * @param kept {@link ReplacedFileKeptException#kept()} が返す控え
+     */
+    static Path writtenBeside(Path kept) {
+        return kept.resolveSibling(NAME);
+    }
+
     /** 書き込み先。まだ存在しない。 */
     Path file() {
         return workspace.resolve(NAME);
@@ -205,10 +214,48 @@ final class OutputWorkspace implements AutoCloseable {
      * @return 控えを抱えたままなら在り処を載せた例外。そうでなければ空
      */
     Optional<RuntimeException> failing(Throwable failed) {
+        return failing(failed, null);
+    }
+
+    /**
+     * {@link #failing(Throwable)} に、消し損ねた平文の在り処を添える（#184。{@link #dropWrittenOutput}）。
+     *
+     * @param failed    起きた失敗
+     * @param plaintext 消し損ねた、復号した中身のファイル。残っていなければ {@code null}
+     * @return 控えを抱えたままなら在り処を載せた例外。そうでなければ空
+     */
+    Optional<RuntimeException> failing(Throwable failed, Path plaintext) {
         Path copy = replaced();
         return holdsTheOnlyCopy(workspace) && Files.exists(copy)
-                ? Optional.of(new ReplacedFileKeptException(copy, failed))
+                ? Optional.of(new ReplacedFileKeptException(copy, plaintext, failed))
                 : Optional.empty();
+    }
+
+    /**
+     * 書けた出力を消す。<b>書き出しを終えた持ち主だけが呼ぶ</b>（#184）。
+     *
+     * <p><b>★★ 呼ぶのは、出力が「鍵の要る入力を復号した中身で、開くのに鍵が要らない」ときだけである</b>
+     * （{@code DocumentWriter#assemble}）。置き換えにも巻き戻しにも失敗すると、ここには元と書けた出力の
+     * 両方が残る。利用者が読むのは「保存に失敗した」であり、<b>平文は書かれていないと信じる</b>
+     * （{@code SECURITY.md}「対象範囲」2 番目）。
+     *
+     * <p><b>★ ふつうの出力は消さない。</b>開いている文書へ上書き保存して失敗したとき、
+     * <b>編集を反映した中身はここにしか無い</b>——元を戻さない限り、保存し直すこともできない。
+     *
+     * <p><b>★ 前の書き出しの残り物には呼ばない</b>（{@link #discardAbandoned} は触らない）。
+     * 別の窓が退避と入れ替えの間にいると、<b>これから出力先へ移すものを消して、あちらの保存を失敗させる。</b>
+     *
+     * @return 消し損ねたなら、そのファイル。消せたか、もともと無ければ {@code null}
+     */
+    Path dropWrittenOutput() {
+        Path written = file();
+        try {
+            Files.deleteIfExists(written);
+            return null;
+        } catch (IOException e) {
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return written;
+        }
     }
 
     /** 作業場所を片づける。消せなくても保存は失敗させない。 */

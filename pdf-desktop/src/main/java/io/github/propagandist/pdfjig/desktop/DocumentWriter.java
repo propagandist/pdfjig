@@ -118,7 +118,10 @@ final class DocumentWriter {
                 // ★★ Error まで受ける。狭く書くと、退避が済んだ後に OutOfMemoryError が
                 //    上がっただけで在り処を言えなくなる——控えは残るのに、画面は汎用の失敗を出す。
                 //    受けても握り潰さない。包まないときはそのまま投げ直す。
-                Optional<RuntimeException> kept = workspace.failing(failed);
+                // ★★ 鍵の要る入力を復号した中身が、鍵なしで開ける形で書けていたら消す（#184）。
+                //   消し損ねたら在り処を伝える——黙ると、平文は書かれていないと信じさせる。
+                Path plaintext = decryptsIntoAnOpenFile(sources, protection) ? workspace.dropWrittenOutput() : null;
+                Optional<RuntimeException> kept = workspace.failing(failed, plaintext);
                 if (kept.isPresent()) {
                     throw kept.get();
                 }
@@ -126,6 +129,18 @@ final class DocumentWriter {
             }
         }
         return List.copyOf(warnings);
+    }
+
+    /**
+     * 出力が、鍵の要る入力を復号した中身で、しかも開くのに鍵が要らないか（#184）。
+     *
+     * <p><b>★ 分かれ目は「保護を掛けたか」ではなく「開くのに鍵が要るか」である</b>
+     * （{@link Protection#userPasswordRequired}。{@code MainWindow#save} と同じ）。
+     * オーナーパスワードだけを掛けた出力は、誰でも開ける。
+     */
+    private static boolean decryptsIntoAnOpenFile(Sources sources, Protection protection) {
+        boolean keyed = sources.all().stream().anyMatch(source -> source.password() != null);
+        return keyed && (protection == null || !protection.userPasswordRequired());
     }
 
     /**

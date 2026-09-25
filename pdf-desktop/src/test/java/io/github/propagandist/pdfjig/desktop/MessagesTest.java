@@ -135,4 +135,17 @@ class MessagesTest {
 
         assertEquals("操作に失敗しました。", message, "例外のメッセージを画面へ出している（INV-5）");
     }
+
+    /** 消し損ねた平文があれば、在ることと場所を言う（#184）。利用者は平文は書かれていないと信じている。 */
+    @Test
+    void saysWhereThePlaintextWasLeft() {
+        Path kept = Path.of("C:", "work", ".pdfjig-1", "replaced.pdf");
+        Path plaintext = OutputWorkspace.writtenBeside(kept);
+
+        String message = Messages.describe(
+                new ReplacedFileKeptException(kept, plaintext, new PdfjigException(ErrorCode.IO_FAILURE)));
+
+        assertTrue(message.contains(plaintext.toString()), "消し損ねた平文の場所を言っていない: " + message);
+        assertTrue(message.contains("保護されていない"), "何が残っているのかを言っていない: " + message);
+    }
 }

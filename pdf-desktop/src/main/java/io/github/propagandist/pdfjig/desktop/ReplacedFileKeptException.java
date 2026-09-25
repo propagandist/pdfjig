@@ -1,6 +1,7 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * 書き出しに失敗し、元の実体が作業場所に残ったまま終わったこと。
@@ -36,11 +37,15 @@ final class ReplacedFileKeptException extends RuntimeException {
      */
     private final transient Path kept;
 
-    ReplacedFileKeptException(Path kept, Throwable failed) {
+    /** 消し損ねた、復号した中身のファイル（#184）。残っていなければ {@code null}。 */
+    private final transient Path plaintext;
+
+    ReplacedFileKeptException(Path kept, Path plaintext, Throwable failed) {
         // ★ メッセージに場所を入れない（上の★★）。原因はそのまま連ねる——
         //   利用者に出る文言は原因の側が持っており、こちらはそこへ場所を足すだけである。
         super("元の実体を作業場所に残したまま失敗した", failed);
         this.kept = kept;
+        this.plaintext = plaintext;
     }
 
     /**
@@ -50,5 +55,14 @@ final class ReplacedFileKeptException extends RuntimeException {
      */
     Path kept() {
         return kept;
+    }
+
+    /**
+     * 消し損ねた、復号した中身のファイルを返す（#184）。
+     *
+     * @return 残っていればそのパス
+     */
+    Optional<Path> plaintext() {
+        return Optional.ofNullable(plaintext);
     }
 }
