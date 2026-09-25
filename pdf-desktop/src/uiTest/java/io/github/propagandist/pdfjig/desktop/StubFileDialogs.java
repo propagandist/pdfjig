@@ -3,6 +3,8 @@ package io.github.propagandist.pdfjig.desktop;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
+import javafx.application.Platform;
 
 /**
  * テストが答えを仕込む {@link FileDialogs}。
@@ -28,6 +30,48 @@ final class StubFileDialogs implements FileDialogs {
 
     /** 直前のダイアログで渡された、始めるフォルダ。渡されなければ {@code null}。 */
     private Path lastInitial;
+
+    /** 次のダイアログが「開いている間」に走らせるもの。{@link #whileNextDialogIsOpen} を見る。 */
+    private Runnable during;
+
+    private BooleanSupplier until;
+
+    /**
+     * 次のダイアログが開いている間に {@code action} を走らせ、{@code done} が真になるまで答えを返さない。
+     *
+     * <p><b>★ 本物のファイル選択は入れ子のイベントループである</b>（#133）。窓が出ている間も
+     * {@code Platform.runLater} は回るので、その間に文書が入れ替わりうる。
+     * <b>ここはその場で答えるので、そのままでは入れ替わりを挟めない。</b>
+     * 答える前に入れ子のループへ入り、{@code done} を待ってから出る——本物と同じ形である。
+     */
+    void whileNextDialogIsOpen(Runnable action, BooleanSupplier done) {
+        during = action;
+        until = done;
+    }
+
+    private void runWhileOpen() {
+        if (during == null) {
+            return;
+        }
+        Runnable action = during;
+        BooleanSupplier done = until;
+        during = null;
+        until = null;
+        Object key = new Object();
+        action.run();
+        exitWhen(done, key);
+        Platform.enterNestedEventLoop(key);
+    }
+
+    private static void exitWhen(BooleanSupplier done, Object key) {
+        Platform.runLater(() -> {
+            if (done.getAsBoolean()) {
+                Platform.exitNestedEventLoop(key, null);
+            } else {
+                exitWhen(done, key);
+            }
+        });
+    }
 
     void willOpen(Path path) {
         open = path;
@@ -85,6 +129,7 @@ final class StubFileDialogs implements FileDialogs {
 
     @Override
     public Optional<List<Path>> openPdfs(Path initial) {
+        runWhileOpen();
         lastInitial = initial;
         List<Path> chosen = openMultiple;
         openMultiple = null;
@@ -93,6 +138,7 @@ final class StubFileDialogs implements FileDialogs {
 
     @Override
     public Optional<Path> savePdf(Path initial, String suggestedName) {
+        runWhileOpen();
         lastInitial = initial;
         lastSuggestedName = suggestedName;
         Path chosen = save;
@@ -102,6 +148,7 @@ final class StubFileDialogs implements FileDialogs {
 
     @Override
     public Optional<Path> chooseFolder(Path initial) {
+        runWhileOpen();
         lastInitial = initial;
         Path chosen = folder;
         folder = null;
