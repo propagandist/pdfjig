@@ -307,14 +307,17 @@ public final class DocumentSession implements AutoCloseable {
      */
     private void adopt(Path path, PdfDocument document) {
         int sourceIndex;
+        int pageCount;
         try {
-            PageOrder.requirePages(document.pageCount());
+            // ★ 1 度だけ読む。2 度目を try の外で読むと、そこが投げたときに登録だけが残る（#148 の門）。
+            pageCount = document.pageCount();
+            PageOrder.requirePages(pageCount);
             sourceIndex = register(path, document);
         } catch (RuntimeException e) {
             closeAfter(document, e);
             throw e;
         }
-        order.append(sourceIndex, document.pageCount());
+        order.append(sourceIndex, pageCount);
     }
 
     private int register(Path path, PdfDocument document) {

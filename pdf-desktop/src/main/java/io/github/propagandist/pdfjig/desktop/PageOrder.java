@@ -60,6 +60,7 @@ public final class PageOrder {
      *
      * @param sourcePageCount 元文書のページ数
      * @return 手つかずの並び
+     * @throws PdfjigException 1 枚も無い場合は {@link ErrorCode#EMPTY_DOCUMENT}
      */
     public static PageOrder of(int sourcePageCount) {
         requirePages(sourcePageCount);
@@ -91,6 +92,7 @@ public final class PageOrder {
      *
      * @param sourceIndex 追加した文書の出どころ番号
      * @param pageCount   その文書のページ数
+     * @throws PdfjigException 1 枚も無い場合は {@link ErrorCode#EMPTY_DOCUMENT}
      */
     public void append(int sourceIndex, int pageCount) {
         requirePages(pageCount);

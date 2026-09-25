@@ -794,7 +794,12 @@ public final class MainWindow {
                         if (session != saving) {
                             // 開いている間に別の文書を開かれた／窓が閉じられた。
                             // ここで入れ替えると、そちらを黙って捨てることになる。
-                            opened.close();
+                            // ★ 閉じる失敗は closeSession と同じく飲んで記録する（#148 の門）。
+                            try {
+                                opened.close();
+                            } catch (RuntimeException e) {
+                                Logs.warn(LogEvent.DOCUMENT_NOT_CLOSED, e);
+                            }
                             return;
                         }
                         adopt(opened);
