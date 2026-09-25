@@ -159,7 +159,7 @@ function Wait-SandboxProcess([int] $TimeoutSeconds, [bool] $Present) {
 <#
     Sandbox を起こし、中側が置き場へ exit-code.txt を書くまで待って、その値を返す。
 
-    ★ 上限を必ず置く（CLAUDE.md「不安定なテストの扱い」）。いつまでも待つ待ち受けは、
+    ★ 上限を必ず置く（.claude/rules/ui-tests.md「不安定なテストの扱い」）。いつまでも待つ待ち受けは、
       壊れていることを報せない。超えたら理由を書いて落とす。
 
     ★ 中側は exit-code.txt を finally で必ず書く。書かれないまま落ちると、ここは

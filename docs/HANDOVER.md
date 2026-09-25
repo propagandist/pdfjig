@@ -174,7 +174,7 @@ M0 では暗号化「設定」機能はないが、暗号化された入力を�
 
 実装上の要点:
 
-- `PDFRenderer#renderImageWithDPI` は必ず `Task` の中で呼ぶ（`CLAUDE.md` JavaFX 節）
+- `PDFRenderer#renderImageWithDPI` は必ず `Task` の中で呼ぶ（`.claude/rules/desktop-ui.md`「JavaFX」）
 - 可視範囲外のページはレンダリングしない。`ListView` / `GridView` の cell factory で
   cell が表示された時点でレンダリングを開始する
 - キャッシュサイズは上限ページ数で管理する（例: 直近 200 ページ）。
@@ -990,7 +990,7 @@ NoOp を最初に作ることで INV-3 が構造的に守られる。
 - **jlink のルートモジュール 2 つも POI のためだった**——`jdk.unsupported`
   （POI が `sun.misc.Unsafe` を使う）と `jdk.xml.dom`（xmlbeans が要求する）
 
-`CLAUDE.md`「依存を放置しない」（org 基準 §2.2）は、**宣言している以上
+org `security-baseline.md` §2.2「依存を放置しない」は、**宣言している以上
 CVE を見る責任があるという意味**である。使っていないものを見続ける理由はない。
 
 #### 戻すときにやること
@@ -1001,7 +1001,7 @@ CVE を見る責任があるという意味**である。使っていないも�
    `jdk.xml.dom` を足す。**これを忘れると jlink 後のアプリが実行時に落ちる**
 3. **`ArchitectureTest` の入れ子クラス `Poi` から `@Disabled` を外す。**
    POI がクラスパスに無い間、あのルールは常に真になる（下の「ルールの空振り」）
-4. `XSSFWorkbook` ではなく **SXSSF を使う**（`CLAUDE.md` リソース管理節）
+4. `XSSFWorkbook` ではなく **SXSSF を使う**（`.claude/rules/modules-and-invariants.md`「リソース管理」）
 
 #### ★ 外したときに分かったこと ── ルールの空振り
 
