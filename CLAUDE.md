@@ -88,9 +88,13 @@ gh api repos/propagandist/.github/contents/docs/ci-strategy.md --jq .content | b
 `docs/work-conventions.md`（**軸が違う。CI の有無と関係なく効く**）。
 **文章の基準**（一貫性・明確さ・リズム・文体・正確さ・網羅性）は同 `docs/writing-baseline.md`
 （**同じく軸が違う。人に読ませる文章を書き終えたら読む**）。
+**表側**（README の型・description・topics・Releases）は同 `docs/repo-surface-baseline.md`
+（**README を触る前・public にする前に読む**）。
 **値**（既定ブランチ・ブランチ名・コミット規約・ラベル・merge 方式・表記の対・定番語彙）は
 **このリポジトリが持つ**——下の `## 作業の型` と `## 文章の値` に書く。
-org 正本には値が 1 つも無い。
+**表側の値だけは逆で、org 正本が持つ**（揃っていること自体が目的のため）。
+**org 正本が実態と合わない／どこにも当てはまらないと気づいたら**、ここへ例外を書き足さず
+`propagandist/.github` へ起票する（上げるか値に留めるかの分かれ目は同 `docs/work-conventions.md` §6）。
 
 **規約の中身をここへ写さない。** 両方に書けば必ず片方が腐る。
 
