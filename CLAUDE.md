@@ -84,7 +84,7 @@ CI と本番デプロイが同時に止まる（2026-08-09 に実際に起きた
 gh api repos/propagandist/.github/contents/docs/ci-strategy.md --jq .content | base64 -d
 ```
 
-**作業の型**（プランを起票で止める／起票の作法／着手前／本文／マージ）は同
+**作業の型**（プランを起票で止める／起票の作法／着手前／本文／マージ／**エージェントの設定**）は同
 `docs/work-conventions.md`（**軸が違う。CI の有無と関係なく効く**）。
 **文章の基準**（一貫性・明確さ・リズム・文体・正確さ・網羅性）は同 `docs/writing-baseline.md`
 （**同じく軸が違う。人に読ませる文章を書き終えたら読む**）。
