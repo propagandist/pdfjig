@@ -15,6 +15,9 @@ import java.util.Map;
  *   <li><b>出力先が既に存在する場合は失敗する</b>（{@link ErrorCode#OUTPUT_ALREADY_EXISTS}）。
  *       上書きの判断は利用者のものであり、暗黙に行わない。この規約により、
  *       入力と同じパスを出力に指定して入力を壊す事故も同時に防がれる</li>
+ *   <li><b>書き出したものは、戻る前にディスクへ届けさせる。届いたか確かめられなければ
+ *       {@link Warning#NOT_DURABLE} を出す</b>（#219。理由は {@code docs/SPEC.md} §4.2）。
+ *       <b>それを改名で置き換えてから元の控えを消す呼ぶ側は、この警告が出たら置き換えないこと</b></li>
  *   <li><b>暗号化された入力を扱った場合、必ず警告を発する</b>
  *       （{@link Warning#ENCRYPTION_NOT_PROPAGATED}）。出力は平文になる——
  *       <b>ただし {@link #assemble(Sources, List, Path, Protection)} に保護を渡した場合を除く</b>

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
+import io.github.propagandist.pdfjig.core.Warning;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -300,5 +301,28 @@ class DocumentWriterTest {
      */
     private static OutputWorkspace workspaceFor(Path target) {
         return OutputWorkspace.nextTo(target, found -> {});
+    }
+
+    /**
+     * 届いたか確かめられなかった書き出しで、既にあるファイルを置き換えない（#219）。
+     *
+     * <p><b>★★ 確かめられなかったのに置き換えると、欠けたものを元の名前に置き、元の控えを消して、成功と出す。</b>
+     * 新しい名前へ書くときは失うものが無いので、止めずに警告として伝える。
+     */
+    @Test
+    @DisplayName("届いたか確かめられなかったら、既にあるファイルは置き換えない")
+    void refusesToReplaceWhenTheOutputIsNotDurable(@TempDir Path directory) throws IOException {
+        Path existing = Files.writeString(directory.resolve("existing.pdf"), "元のファイル");
+        Path fresh = directory.resolve("fresh.pdf");
+
+        PdfjigException refused = assertThrows(
+                PdfjigException.class,
+                () -> DocumentWriter.refuseToReplaceUnlessDurable(List.of(Warning.NOT_DURABLE), existing));
+        assertEquals(ErrorCode.OUTPUT_NOT_DURABLE, refused.errorCode());
+
+        // 新しい名前なら止めない。届いていれば、置き換えでも止めない。
+        DocumentWriter.refuseToReplaceUnlessDurable(List.of(Warning.NOT_DURABLE), fresh);
+        DocumentWriter.refuseToReplaceUnlessDurable(List.of(), existing);
+        assertEquals("元のファイル", Files.readString(existing));
     }
 }

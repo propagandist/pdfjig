@@ -12,6 +12,10 @@ import java.nio.file.Path;
  *
  * <p><b>既存の出力は拒む</b>（{@link ErrorCode#OUTPUT_ALREADY_EXISTS}）。
  * {@code pdf-core} 全体の契約である（{@code docs/SPEC.md} §4.2）。
+ *
+ * <p><b>書き出したものは、戻る前にディスクへ届けさせる</b>（#219。{@code docs/SPEC.md} §4.2）。
+ * <b>★ ただし届いたかは伝えない</b>——警告を返す口が無く、既存の出力を拒むので置き換えも起きない。
+ * <b>書き出したものを置き換えに使う呼ぶ側が現れたら、届いたかを返す口を先に足すこと。</b>
  */
 public interface Encryption {
 

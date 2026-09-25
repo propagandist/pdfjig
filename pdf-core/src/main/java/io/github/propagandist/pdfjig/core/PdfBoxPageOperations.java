@@ -87,7 +87,8 @@ public final class PdfBoxPageOperations implements PageOperations {
      * {@code ThumbnailSource} の {@code PageRendering} である。
      *
      * @param warnings 警告の受け口
-     * @param saver    書き出す手。渡されたものを書けば、どう書いてもよい
+     * @param saver    書き出す手。渡されたものを書き、<b>戻る前にディスクへ届けさせること</b>（{@link DurableSave}。#219）。
+     *                 それさえ守れば、どう書いてもよい
      */
     PdfBoxPageOperations(WarningListener warnings, DocumentSaver saver) {
         if (warnings == null) {
@@ -131,7 +132,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                 merger.appendDocument(merged, source.delegate());
             }
             applyInformation(merged, information, inputs.size() > 1, warnings);
-            saver.save(merged, output);
+            save(merged, output, warnings);
         }
     }
 
@@ -314,7 +315,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                 page.setRotation(rotationOf(page).plus(entry.getValue()).degrees());
             }
             applyProtection(delegate, null);
-            saver.save(delegate, output);
+            save(delegate, output, warnings);
         }
     }
 
@@ -514,7 +515,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         PageReferences.discard(all, ordered);
 
         applyProtection(document, protection);
-        saver.save(document, output);
+        save(document, output, warnings);
     }
 
     /**
@@ -581,7 +582,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             applyInformation(target, information, mixed, warnings);
 
             applyProtection(target, protection);
-            saver.save(target, output);
+            save(target, output, warnings);
         }
     }
 
@@ -1016,6 +1017,9 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * <p>既定は {@link PdfBoxPageOperations#saveDocument}。差し替える理由は
      * {@link PdfBoxPageOperations#PdfBoxPageOperations(WarningListener, DocumentSaver)} を見ること。
+     *
+     * <p><b>★★ 戻る前にディスクへ届けさせること</b>（{@link DurableSave}。#219）。
+     * 画面の保存は、書けたものを改名で置き換えてから元の控えを消す。
      */
     @FunctionalInterface
     interface DocumentSaver {
@@ -1023,9 +1027,22 @@ public final class PdfBoxPageOperations implements PageOperations {
         /**
          * 書き出す。
          *
+         * @return ディスクへ届いたと確かめられたなら {@code true}（{@link DurableSave#write}）
          * @throws PdfjigException 書けない場合は {@link ErrorCode#IO_FAILURE}
          */
-        void save(PDDocument document, Path output);
+        boolean save(PDDocument document, Path output);
+    }
+
+    /**
+     * 書き出す。届いたか確かめられなければ、警告を積む（{@link Warning#NOT_DURABLE}。#219）。
+     *
+     * <p><b>書き出しはすべてここを通す。</b>呼ぶ側それぞれで返り値を見ると、足した 1 か所が黙る。
+     */
+    private void save(PDDocument document, Path output, Warnings warnings) {
+        if (!saver.save(document, output)) {
+            // 分割は出力ごとにここを通る。同じ警告を出力の数だけ伝えない。
+            warnings.addOnce(Warning.NOT_DURABLE);
+        }
     }
 
     /**
@@ -1037,9 +1054,11 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <b>出力が書けなかっただけなのに入力のせいにされる</b>（#150）。
      * 包んであれば {@link PdfjigException#wrapping} が素通しするので、
      * <b>どの呼ぶ側を通っても符号は変わらない。</b>
+     *
+     * <p><b>★★ 戻る前にディスクへ届けさせる</b>（{@link DurableSave}。#219）。届いたかを返す。
      */
-    static void saveDocument(PDDocument document, Path output) {
-        guardedRun(ErrorCode.IO_FAILURE, () -> document.save(output.toFile()));
+    static boolean saveDocument(PDDocument document, Path output) {
+        return guarded(ErrorCode.IO_FAILURE, () -> DurableSave.write(document, output));
     }
 
     /**

@@ -17,15 +17,20 @@ import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaCodeUnitAccess;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -82,6 +87,12 @@ class ArchitectureTest {
 
     /** PDFBox を走らせる仕事を包む、ただ 1 つの場所。 */
     private static final String PDFBOX_GUARD = "io.github.propagandist.pdfjig.core.PdfBoxGuard";
+
+    /** pdf-core の書き出しがすべて通る。#219 の規則が見る。 */
+    private static final String DURABLE_SAVE = "io.github.propagandist.pdfjig.core.DurableSave";
+
+    /** PDFBox の文書。書き出しの入口 {@code save} を持つ。 */
+    private static final String PD_DOCUMENT = "org.apache.pdfbox.pdmodel.PDDocument";
 
     /** 警告の受け口。動かしてよいのは {@code Warnings} だけである。 */
     private static final String WARNING_LISTENER = "io.github.propagandist.pdfjig.core.WarningListener";
@@ -486,7 +497,7 @@ class ArchitectureTest {
     /**
      * 出力先へ改名するところは、どこも原子的な移動を頼む。
      *
-     * <p><b>★★ これは実装の中身を縛る、この一覧で唯一のルールである。</b>ふつうはやらない——
+     * <p><b>★★ これは実装の中身を縛るルールである。</b>ふつうはやらない——
      * だが<b>ここは「頼んでいること」そのものが直しであり、それを見るテストが 1 本も書けなかった</b>
      * （#113）。頼まなければ断られようがないので、フォールバックを見るテストは素通りし、
      * 置き換えを見るテストは 2 段でも成功する。<b>消しても何も鳴らない。</b>
@@ -531,6 +542,74 @@ class ArchitectureTest {
                 "頼まないと Windows では DeleteFile → MoveFileEx の 2 段になり、その間に割り込まれると"
                         + "元のファイルも置き換えるはずのものも残らない（#113）。"
                         + "1 か所だけ外しても DocumentWriterTest は全部緑になるので、縛れるのはここだけである");
+    }
+
+    /**
+     * {@code pdf-core} の書き出しは、すべて閉じる前に書いたハンドルでディスクへ届けさせる（#219）。
+     *
+     * <p><b>★★ これも「頼んでいること」そのものが直しである</b>——上の原子的な移動と同じく、
+     * 届いたかどうかは電源を落とさないと見えず、<b>消しても何も鳴らない。</b>理由の正本は
+     * {@code docs/SPEC.md} §4.2 と {@code DurableSave} である。
+     *
+     * <p><b>書き出しを 1 か所に集め、そこを縛る。</b>{@code PDDocument#save} を呼ぶのは
+     * {@code DurableSave.write} だけで、しかも {@code save(OutputStream)} であること。
+     * 届けさせる呼び出し・チャネルの取り出し・出力を開くことも、そこだけで、開くのは 1 度だけであること。
+     * <b>{@code save(File)} へ戻す形、名前で開き直して届けさせる形（読み取りでも書き込みでも）、
+     * 暗号化を {@code save(File)} へ戻す形は、どれも赤になる</b>——6 通りに壊して確かめた（2026-09-25）。
+     *
+     * <p><b>★ 見えないものがある。</b>{@code PDDocument#save} を通らない書き方（{@code COSWriter} を直に使う、
+     * {@code PDFMergerUtility} に書き出し先を渡す等）、書く順序（{@code force} が閉じた後か）、
+     * {@code core} の下のパッケージ。<b>書き出しを足すときは {@code DurableSave} を通すこと。</b>
+     */
+    @Test
+    @DisplayName("pdf-core の書き出しは、すべて閉じる前に書いたハンドルでディスクへ届けさせる")
+    void everyWriteFlushesThroughTheHandleItWrote() {
+        String write = DURABLE_SAVE + ".write(PDDocument, Path)";
+        assertEquals(Set.of(write), unitsAccessing(PD_DOCUMENT, "save"), "DurableSave を通らずに書いている。届く前に置き換えられうる（#219）");
+        assertEquals(Set.of(write), unitsAccessing(FileChannel.class.getName(), "force"), "届けさせる場所が増減している（#219）");
+        assertEquals(
+                Set.of(write),
+                unitsAccessing(FileOutputStream.class.getName(), "getChannel"),
+                "書いたハンドルから届けさせていない（#219）");
+
+        List<JavaCodeUnitAccess<?>> saves = coreClasses()
+                .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                .filter(access -> access.getTargetOwner().getName().equals(PD_DOCUMENT))
+                .filter(access -> access.getTarget().getName().equals("save"))
+                .toList();
+        assertTrue(
+                saves.stream()
+                        .allMatch(access -> access.getTarget().getRawParameterTypes().stream()
+                                .map(JavaClass::getName)
+                                .toList()
+                                .equals(List.of(OutputStream.class.getName()))),
+                "save(OutputStream) 以外で書いている。save(File) は中で閉じるので、届けさせる手が無い（#219）");
+
+        long opened = coreClasses()
+                .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                .filter(access -> access.getTargetOwner().getName().equals(FileOutputStream.class.getName()))
+                .filter(access -> access.getTarget().getName().equals(JavaConstructor.CONSTRUCTOR_NAME))
+                .count();
+        assertEquals(1, opened, "出力を開き直している。書いたハンドルで届けさせること（#219）");
+
+        // ★★ 届いたか確かめられなかったとき、画面の保存は置き換えを止める。止める判定を外しても
+        //   単体テスト（DocumentWriterTest）は判定そのものしか見ないので、呼んでいることはここで縛る。
+        // ★ 順序も見る。move の後で止めても、元は既に置き換わり、控えも手放している。
+        List<JavaMethodCall> calls = classes.get(DOCUMENT_WRITER).getMethods().stream()
+                .filter(method -> method.getName().equals("assemble"))
+                .flatMap(method -> method.getMethodCallsFromSelf().stream())
+                .toList();
+        int refuse = calls.stream()
+                .filter(call -> call.getTarget().getName().equals("refuseToReplaceUnlessDurable"))
+                .mapToInt(JavaMethodCall::getLineNumber)
+                .min()
+                .orElse(Integer.MAX_VALUE);
+        int move = calls.stream()
+                .filter(call -> call.getTarget().getName().equals("move"))
+                .mapToInt(JavaMethodCall::getLineNumber)
+                .min()
+                .orElse(-1);
+        assertTrue(refuse < move, "画面の保存が、届いたか確かめる前に置き換えうる（#219）");
     }
 
     /**

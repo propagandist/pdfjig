@@ -112,6 +112,7 @@ final class DocumentWriter {
             //   次の保存で同じ変換が二重に掛かる（#118）。
             try {
                 operations.assemble(sources, pages, workspace.file(), protection);
+                refuseToReplaceUnlessDurable(warnings, output);
                 move(workspace.file(), output, workspace);
             } catch (RuntimeException | Error failed) {
                 // ★★ Error まで受ける。狭く書くと、退避が済んだ後に OutOfMemoryError が
@@ -125,6 +126,33 @@ final class DocumentWriter {
             }
         }
         return List.copyOf(warnings);
+    }
+
+    /**
+     * 書けたものがディスクへ届いたか確かめられなかったなら、既にあるファイルを置き換えない（#219）。
+     *
+     * <p><b>★★ 置き換えた後で控えを消すので、届く前に置き換えると直後の電源断で新旧どちらも失いうる。</b>
+     * しかも「確かめられなかった」は「本当に書けていなかった」でもありうる（{@link Warning#NOT_DURABLE}）
+     * ——そのまま置き換えると、<b>欠けたものを元の名前に置き、元の控えを消して、成功と出す。</b>
+     * 止めれば、元は手つかずで残る。
+     *
+     * <p><b>新しい名前へ書くときは止めない。</b>失うものが無いので、書いたうえで警告として伝える。
+     *
+     * <p><b>package-private なのはテストのためである</b>（{@code DocumentWriterTest}）。
+     * 届かない書き出しは、画面の経路からは狙って起こせない。
+     *
+     * @param warnings 書き出しで出た警告
+     * @param output   出力先
+     * @throws PdfjigException 置き換えになるのに届いたか確かめられなかった場合は
+     *                         {@link ErrorCode#OUTPUT_NOT_DURABLE}
+     */
+    static void refuseToReplaceUnlessDurable(List<Warning> warnings, Path output) {
+        // ★ 無いと確信できるときだけ通す。Files.exists は「確かめられない」を「無い」に潰すので、
+        //   属性を読めないだけの既存ファイルを置き換えてしまう——退避の側（setAside）と同じ述語で見る。
+        //   ★ ここから move までの間に別の窓がその名前を作る競合は見ない（replaceWith と同じ扱い）。
+        if (warnings.contains(Warning.NOT_DURABLE) && !Files.notExists(output)) {
+            throw new PdfjigException(ErrorCode.OUTPUT_NOT_DURABLE);
+        }
     }
 
     /**
@@ -260,7 +288,8 @@ final class DocumentWriter {
      * <b>呼んでよいのはこのクラスの中だけである</b>——ArchUnit が縛っている
      * （{@code replaceIsCalledOnlyByDocumentWriter}）。
      *
-     * @param from      書けたもの。作業場所の中にある
+     * @param from      書けたもの。作業場所の中にある。<b>ディスクへ届いたと確かめられていること</b>
+     *                  （{@link #refuseToReplaceUnlessDurable}。#219）
      * @param to        出力先
      * @param workspace 退避先と、抱えていることの印を持つ（{@link OutputWorkspace#replaced}）
      */

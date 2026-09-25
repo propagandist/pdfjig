@@ -1874,7 +1874,7 @@ class PdfBoxPageOperationsTest {
             if (saved.incrementAndGet() == nth) {
                 throw new PdfjigException(ErrorCode.IO_FAILURE);
             }
-            PdfBoxPageOperations.saveDocument(document, output);
+            return PdfBoxPageOperations.saveDocument(document, output);
         };
     }
 

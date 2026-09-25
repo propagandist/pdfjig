@@ -665,7 +665,11 @@ public final class MainWindow {
                         //   次に同じフォルダへ書き出すまで来ない。
                         //   ★ 最後に出す。いまの書き出しで起きたことが先で、前の書き出しの跡は後である。
                         try {
-                            markSaved(saving, sources, pages);
+                            // ★★ 届いたか確かめられなかった回は「保存済み」にしない（#219）。書いたものが
+                            //   欠けているおそれがあり、印を下ろすと閉じるときに何も訊かれず編集が消える。
+                            if (!outcome.warnings().contains(Warning.NOT_DURABLE)) {
+                                markSaved(saving, sources, pages);
+                            }
                             // ★ 警告より先に寄せ直しを始める。messages.warnings はモーダルで、
                             //   出ている間は入れ子のイベントループに入る——後ろに置くと、
                             //   利用者が閉じるまで寄せ直しが始まらない。
