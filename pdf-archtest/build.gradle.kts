@@ -12,3 +12,36 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
+
+// AgentRulesTest は .claude/rules/ と、それを指す参照と、glob が当たるファイルを読む（#168）。
+// どれもクラスパスの外なので、入力に宣言しないとルールだけを直したときに UP-TO-DATE で飛ばされる。
+// 入力は追跡しうるファイル全体になるので、ArchUnit を巻き込まないよう別のタスクに分けた。
+val agentRulesTest by tasks.registering(Test::class) {
+    description = "Checks .claude/rules/ frontmatter and references to rule sections."
+    group = "verification"
+    testClassesDirs =
+        sourceSets.test
+            .get()
+            .output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching("*.AgentRulesTest") }
+    inputs
+        .files(
+            rootProject.fileTree(rootDir) {
+                // AgentRulesTest は git ls-files しか見ない。ここは追跡しないものの代表だけを外す。
+                exclude("**/build/**", "**/bin/**", "**/.gradle/**", ".git/**", ".claude/worktrees/**", "tmp/**", "dist/**")
+            },
+        ).withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("repositoryFiles")
+    // 見ているのは git ls-files なので、add / rm --cached だけの変更でも走り直させる。
+    inputs.files(rootProject.file(".git/index")).withPropertyName("gitIndex")
+}
+
+tasks.test {
+    filter { excludeTestsMatching("*.AgentRulesTest") }
+}
+
+tasks.check {
+    dependsOn(agentRulesTest)
+}

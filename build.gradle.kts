@@ -80,6 +80,7 @@ spotless {
         target(
             "*.md",
             "docs/**/*.md",
+            ".claude/rules/*.md",
             ".github/**/*.yml",
             "gradle/libs.versions.toml",
             ".gitignore",

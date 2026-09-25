@@ -58,7 +58,7 @@ Desktop.ini
 /tmp/
 
 # --- エージェントの設定 ---
-# ★ .claude/ を丸ごと無視しない。settings.json と hooks は commit する側であり、
+# ★ .claude/ を丸ごと無視しない。settings.json と hooks と rules/ は commit する側であり、
 #   丸ごと無視すると、それらを足したときに黙って効かなくなる。
 # 手元の permissions が入るこれだけを外す。
 .claude/settings.local.json
