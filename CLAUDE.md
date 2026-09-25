@@ -161,7 +161,7 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
 **読む契機はあちらの冒頭にある。**
 ★ **同 §1 を緩める判断は、このリポジトリではしていない。**
 
-同 §6「各リポジトリが決めておく値」の、pdfjig の値は以下。
+同 §6「各リポジトリが決めておく値」が挙げるものについて、pdfjig の値は以下。
 **あちらには書かない**（org §0）。
 
 | 決めるもの | pdfjig の値 |
@@ -170,18 +170,18 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
 | ブランチの接頭辞 | `feature/` `fix/` `chore/` `ci/` `docs/` `build/` `test/` |
 | ブランチ名に issue 番号を入れるか | **入れない。** 何のブランチかは名前で読めるほうがよい |
 | コミット subject の言語と型 | 日本語。Conventional Commits の型を前に置く（`feat:` `fix:` `docs:` `build(deps):` `test(archtest):`） |
-| トレーラー | `Co-Authored-By: <モデル名> <noreply@anthropic.com>`（大小はこの形）。**コミットと、エージェントが書いた issue の本文・コメントの末尾に置く。** 併用しているエージェントは Claude Code だけ（**2026-09-25 実測**。履歴にあるのは Claude と dependabot）。**モデル名はハーネスが示す文字列をそのまま使い、替わった日から新しい名前にする。** ★ **本文を別のエージェントが編集したら、元のトレーラーを消さずに編集した側を 1 行足す** |
+| トレーラ | `Co-Authored-By: <モデル名> <noreply@anthropic.com>`（大小はこの形）。**コミットと、エージェントが書いた issue の本文・コメントの末尾に置く。** PR 本文は末尾の `🤖 Generated with [Claude Code](…)` の行で表し、トレーラを置かない（**同じ grep では拾えない**）。**モデル名はハーネスが示す文字列をそのまま使う。** ★ **本文を別のエージェントが編集したら、元のトレーラを消さずに編集した側を 1 行足す。** 履歴のトレーラに出るエージェントは Claude と dependabot だけである（**2026-09-25 実測**）。★ **ただしトレーラでは併用の有無を確かめられない**（org §4 の #140）。**別のエージェントを入れた日にこの行を引き直す** |
 | merge 方式 | `--no-ff`。マージ済みのブランチは残さない（同上） |
 | ラベル集合 | 下の「ラベル」 |
-| マイルストーン運用 | **する。単位はリリース版、題は `vX.Y.Z`（タグと同じ綴り）。patch 版も作る**（`v0.1.1` / `v0.1.2`）。下の「マイルストーン」 |
-| `permissions` | **`.claude/settings.json` には 1 つも置かない**（2026-09-25 実測）。置いてあるのは hook 2 本だけ。**`allow` は各自の `settings.local.json` にあり、棚卸しは org「エージェントの設定」の「いつ見直すか」①〜③ で** |
-| permission mode | **リポジトリでは指定しない**（`defaultMode` を置かない。作業者が選ぶ）。★ **どのモードで何が止まるかは確かめていない**——止まると当てにしてよいのは hook 2 本だけ |
+| マイルストーン運用 | **する。** 単位・題の形・patch 版は下の「マイルストーン」 |
+| `permissions` | **`.claude/settings.json` には 1 つも置かない**（**2026-09-25 実測**。置いてあるのは hook だけ）。**`allow` は各自の `settings.local.json` に置く。** ★ **VS Code の承認カードは `settings.json` へも書ける**（org 同節）ので、**許可した後は `git status` を見る**。棚卸しは org「エージェントの設定をどこへ書くか」の「いつ見直すか」①〜③ で |
+| permission mode | **リポジトリでは指定しない**（`defaultMode` を置かない。作業者が選ぶ）。★ **どのモードで何が止まるかは確かめていない** |
 | 本文の書式の見本にする issue 番号 | **#26** |
 | そのリポジトリ固有の関門 | 分類 P（利用者の手元で動くものを配る）。上の「セキュリティ」 |
 
 ### マイルストーン
 
-**単位はリリース版**（`v0.1.0` / `v0.2.0` …）。`SPEC.md` §8 の M0〜M3 は**仕様側の期**であり、
+**単位はリリース版で、題はタグと同じ `vX.Y.Z`**（`v0.1.0` / `v0.2.0` …）。**patch 版も作る**（`v0.1.1` / `v0.1.2`）。`SPEC.md` §8 の M0〜M3 は**仕様側の期**であり、
 **1 つの期が複数のリリースに分かれる。** 対応はマイルストーンの description に書く。
 
 - **issue には必ずマイルストーンを付ける。** 時期が決まっていないものだけ付けない
@@ -252,7 +252,7 @@ org の `writing-baseline.md` が正である。**中身をここへ写さない
 gh api repos/propagandist/.github/contents/docs/writing-baseline.md --jq .content | base64 -d
 ```
 
-同 §9「各リポジトリが決めておく値」の、pdfjig の値は以下。
+同 §9「各リポジトリが決めておく値」が挙げるものについて、pdfjig の値は以下。
 **あちらには書かない**（org §0）。
 
 | 決めるもの | pdfjig の値 |
