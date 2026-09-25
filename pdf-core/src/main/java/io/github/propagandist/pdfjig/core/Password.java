@@ -6,7 +6,7 @@ import java.util.Objects;
 /**
  * パスワードの持ち主。
  *
- * <p><b>作った場所で try-with-resources に載せる</b>（CLAUDE.md「リソース管理」）。
+ * <p><b>作った場所で try-with-resources に載せる</b>（.claude/rules/modules-and-invariants.md「リソース管理」）。
  * ゼロ埋めは {@link #close()} が行うので、<b>片づけの文を書き忘れる場所が構文として無い。</b>
  *
  * <p><b>★★ 受け取った側は消さない。</b>{@code PdfDocument#open} も

@@ -10,7 +10,7 @@ import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
  *
  * <p><b>★★ 掛ける側が 2 つある</b>——{@code Encryption#protect}（既にある文書へ後から）と
  * {@code PageOperations#assemble}（組み立てながら。#199）。<b>方針の組み立てを写すと、
- * 片方だけ直した設定で書けるようになる</b>（{@code CLAUDE.md}「重複・二重実装」）。
+ * 片方だけ直した設定で書けるようになる</b>（{@code CLAUDE.md}「配る差分の門」1）。
  *
  * <p><b>★★ INV-5 の境界がここにある。</b>PDFBox の {@link StandardProtectionPolicy} は
  * {@code String} しか受け付けないので、<b>ここで一度だけ {@code String} が生成される</b>
