@@ -532,8 +532,8 @@ public final class MainWindow {
      * <b>注意書きで残さず、ここで解く。</b>
      */
     private static ErrorCode errorCodeOf(Throwable failure) {
-        if (failure instanceof ReplacedFileKeptException kept) {
-            return errorCodeOf(kept.getCause());
+        if (failure instanceof ReplacedFileKeptException || failure instanceof PlaintextLeftException) {
+            return errorCodeOf(failure.getCause());
         }
         return failure instanceof PdfjigException pdfjig ? pdfjig.errorCode() : null;
     }

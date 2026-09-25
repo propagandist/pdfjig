@@ -365,19 +365,20 @@ class OutputWorkspaceTest {
     void putsTheKeptPlaceOnTheFailureOnlyWhenTheCopyIsThere(@TempDir Path directory) throws IOException {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             PdfjigException failed = new PdfjigException(ErrorCode.IO_FAILURE);
-            assertTrue(workspace.failing(failed).isEmpty(), "何も退避していないのに控えの在り処を載せている");
+            assertTrue(workspace.failing(failed, null).isEmpty(), "何も退避していないのに控えの在り処を載せている");
 
             workspace.holdOriginal();
-            assertTrue(workspace.failing(failed).isEmpty(), "印だけを見て在り処を載せている。控えが無いのに「ここに残っている」と言うことになる（#124）");
+            assertTrue(workspace.failing(failed, null).isEmpty(), "印だけを見て在り処を載せている。控えが無いのに「ここに残っている」と言うことになる（#124）");
 
             Files.writeString(workspace.replaced(), "元のファイル");
             ReplacedFileKeptException kept = assertInstanceOf(
-                    ReplacedFileKeptException.class, workspace.failing(failed).orElseThrow());
+                    ReplacedFileKeptException.class,
+                    workspace.failing(failed, null).orElseThrow());
             assertEquals(workspace.replaced(), kept.kept(), "控えの在り処が退避先と違う");
             assertSame(failed, kept.getCause(), "何が起きたのかを落としている");
 
             workspace.releaseOriginal();
-            assertTrue(workspace.failing(failed).isEmpty(), "元の場所へ返したのに、控えの在り処を載せている");
+            assertTrue(workspace.failing(failed, null).isEmpty(), "元の場所へ返したのに、控えの在り処を載せている");
         }
     }
 
@@ -399,8 +400,9 @@ class OutputWorkspaceTest {
             workspace.holdOriginal();
             Files.writeString(workspace.replaced(), "元のファイル");
 
-            RuntimeException reported =
-                    workspace.failing(new PdfjigException(ErrorCode.IO_FAILURE)).orElseThrow();
+            RuntimeException reported = workspace
+                    .failing(new PdfjigException(ErrorCode.IO_FAILURE), null)
+                    .orElseThrow();
 
             assertEquals(
                     "元の実体を作業場所に残したまま失敗した",
@@ -424,7 +426,7 @@ class OutputWorkspaceTest {
             Files.writeString(workspace.replaced(), "元のファイル");
             OutOfMemoryError failed = new OutOfMemoryError();
 
-            RuntimeException reported = workspace.failing(failed).orElseThrow();
+            RuntimeException reported = workspace.failing(failed, null).orElseThrow();
 
             assertSame(failed, reported.getCause(), "Error を受け取れていない。控えが残るのに何も言わない道ができる");
         }
@@ -562,6 +564,28 @@ class OutputWorkspaceTest {
     private static List<String> namesIn(Path directory) throws IOException {
         try (Stream<Path> entries = Files.list(directory)) {
             return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+        }
+    }
+
+    /**
+     * 元を抱えていない失敗でも、消し損ねた平文は伝える（#184 の門）。
+     *
+     * <p><b>元の控えがある回だけに載せると、巻き戻せた回や退避の前の失敗で、平文は黙って残る。</b>
+     */
+    @Test
+    @DisplayName("元を抱えていなくても、消し損ねた平文は伝える")
+    void reportsLeftoverPlaintextEvenWithoutAHeldOriginal(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            Path plaintext = workspace.file();
+            RuntimeException reported = workspace
+                    .failing(new PdfjigException(ErrorCode.IO_FAILURE), plaintext)
+                    .orElseThrow();
+
+            PlaintextLeftException left = assertInstanceOf(PlaintextLeftException.class, reported);
+            assertEquals(plaintext, left.plaintext());
+            assertTrue(workspace
+                    .failing(new PdfjigException(ErrorCode.IO_FAILURE), null)
+                    .isEmpty());
         }
     }
 }

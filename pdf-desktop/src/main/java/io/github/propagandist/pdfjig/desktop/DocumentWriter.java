@@ -120,7 +120,8 @@ final class DocumentWriter {
                 //    受けても握り潰さない。包まないときはそのまま投げ直す。
                 // ★★ 鍵の要る入力を復号した中身が、鍵なしで開ける形で書けていたら消す（#184）。
                 //   消し損ねたら在り処を伝える——黙ると、平文は書かれていないと信じさせる。
-                Path plaintext = decryptsIntoAnOpenFile(sources, protection) ? workspace.dropWrittenOutput() : null;
+                Path plaintext =
+                        decryptsIntoAnOpenFile(sources, pages, protection) ? workspace.dropWrittenOutput() : null;
                 Optional<RuntimeException> kept = workspace.failing(failed, plaintext);
                 if (kept.isPresent()) {
                     throw kept.get();
@@ -134,12 +135,20 @@ final class DocumentWriter {
     /**
      * 出力が、鍵の要る入力を復号した中身で、しかも開くのに鍵が要らないか（#184）。
      *
+     * <p><b>★ 見るのは、書いたページの出どころだけである</b>（#184 の門）。画面は開いている出どころの
+     * 鍵を全部渡すので、<b>鍵の要る PDF を足してそのページを全部消した文書</b>でも鍵が来る——
+     * 渡された鍵で決めると、<b>残すべきふつうの出力を消す。</b>画面が問う側の
+     * {@code DocumentSession#keyedContributors} と同じ見方である。
+     *
      * <p><b>★ 分かれ目は「保護を掛けたか」ではなく「開くのに鍵が要るか」である</b>
      * （{@link Protection#userPasswordRequired}。{@code MainWindow#save} と同じ）。
      * オーナーパスワードだけを掛けた出力は、誰でも開ける。
      */
-    private static boolean decryptsIntoAnOpenFile(Sources sources, Protection protection) {
-        boolean keyed = sources.all().stream().anyMatch(source -> source.password() != null);
+    private static boolean decryptsIntoAnOpenFile(Sources sources, List<PageSelection> pages, Protection protection) {
+        boolean keyed = pages.stream()
+                .mapToInt(PageSelection::sourceIndex)
+                .distinct()
+                .anyMatch(index -> sources.get(index).password() != null);
         return keyed && (protection == null || !protection.userPasswordRequired());
     }
 

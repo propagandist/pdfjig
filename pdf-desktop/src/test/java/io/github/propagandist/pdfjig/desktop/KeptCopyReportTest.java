@@ -124,6 +124,38 @@ class KeptCopyReportTest {
     }
 
     /**
+     * 鍵の要る出どころを持っていても、書いたページがそこから来ていなければ、出力は残す（#184 の門）。
+     *
+     * <p><b>画面は開いている出どころの鍵を全部渡す。</b>鍵の要る PDF を足してそのページを全部消した文書でも
+     * 鍵が来るので、渡された鍵で決めると、<b>編集を反映した中身がそこにしか無いふつうの出力を消す。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("鍵の要る出どころから 1 ページも書いていなければ、出力は残す")
+    void keepsTheOutputWhenNoPageComesFromAKeyedSource(@TempDir Path directory) throws IOException {
+        Path output = directory.resolve("out.pdf");
+        TestPdfs.plain(output, 3);
+        Path plain = TestPdfs.plain(directory.resolve("plain.pdf"), 2);
+        Path locked = TestPdfs.encrypted(directory.resolve("locked.pdf"), "key", 2);
+
+        AclEntry denial = denyAddingFilesTo(directory);
+        try (Password key = Password.copyOf("key")) {
+            ReplacedFileKeptException kept = assertThrows(
+                    ReplacedFileKeptException.class,
+                    () -> DocumentWriter.assemble(
+                            Sources.of(Source.of(plain), Source.of(locked, key)),
+                            List.of(PageSelection.of(0, 1)),
+                            output,
+                            null,
+                            found -> {}));
+
+            assertTrue(Files.exists(OutputWorkspace.writtenBeside(kept.kept())), "平文の復号物ではない出力まで消している");
+        } finally {
+            allowAgain(directory, denial);
+        }
+    }
+
+    /**
      * 作業場所を作れずに投げても、前の書き出しが残した控えは知らせる（#138）。
      *
      * <p><b>★★ 作れずに投げる回こそ、利用者がやり直している回である。</b>

@@ -210,25 +210,21 @@ final class OutputWorkspace implements AutoCloseable {
      * 「書き出しの失敗」にしてしまうと、<b>書けているのに失敗として出る</b>——
      * 呼ぶ側はそこで寄せ直しを飛ばし、次の保存で同じ変換が二重に掛かる（#118）。
      *
-     * @param failed 起きた失敗
-     * @return 控えを抱えたままなら在り処を載せた例外。そうでなければ空
-     */
-    Optional<RuntimeException> failing(Throwable failed) {
-        return failing(failed, null);
-    }
-
-    /**
-     * {@link #failing(Throwable)} に、消し損ねた平文の在り処を添える（#184。{@link #dropWrittenOutput}）。
+     * <p><b>★★ 消し損ねた平文も、ここで在り処を載せる</b>（#184。{@link #dropWrittenOutput}）。
+     * <b>元を抱えていない失敗でも言う</b>（{@link PlaintextLeftException}）——元の控えがある回だけに
+     * 載せると、巻き戻せた回や退避の前の失敗で、平文は黙って残る。
+     * <b>平文を伝えない版は置かない</b>（{@link #nextTo} と同じ理由）。
      *
      * @param failed    起きた失敗
      * @param plaintext 消し損ねた、復号した中身のファイル。残っていなければ {@code null}
-     * @return 控えを抱えたままなら在り処を載せた例外。そうでなければ空
+     * @return 控えを抱えたままか、平文を残したなら在り処を載せた例外。そうでなければ空
      */
     Optional<RuntimeException> failing(Throwable failed, Path plaintext) {
         Path copy = replaced();
-        return holdsTheOnlyCopy(workspace) && Files.exists(copy)
-                ? Optional.of(new ReplacedFileKeptException(copy, plaintext, failed))
-                : Optional.empty();
+        if (holdsTheOnlyCopy(workspace) && Files.exists(copy)) {
+            return Optional.of(new ReplacedFileKeptException(copy, plaintext, failed));
+        }
+        return plaintext == null ? Optional.empty() : Optional.of(new PlaintextLeftException(plaintext, failed));
     }
 
     /**
