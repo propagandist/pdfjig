@@ -171,7 +171,7 @@ class ArchitectureTest {
                 .should()
                 .dependOnClassesThat()
                 .resideInAnyPackage(PDFBOX + "..")
-                .because("PDFBox への依存は pdf-core に閉じる（CLAUDE.md リソース管理）")
+                .because("PDFBox への依存は pdf-core に閉じる（.claude/rules/modules-and-invariants.md リソース管理）")
                 .check(classes);
     }
 
@@ -205,7 +205,7 @@ class ArchitectureTest {
                     .should()
                     .dependOnClassesThat()
                     .resideInAnyPackage("org.apache.poi..")
-                    .because("POI への依存は pdf-core に閉じる（CLAUDE.md リソース管理）")
+                    .because("POI への依存は pdf-core に閉じる（.claude/rules/modules-and-invariants.md リソース管理）")
                     .check(classes);
         }
     }
@@ -269,7 +269,7 @@ class ArchitectureTest {
                         .and(not(nameMatching("java\\.net\\.(URI|URISyntaxException|URLEncoder|URLDecoder)"))))
                 .because("pdf-core は確定的処理のみを行う。"
                         + "外へ出る経路は pdf-desktop の UpdateCheck にあり、pdf-ai にも入る。"
-                        + "その都合がこちらへ滲むのを止める（CLAUDE.md「モジュール別の責務」）")
+                        + "その都合がこちらへ滲むのを止める（.claude/rules/modules-and-invariants.md「モジュール別の責務」）")
                 .check(classes);
     }
 
