@@ -171,7 +171,7 @@ class ArchitectureTest {
                 .should()
                 .dependOnClassesThat()
                 .resideInAnyPackage(PDFBOX + "..")
-                .because("PDFBox への依存は pdf-core に閉じる（.claude/rules/modules-and-invariants.md リソース管理）")
+                .because("PDFBox への依存は pdf-core に閉じる（.claude/rules/modules-and-invariants.md「モジュール別の責務」）")
                 .check(classes);
     }
 
@@ -205,7 +205,7 @@ class ArchitectureTest {
                     .should()
                     .dependOnClassesThat()
                     .resideInAnyPackage("org.apache.poi..")
-                    .because("POI への依存は pdf-core に閉じる（.claude/rules/modules-and-invariants.md リソース管理）")
+                    .because("POI への依存は pdf-core に閉じる（.claude/rules/modules-and-invariants.md「モジュール別の責務」）")
                     .check(classes);
         }
     }
@@ -238,7 +238,7 @@ class ArchitectureTest {
      *
      * <p><b>★ 縛るのは pdf-core だけである。</b> pdf-ai は通信するのが仕事であり
      * （{@code AnthropicProvider}）、pdf-cli はそれを呼ぶ。
-     * {@code CLAUDE.md} が「一切行わない」と書いているのは pdf-core だけなので、
+     * {@code .claude/rules/modules-and-invariants.md}「モジュール別の責務」が「一切行わない」と書いているのは pdf-core だけなので、
      * <b>規約が言っている以上のことを機械に守らせない。</b>
      *
      * <p><b>★ 訂正（#72、2026-08-30）——外への通信が初めて入るのは pdf-ai ではなかった。</b>
