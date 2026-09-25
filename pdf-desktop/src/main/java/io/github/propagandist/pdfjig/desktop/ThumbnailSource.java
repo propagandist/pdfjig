@@ -99,7 +99,7 @@ public final class ThumbnailSource implements AutoCloseable {
      *
      * <p>テストが描画を止めたまま、外す操作との待ち合わせを確かめるために使う。
      * 実際の描画の速さで当てにいくと、落ちるかどうかが機械の速さで決まる
-     * （CLAUDE.md「不安定なテストの扱い」）。
+     * （.claude/rules/ui-tests.md「不安定なテストの扱い」）。
      *
      * @param edgePixels サムネイルの長辺の画素数
      * @param rendering  ページを描く実装

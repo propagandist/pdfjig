@@ -1,4 +1,4 @@
-# 整形の判断は Spotless が正である（CLAUDE.md「整形」）。このファイルの役目は 2 つ。
+# 整形の判断は Spotless が正である（.claude/rules/build-and-format.md「整形」）。このファイルの役目は 2 つ。
 #
 # 1. IDE の整形を palantir / ktlint に寄せ、spotlessApply のたびに書き戻される往復を減らす
 # 2. ★ ktlint はこのファイルを読む（editorConfigPath の既定がトッププロジェクトの .editorconfig）。

@@ -121,7 +121,7 @@ final class SourceLegend {
      * 表示を作り直す。
      *
      * <p><b>★ 節点ごと作り直す。</b>だから「×」の id を付け替える必要がない——
-     * <b>サムネイルのタイルは行を使い回すので付け替えが要る</b>が（{@code CLAUDE.md}「命名」）、
+     * <b>サムネイルのタイルは行を使い回すので付け替えが要る</b>が（{@code .claude/rules/desktop-ui.md}「画面の id と JavaFX」）、
      * こちらは消えたぶんの節点ごと捨てられる。<b>使い回す形に変えるなら、そこで付け替えること。</b>
      *
      * @param session 表示中の編集セッション。{@code null} なら隠す
@@ -193,7 +193,7 @@ final class SourceLegend {
 
         Button remove = new Button();
         // ★★ この道具で唯一取り消せない操作の入口である（#115）。
-        //   id はテストとの契約（CLAUDE.md「命名」）、accessibleText は支援技術から見える
+        //   id はテストとの契約（.claude/rules/desktop-ui.md「画面の id と JavaFX」）、accessibleText は支援技術から見える
         //   唯一の手がかりである——Windows の UI Automation に setId は届かない。
         //   ★ 位置で区別するのは、ファイルごとに 1 つずつ増えるからである（ThumbnailTile と同じ形）。
         remove.setId("source-remove-" + sourceIndex);

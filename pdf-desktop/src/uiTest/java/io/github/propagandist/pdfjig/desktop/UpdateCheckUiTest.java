@@ -97,7 +97,7 @@ class UpdateCheckUiTest extends DesktopUiTest {
 
         // ★ 1 回目と 2 回目の答えが一致することは求めない。1 回目が一時的に失敗して
         //   2 回目が通れば（逆も）変わるのが正しく、そこで赤くするのは環境の揺れを
-        //   判断の揺れとして扱うことになる（CLAUDE.md「不安定なテストの扱い」）。
+        //   判断の揺れとして扱うことになる（.claude/rules/ui-tests.md「不安定なテストの扱い」）。
         String again = result(robot).getText();
         assertFalse(again.isBlank(), "押し直したのに答えの行が空である");
         assertEquals(1, again.lines().count(), again);
@@ -132,7 +132,7 @@ class UpdateCheckUiTest extends DesktopUiTest {
      * ボタンを最後に戻すからである。</b>逆順だった間、この待ちは「確認しています…」のまま
      * 抜けた（2026-08-30、遮断された Sandbox で実際に落ちた）。
      * <b>待ち時間を延ばして直すたぐいではない</b>——完了の条件が間違っていた
-     * （{@code CLAUDE.md}「不安定なテストの扱い」）。
+     * （{@code .claude/rules/ui-tests.md}「不安定なテストの扱い」）。
      */
     private void waitForAnswer(FxRobot robot) throws Exception {
         waitFor(() -> result(robot).isVisible()

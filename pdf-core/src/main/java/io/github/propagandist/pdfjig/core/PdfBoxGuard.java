@@ -91,7 +91,7 @@ final class PdfBoxGuard {
     /**
      * PDFBox を走らせる仕事。
      *
-     * <p><b>★ ここだけはチェック例外を通す</b>（{@code CLAUDE.md} の「チェック例外は使わない」は
+     * <p><b>★ ここだけはチェック例外を通す</b>（{@code .claude/rules/modules-and-invariants.md} の「チェック例外は使わない」は
      * <b>外へ出る口の話である</b>）。PDFBox は {@code IOException} を投げるので、
      * <b>通さないと呼ぶ側が自分で捕まえることになり、畳む場所がまた散る。</b>
      */

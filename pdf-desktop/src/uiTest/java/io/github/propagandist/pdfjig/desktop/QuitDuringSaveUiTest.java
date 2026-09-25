@@ -119,7 +119,7 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
         held.release();
 
         waitFor(() -> !stage.isShowing());
-        // ★ 画面が閉じたことだけを見ても、ファイルが正しい保証にはならない（CLAUDE.md「画面のテスト」）。
+        // ★ 画面が閉じたことだけを見ても、ファイルが正しい保証にはならない（.claude/rules/ui-tests.md「画面のテスト」）。
         //   守っているのはこの中身である——2 本の改名の途中で終わっていれば、ここが違う。
         assertEquals(List.of("P1", "P2", "P3"), pageTexts(output), "書き終わる前に終了している（#134）");
     }
@@ -184,7 +184,7 @@ class QuitDuringSaveUiTest extends DesktopUiTest {
      * メニューの「終了」を押す。
      *
      * <p><b>★ 文言で掴む。</b>{@code MenuItem} は {@code Node} ではないので id では掴めない
-     * ——<b>文言で掴んでよい唯一の相手である</b>（{@code CLAUDE.md}「画面のテスト」）。
+     * ——<b>文言で掴んでよい唯一の相手である</b>（{@code .claude/rules/ui-tests.md}「画面のテスト」）。
      *
      * <p><b>★★ これが直す前の欠陥をそのまま踏む道である。</b>直す前の「終了」は
      * {@code stage::close} を直に呼んでおり、<b>走っている最中でもその場で閉じる。</b>

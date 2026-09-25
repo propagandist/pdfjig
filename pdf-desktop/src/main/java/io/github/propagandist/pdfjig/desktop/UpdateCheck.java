@@ -73,7 +73,7 @@ final class UpdateCheck {
     /**
      * 確認する。
      *
-     * <p><b>バックグラウンドスレッドから呼ぶこと</b>（{@code CLAUDE.md}「JavaFX」）。
+     * <p><b>バックグラウンドスレッドから呼ぶこと</b>（{@code .claude/rules/desktop-ui.md}「JavaFX」）。
      * 遮断された環境では長く返らない（{@link #TIMEOUT_MS}）。
      *
      * <p><b>例外を投げない。</b>失敗はすべて {@link UpdateStatus.Unavailable} になる。

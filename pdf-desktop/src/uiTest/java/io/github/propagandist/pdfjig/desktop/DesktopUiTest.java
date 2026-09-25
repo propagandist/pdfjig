@@ -53,7 +53,7 @@ abstract class DesktopUiTest {
     /**
      * 非同期の処理を待つ上限。
      *
-     * <p>読み込みも書き出しもバックグラウンドで走る（CLAUDE.md JavaFX 節）。手元では
+     * <p>読み込みも書き出しもバックグラウンドで走る（.claude/rules/desktop-ui.md「JavaFX」）。手元では
      * 1 秒とかからないが、CI のランナーは遅い。短くして落ちやすくする理由がない。
      */
     static final int TIMEOUT_SECONDS = 20;

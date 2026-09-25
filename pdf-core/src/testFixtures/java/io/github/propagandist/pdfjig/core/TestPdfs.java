@@ -49,7 +49,7 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
  *
  * <p>PDFBox は {@code testFixturesImplementation} で取ってある。ここが返すのは
  * {@link Path} だけであり、{@code PDDocument} が下流モジュールへ漏れることはない
- * （CLAUDE.md「PDFBox の型を他モジュールに漏らさない」）。
+ * （.claude/rules/modules-and-invariants.md「リソース管理」）。
  */
 public final class TestPdfs {
 
