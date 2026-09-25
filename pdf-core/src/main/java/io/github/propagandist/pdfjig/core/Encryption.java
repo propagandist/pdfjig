@@ -12,6 +12,9 @@ import java.nio.file.Path;
  *
  * <p><b>既存の出力は拒む</b>（{@link ErrorCode#OUTPUT_ALREADY_EXISTS}）。
  * {@code pdf-core} 全体の契約である（{@code docs/SPEC.md} §4.2）。
+ *
+ * <p><b>書き出したものは、戻る時点でディスクへ届いている</b>（#219）。これも {@code pdf-core} 全体の
+ * 契約である（{@link PageOperations} と同じ。{@code docs/SPEC.md} §4.2）。
  */
 public interface Encryption {
 
