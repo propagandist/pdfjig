@@ -365,6 +365,26 @@ abstract class DesktopUiTest {
                 : Stream.of(item);
     }
 
+    /**
+     * ダイアログのボタンが出てくるなら掴む。
+     *
+     * <p><b>★★ 「出ない」を 1 回の lookup で決めない。</b>{@code Alert#showAndWait} は
+     * 新しい窓を立てるので、<b>クリックの直後に見ると間に合わないことがある</b>——
+     * そこで空を返すと、<b>門が漏れているのに緑になる</b>（{@link #GRACE_SECONDS}）。
+     */
+    static Optional<Node> dialogButton(FxRobot robot, String id) {
+        try {
+            WaitForAsyncUtils.waitFor(
+                    GRACE_SECONDS,
+                    TimeUnit.SECONDS,
+                    () -> robot.lookup(id).tryQuery().isPresent());
+        } catch (Exception neverShown) {
+            return Optional.empty();
+        }
+        WaitForAsyncUtils.waitForFxEvents();
+        return robot.lookup(id).tryQuery();
+    }
+
     static String statusText(FxRobot robot) {
         return robot.lookup("#status-label").queryAs(Label.class).getText();
     }
