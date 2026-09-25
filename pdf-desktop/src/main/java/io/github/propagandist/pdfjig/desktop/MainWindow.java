@@ -58,7 +58,7 @@ import javafx.stage.WindowEvent;
  *   <li>{@link Messages} — 利用者に伝えること
  * </ul>
  *
- * <p><b>ファイル I/O を伴う操作はすべて非同期で行う</b>（.claude/rules/desktop-ui.md JavaFX 節）。
+ * <p><b>ファイル I/O を伴う操作はすべて非同期で行う</b>（.claude/rules/desktop-ui.md「JavaFX」）。
  * 画面を止めないためであり、100 ページの文書でも開いた瞬間に固まらない。
  *
  * <p>並べ替えと削除はページ並びの上でだけ起き、ファイルには触れない。

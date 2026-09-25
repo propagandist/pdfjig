@@ -17,7 +17,7 @@ import javafx.stage.Stage;
  *
  * <p>スレッド規約: {@code PDFRenderer} の呼び出しは必ずバックグラウンドスレッド
  * （{@code Task} / {@code Service}）で行う。JavaFX Application Thread では
- * レンダリング済みの {@code Image} の差し込みのみを行う（.claude/rules/desktop-ui.md JavaFX 節）。
+ * レンダリング済みの {@code Image} の差し込みのみを行う（.claude/rules/desktop-ui.md「JavaFX」）。
  *
  * <p><b>利用者の PC に置くものの読み書きは、すべてここが持つ。</b>設定も {@link Logs} も、
  * 起こすのはこのクラスだけである——画面がファイルの置き場を知ると #57 が重くなり、
