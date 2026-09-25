@@ -794,7 +794,12 @@ public final class MainWindow {
                         if (session != saving) {
                             // 開いている間に別の文書を開かれた／窓が閉じられた。
                             // ここで入れ替えると、そちらを黙って捨てることになる。
-                            opened.close();
+                            // ★ 閉じる失敗は closeSession と同じく飲んで記録する（#148 の門）。
+                            try {
+                                opened.close();
+                            } catch (RuntimeException e) {
+                                Logs.warn(LogEvent.DOCUMENT_NOT_CLOSED, e);
+                            }
                             return;
                         }
                         adopt(opened);
@@ -1266,8 +1271,16 @@ public final class MainWindow {
         thumbnails.clear();
 
         // 描画スレッドの停止を待つ。1 枚分の描画が終わるまでなので、ここでの待ちは短い。
-        session.close();
+        // ★★ 手放してから閉じ、閉じる失敗は飲んで記録する（#148 の門）。投げると、別の文書を開く途中なら
+        //   開いたばかりの文書を受け取らずに漏らし、閉じた古い文書を握ったまま編集を続けさせる。
+        //   閉じ損ねた手は残りうるが、利用者にできることは無い（DocumentSession#close が 1 つ残らず試みている）。
+        DocumentSession closing = session;
         session = null;
+        try {
+            closing.close();
+        } catch (RuntimeException e) {
+            Logs.warn(LogEvent.DOCUMENT_NOT_CLOSED, e);
+        }
 
         documentOpen.set(false);
         updateTitle();

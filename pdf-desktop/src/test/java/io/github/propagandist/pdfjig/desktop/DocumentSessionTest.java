@@ -1,10 +1,14 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
+import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.TestPdfs;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -77,5 +81,26 @@ class DocumentSessionTest {
                     List.of("locked.pdf"),
                     session.keyedContributors(List.of(PageSelection.of(0, 1), PageSelection.of(0, 2))));
         }
+    }
+
+    /**
+     * 0 ページの文書を足しても、何も変わらない（#148）。
+     *
+     * <p><b>登録してから並びへ足すと、一覧には入っているのに並びには無いまま残り、文書も閉じられない。</b>
+     * {@code SECURITY.md}「対象範囲」の「手元で開く細工 PDF」で作れる。
+     */
+    @Test
+    void addingAnEmptyDocumentChangesNothing(@TempDir Path dir) throws Exception {
+        Path empty = TestPdfs.plain(dir.resolve("empty.pdf"), 0);
+        try (DocumentSession session = DocumentSession.open(TestPdfs.plain(dir.resolve("a.pdf"), 2))) {
+            PdfjigException refused = assertThrows(PdfjigException.class, () -> session.add(empty));
+
+            assertEquals(ErrorCode.EMPTY_DOCUMENT, refused.errorCode());
+            assertEquals(1, session.sourceCount(), "並びに無いファイルが一覧に残っている");
+            assertEquals(2, session.order().size());
+            assertEquals(2, session.sourcePageCount(), "足さなかった文書を抱えている");
+        }
+        // 弾いた文書を閉じていれば消せる。Windows では開いたままなら手が握られていて消せない。
+        Files.delete(empty);
     }
 }

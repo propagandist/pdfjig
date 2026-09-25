@@ -70,14 +70,17 @@ public final class DocumentSession implements AutoCloseable {
     /**
      * 文書を足す。ページは並びの末尾に付く。
      *
+     * <p><b>失敗するときは、何も変わっていない</b>（#148）。
+     *
      * @param path 足すファイル
+     * @throws PdfjigException ページが 1 枚も無いファイルは {@link io.github.propagandist.pdfjig.core.ErrorCode#EMPTY_DOCUMENT}
      */
     public void add(Path path) {
         adopt(path, PdfDocument.open(path));
     }
 
     /**
-     * パスワード付きの文書を足す。
+     * パスワード付きの文書を足す。失敗するときの約束は {@link #add(Path)} と同じである。
      *
      * @param path     足すファイル
      * @param password パスワード。ここでは消さない（{@link PdfDocument#open(Path, Password)}）
@@ -111,7 +114,14 @@ public final class DocumentSession implements AutoCloseable {
         // 描画が文書を触っている間に閉じると壊れる。removeSource も走っている描画を待つので、
         // この順で閉じてよい（ThumbnailSource の契約）。上で待っているため、ここでは待たされない。
         thumbnails.removeSource(sourceIndex);
-        removed.close();
+        // ★★ 閉じる失敗は飲んで記録する（#148）。ここまでで外すことは済んでいる——投げると、
+        //   一覧からは消えているのに「ファイルの読み書きに失敗しました」が出る（優先順位 2）。
+        //   どのみち捨てる文書であり、利用者にできることは無い。
+        try {
+            removed.close();
+        } catch (PdfjigException e) {
+            Logs.warn(LogEvent.DOCUMENT_NOT_CLOSED, e);
+        }
     }
 
     /** 最初に開いたファイル。表題と保存名の既定に使う。 */
@@ -243,9 +253,32 @@ public final class DocumentSession implements AutoCloseable {
     @Override
     public void close() {
         // 描画が文書を触っている間に閉じると壊れる。必ずこの順で閉じる。
-        thumbnails.close();
+        // ★★ ただし描画の後始末が投げても、文書は閉じる（#148）。閉じ損ねると、Windows では
+        //   開いた PDF の手が握られたまま残り、利用者は同じファイルを消せない・別のアプリで開けない。
+        //   ★ そのとき描画がまだ文書を触っていれば、その 1 枚の描画が失敗する。手を握り続けるより害が小さい。
+        //   ★ 両方が投げたら、両方を残す（先に起きたほうを投げ、後を添える）。
+        RuntimeException failure = null;
+        try {
+            thumbnails.close();
+        } catch (RuntimeException e) {
+            failure = e;
+        }
+        try {
+            closeDocuments();
+        } catch (RuntimeException e) {
+            if (failure == null) {
+                failure = e;
+            } else {
+                failure.addSuppressed(e);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
 
-        // 1 つ閉じ損ねても残りは閉じる。開いたままの文書を残すほうが害が大きい。
+    /** 1 つ閉じ損ねても残りは閉じる。開いたままの文書を残すほうが害が大きい。 */
+    private void closeDocuments() {
         PdfjigException failure = null;
         for (PdfDocument document : documents) {
             try {
@@ -263,16 +296,28 @@ public final class DocumentSession implements AutoCloseable {
         }
     }
 
-    /** 開いた文書を受け持ち、そのページを並びの末尾に足す。 */
+    /**
+     * 開いた文書を受け持ち、そのページを並びの末尾に足す。
+     *
+     * <p><b>★★ 入れる前に検める</b>（#148）。0 ページの文書を登録してから並びへ足すと、
+     * {@link PageOrder#append} が投げたときに<b>一覧・文書・サムネイルには入っているのに
+     * 並びには 1 件も無い</b>まま残り、文書も閉じられない。検めてから入れれば、戻すものが無い
+     * ——{@link #remove} が「何かを変える前に待つ」のと同じ手である。
+     * <b>最初に開く経路（{@link #wrap}）は同じ入力を弾いて閉じている。</b>足す側だけが非対称だった。
+     */
     private void adopt(Path path, PdfDocument document) {
         int sourceIndex;
+        int pageCount;
         try {
+            // ★ 1 度だけ読む。2 度目を try の外で読むと、そこが投げたときに登録だけが残る（#148 の門）。
+            pageCount = document.pageCount();
+            PageOrder.requirePages(pageCount);
             sourceIndex = register(path, document);
         } catch (RuntimeException e) {
-            document.close();
+            closeAfter(document, e);
             throw e;
         }
-        order.append(sourceIndex, document.pageCount());
+        order.append(sourceIndex, pageCount);
     }
 
     private int register(Path path, PdfDocument document) {
@@ -286,8 +331,20 @@ public final class DocumentSession implements AutoCloseable {
         try {
             return new DocumentSession(path, document);
         } catch (RuntimeException e) {
-            document.close();
+            closeAfter(document, e);
             throw e;
+        }
+    }
+
+    /**
+     * 受け入れ損ねた文書を閉じる。<b>閉じる失敗は元の失敗に添えて、上書きしない</b>（#148 の門）
+     * ——上書きすると、空の PDF を足した利用者が「ファイルの読み書きに失敗しました」を見る。
+     */
+    private static void closeAfter(PdfDocument document, RuntimeException failed) {
+        try {
+            document.close();
+        } catch (PdfjigException e) {
+            failed.addSuppressed(e);
         }
     }
 }
