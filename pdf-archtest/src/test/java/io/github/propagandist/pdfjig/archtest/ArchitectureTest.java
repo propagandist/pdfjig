@@ -553,8 +553,12 @@ class ArchitectureTest {
      * <p><b>書き出しを 1 か所に集め、そこを縛る。</b>{@code PDDocument#save} を呼ぶのは
      * {@code DurableSave.write} だけで、しかも {@code save(OutputStream)} であること。
      * 届けさせる呼び出し・チャネルの取り出し・出力を開くことも、そこだけで、開くのは 1 度だけであること。
-     * <b>これで、{@code save(File)} へ戻す形、名前で開き直して届けさせる形（読み取りでも書き込みでも）、
-     * 届けさせない書き出しを別に足す形が、どれも赤になる</b>——どれも壊して確かめた。
+     * <b>{@code save(File)} へ戻す形、名前で開き直して届けさせる形（読み取りでも書き込みでも）、
+     * 暗号化を {@code save(File)} へ戻す形は、どれも赤になる</b>——6 通りに壊して確かめた（2026-09-25）。
+     *
+     * <p><b>★ 見えないものがある。</b>{@code PDDocument#save} を通らない書き方（{@code COSWriter} を直に使う、
+     * {@code PDFMergerUtility} に書き出し先を渡す等）、書く順序（{@code force} が閉じた後か）、
+     * {@code core} の下のパッケージ。<b>書き出しを足すときは {@code DurableSave} を通すこと。</b>
      */
     @Test
     @DisplayName("pdf-core の書き出しは、すべて閉じる前に書いたハンドルでディスクへ届けさせる")
@@ -586,6 +590,14 @@ class ArchitectureTest {
                 .filter(access -> access.getTarget().getName().equals(JavaConstructor.CONSTRUCTOR_NAME))
                 .count();
         assertEquals(1, opened, "出力を開き直している。書いたハンドルで届けさせること（#219）");
+
+        // ★★ 届いたか確かめられなかったとき、画面の保存は置き換えを止める。止める判定を外しても
+        //   単体テスト（DocumentWriterTest）は判定そのものしか見ないので、呼んでいることはここで縛る。
+        boolean refuses = classes.get(DOCUMENT_WRITER).getMethods().stream()
+                .filter(method -> method.getName().equals("assemble"))
+                .flatMap(method -> method.getCallsFromSelf().stream())
+                .anyMatch(call -> call.getTarget().getName().equals("refuseToReplaceUnlessDurable"));
+        assertTrue(refuses, "画面の保存が、届いたか確かめられないまま置き換えうる（#219）");
     }
 
     /**
