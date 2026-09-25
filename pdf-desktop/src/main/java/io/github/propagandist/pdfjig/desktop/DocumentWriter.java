@@ -260,7 +260,8 @@ final class DocumentWriter {
      * <b>呼んでよいのはこのクラスの中だけである</b>——ArchUnit が縛っている
      * （{@code replaceIsCalledOnlyByDocumentWriter}）。
      *
-     * @param from      書けたもの。作業場所の中にある
+     * @param from      書けたもの。作業場所の中にある。<b>ディスクへ届いていること</b>——置き換えた後で控えを消すので、
+     *                  届く前に置き換えると、直後の電源断で新旧どちらも失いうる（#219。{@code PageOperations} の契約）
      * @param to        出力先
      * @param workspace 退避先と、抱えていることの印を持つ（{@link OutputWorkspace#replaced}）
      */
