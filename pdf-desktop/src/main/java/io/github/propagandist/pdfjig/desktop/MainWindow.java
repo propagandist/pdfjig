@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.ai.AiProvider;
 import io.github.propagandist.pdfjig.core.ErrorCode;
+import io.github.propagandist.pdfjig.core.PageRange;
 import io.github.propagandist.pdfjig.core.PageSelection;
 import io.github.propagandist.pdfjig.core.Password;
 import io.github.propagandist.pdfjig.core.PdfjigException;
@@ -473,9 +474,9 @@ public final class MainWindow {
      * <p><b>★★ ここが通ると文書が入れ替わる。</b>窓（確認・入力・ファイル選択）が出ている間も
      * {@code Platform.runLater} は回るので、<b>入れ替わりは窓の内側でも起きる</b>——
      * <b>確認や入力を挟む操作は、挟んだ後に自分で検め直すこと。</b>
-     * <b>いま検め直しているのは {@link #removeSource} だけである</b>——
-     * {@code keepRange} / {@code addDocument} / {@code addWithPassword} / {@code writeSegments} は
-     * まだであり、#133 が持つ。<b>今日の呼び出し元は起動引数だけなので届かない。</b>
+     * <b>掴み方と検め直し方は {@link Held} の 1 か所にある</b>（#133）。窓を挟む操作を足すなら、
+     * 窓の前に {@link #hold()} で掴み、窓の後に {@link #stillHolds(Held)} で検め直す。
+     * <b>今日の呼び出し元は起動引数だけなので届かない</b>——ファイルの関連付けを入れた日に効く。
      *
      * @param path 開くファイル
      */
@@ -589,13 +590,20 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
+        // ★★ 窓は 3 つ挟む（保存先・保護の指定・鍵）。窓ごとに検め直す（#133）。
+        //   入れ替わった後に書くと、入れ替わった先の元のファイルを開いたまま置き換えうる。
+        Held held = hold();
         Optional<Path> chosen = dialogs.savePdf(writingFolder().orElse(null), suggestedFileName());
         if (chosen.isEmpty()) {
             return;
         }
+        if (!stillHolds(held)) {
+            abandonedBecauseSwapped("保存");
+            return;
+        }
 
-        DocumentSession saving = session;
-        List<Path> sources = saving.paths();
+        DocumentSession saving = held.target();
+        List<Path> sources = held.sources();
         List<PageSelection> pages = saving.order().toPageSelections();
         // 区切りと選択位置は書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
         List<Boolean> breaks = saving.order().breaks();
@@ -619,6 +627,11 @@ public final class MainWindow {
         }
         boolean handedOver = false;
         try {
+            // 保護の指定の窓の後。ここで戻れば、打った鍵は finally が閉じる。
+            if (!stillHolds(held)) {
+                abandonedBecauseSwapped("保存");
+                return;
+            }
             // ★★ 保護が落ちるなら、書き出す前に伝えて選ばせる（docs/SPEC.md §4.3.1。#29 / #192）。
             //   ★★ 問わずに済むのは「鍵が要る出力になる」ときだけである（#30 の門の 2 段目）。
             //   「保護を掛けた」で分けると、ユーザーパスワードを空にした回に穴が開く——
@@ -645,6 +658,11 @@ public final class MainWindow {
 
             // ★★ 入力の鍵と、掛ける側の鍵の両方を渡す。どちらも仕事の枠が閉じる。
             owned.addAll(keysOf(inputs.all()));
+            // 確認と鍵の窓の後。ここで戻っても、渡す前なので finally が全部閉じる。
+            if (!stillHolds(held)) {
+                abandonedBecauseSwapped("保存");
+                return;
+            }
 
             // ★★ 前の書き出しが残した控えは、この書き出しの成否に関わらず伝える（#138）。
             //   書き出しのスレッドで積まれ、画面のスレッドで読まれる。
@@ -856,6 +874,44 @@ public final class MainWindow {
         return session == target && target.paths().equals(sources);
     }
 
+    /**
+     * 窓を挟む前に掴んだ文書と出どころ（#133）。窓を閉じた後に {@link #stillHolds(Held)} で検め直す。
+     *
+     * <p><b>★★ 窓は入れ子のイベントループである。</b>確認・入力・ファイル選択のどれが出ている間も
+     * {@code Platform.runLater} は回り、{@link #open} が文書を入れ替えうる。
+     *
+     * <p><b>★ 食い違ったときの扱いは 2 つに分ける。</b>
+     * <b>画面の上の編集</b>（範囲・追加・区切り・外す）は<b>黙って戻る</b>——結果は画面に見えており、
+     * 利用者が見た説明はもう成り立たない。
+     * <b>ファイルへ書く操作</b>（保存・分割）は<b>断って戻る</b>（{@link #abandonedBecauseSwapped}）
+     * ——書いたかどうかは画面に見えず、黙ると押した結果が読めない（優先順位 2）。
+     */
+    private record Held(DocumentSession target, List<Path> sources) {}
+
+    /** いま開いている文書を掴む。開いていなければ呼ばない。 */
+    private Held hold() {
+        return new Held(session, session.paths());
+    }
+
+    private boolean stillHolds(Held held) {
+        return stillHolds(held.target(), held.sources());
+    }
+
+    /**
+     * 窓の最中に文書が入れ替わったので、ファイルへ書く操作をやめたと伝える（#133）。
+     *
+     * <p><b>★ 書いても中身は確認した文書のものである</b>（掴んだ文書から鍵も並びも取る）。
+     * それでも止めるのは、<b>画面が別の文書を映しているのに「保存しました」「分割しました」と出ると、
+     * どちらの文書を書いたのかを取り違えさせる</b>からである。上書き保存では、
+     * <b>入れ替わった先の元のファイルを、開いたまま置き換えうる</b>（優先順位 1）。
+     *
+     * @param action 「保存」「分割」など。文言に入る
+     */
+    private void abandonedBecauseSwapped(String action) {
+        messages.information(
+                action + "しませんでした。" + System.lineSeparator() + "確認の間に、開いている文書が変わりました。もう一度" + action + "してください。");
+    }
+
     private void deleteSelected() {
         int index = thumbnails.selectedIndex();
         if (session == null || index < 0) {
@@ -876,12 +932,30 @@ public final class MainWindow {
         session.order().rotateAt(index, additional);
     }
 
+    /**
+     * 範囲を訊いて、その範囲だけを残す。
+     *
+     * <p><b>★★ 窓を挟んだ後に検め直す</b>（#133）。範囲は<b>訊いたときの枚数で</b>検めてあり、
+     * 窓の最中に文書が入れ替われば、<b>別の文書へ当たるか、枚数を越えて投げる。</b>
+     * 入れ替わっていたら黙って戻る——利用者が見た枚数はもう成り立たない（{@link #removeSource} と同じ）。
+     */
     private void keepRange() {
         if (session == null) {
             return;
         }
-        PageRangePrompt.ask(stage, session.order().size())
-                .ifPresent(range -> session.order().keepOnly(range));
+        Held held = hold();
+        Optional<PageRange> range =
+                PageRangePrompt.ask(stage, held.target().order().size());
+        if (range.isEmpty() || !stillHolds(held)) {
+            return;
+        }
+        try {
+            held.target().order().keepOnly(range.get());
+        } catch (PdfjigException e) {
+            // 検め直した後なので届かないはずだが、届いたときに画面へ何も出ない形にはしない
+            // （配布物には標準エラーが無い。#133）。
+            messages.failure(e);
+        }
     }
 
     /**
@@ -899,14 +973,25 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
+        // ★ ファイル選択も入れ子のイベントループである（#133）。足す先が入れ替わっていたら黙って戻る。
+        Held held = hold();
         Optional<List<Path>> chosen = dialogs.openPdfs(readingFolder().orElse(null));
         if (chosen.isEmpty()) {
             return;
         }
-
-        chosen.get().stream()
+        List<Path> sorted = chosen.get().stream()
                 .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                .forEach(this::addDocument);
+                .toList();
+        for (Path path : sorted) {
+            // ★★ 1 つごとに検め直す。鍵の窓は 1 つごとに出うるので、途中で入れ替わると
+            //   残りが入れ替わった先へ足される（#133 の門）。
+            if (!stillHolds(held)) {
+                return;
+            }
+            addDocument(held.target(), path);
+            // 足した分だけ出どころが伸びる。掴み直すのは同じ文書である——session を読むと入れ替わりを見逃す。
+            held = new Held(held.target(), held.target().paths());
+        }
     }
 
     /**
@@ -915,13 +1000,13 @@ public final class MainWindow {
      * <p>読み込みは短く、足した結果は画面にすぐ出したい。ここは同期で行う。
      * ページの描画は今までどおりサムネイル側が非同期で受け持つ。
      */
-    private void addDocument(Path path) {
+    private void addDocument(DocumentSession target, Path path) {
         folders.rememberReadFile(path);
         try {
-            session.add(path);
+            target.add(path);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.PASSWORD_REQUIRED) {
-                addWithPassword(path, false);
+                addWithPassword(target, path, false);
             } else {
                 messages.failure(e);
             }
@@ -930,19 +1015,23 @@ public final class MainWindow {
     }
 
     /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
-    private void addWithPassword(Path path, boolean retry) {
+    private void addWithPassword(DocumentSession target, Path path, boolean retry) {
+        Held held = new Held(target, target.paths());
         Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
         // ★★ ここは同じスレッドの中で終わるので、持ち主のまま閉じる。中まで届かずに投げることが
-        //   あり（session は null になりうるし、窓を挟んだ後の検め直しを足せば早く戻る経路も
-        //   増える）、そこを通ってもこの close が消す（INV-5。#145）。
+        //   あり、窓を挟んだ後の検め直しで早く戻る経路もある。どれを通ってもこの close が消す（INV-5。#145）。
         try (Password password = entered.get()) {
-            session.add(path, password);
+            if (!stillHolds(held)) {
+                // 鍵の窓の最中に入れ替わった（#133）。足す先が違うので、黙って戻る。
+                return;
+            }
+            target.add(path, password);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
-                addWithPassword(path, true);
+                addWithPassword(target, path, true);
             } else {
                 messages.failure(e);
             }
@@ -1063,11 +1152,17 @@ public final class MainWindow {
         //   その間に文書が入れ替わりうる（#133）。★ 後で控えると、入れ替わった後の
         //   出どころ一覧へ入れ替わる前の出どころ番号を当てることになる——
         //   そこは素の IndexOutOfBoundsException になり、画面に何も出ない（#29 の門の 2 段目）。
-        //   ★ 見張る形にはしていない。#133 が 4 つまとめて持つ。
-        DocumentSession writing = session;
+        //   ★ 控えた文書から書くので、中身が取り違わることは無い。それでも窓ごとに検め直して断る
+        //   （#133。理由は abandonedBecauseSwapped）。先に検めれば、閉じた文書の鍵を打たせずに済む。
+        Held held = hold();
+        DocumentSession writing = held.target();
 
         Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
         if (directory.isEmpty()) {
+            return;
+        }
+        if (!stillHolds(held)) {
+            abandonedBecauseSwapped("分割");
             return;
         }
 
@@ -1075,6 +1170,10 @@ public final class MainWindow {
         //   N 回出すと「読まずに続行を押す」習慣ができる。
         List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
         if (!consentsToDroppingProtection(writing, allPages, ProtectionPrompt.Outcome.PLAIN)) {
+            return;
+        }
+        if (!stillHolds(held)) {
+            abandonedBecauseSwapped("分割");
             return;
         }
         // ★★ 数えるのはかたまりごとである。pdf-core は assembleEach でかたまりの数だけ
@@ -1090,6 +1189,12 @@ public final class MainWindow {
             return;
         }
         Sources sources = keyed.get();
+        if (!stillHolds(held)) {
+            // ★ 鍵は渡しきっていない。持ち主はまだここである（INV-5）。
+            keysOf(sources.all()).forEach(Password::close);
+            abandonedBecauseSwapped("分割");
+            return;
+        }
         Path outputDir = directory.get();
 
         if (run(
@@ -1114,8 +1219,15 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        PageCountPrompt.ask(stage, session.order().size(), session.baseName())
-                .ifPresent(session.order()::applyEveryNPages);
+        // ★ 窓を挟んだ後に検め直す（#133）。入れ替わった先に当てると、利用者が手で置いた区切りを
+        //   確認なしに塗り替える。
+        Held held = hold();
+        Optional<Integer> every = PageCountPrompt.ask(
+                stage, held.target().order().size(), held.target().baseName());
+        if (every.isEmpty() || !stillHolds(held)) {
+            return;
+        }
+        held.target().order().applyEveryNPages(every.get());
     }
 
     private void clearBreaks() {
