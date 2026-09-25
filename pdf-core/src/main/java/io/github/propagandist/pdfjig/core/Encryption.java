@@ -33,7 +33,8 @@ public interface Encryption {
      *
      * @param input 入力ファイル
      * @return 暗号化の状態
-     * @throws PdfjigException 読めない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     * @throws PdfjigException 無い・ファイルではない場合は {@link ErrorCode#FILE_NOT_FOUND}、
+     *                         在るのにいま読めない場合は {@link ErrorCode#FILE_UNREADABLE}、
      *                         PDF として読めない場合は {@link ErrorCode#NOT_A_PDF}
      */
     EncryptionInfo inspect(Path input);
