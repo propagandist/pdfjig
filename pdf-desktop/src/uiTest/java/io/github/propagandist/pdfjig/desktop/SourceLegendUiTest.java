@@ -65,7 +65,7 @@ class SourceLegendUiTest extends DesktopUiTest {
         waitFor(() -> statusText(robot).equals("2 / 2 ページ"));
 
         // ★ 枚数だけを見ない。どのファイルのページが残ったかは、書き出して初めて確かめられる
-        //   （CLAUDE.md「画面のテスト」）。1 ファイルに減っているので文書情報の警告は出ない。
+        //   （.claude/rules/ui-tests.md「画面のテスト」）。1 ファイルに減っているので文書情報の警告は出ない。
         assertEquals(List.of("A1", "A2"), pageTexts(saveAs(robot, dir.resolve("out.pdf"))));
     }
 
@@ -91,7 +91,7 @@ class SourceLegendUiTest extends DesktopUiTest {
     /**
      * 外したファイルの id が一覧に残らない。
      *
-     * <p><b>★ サムネイルのタイルと同じ注意である</b>（{@code CLAUDE.md}「命名」）——
+     * <p><b>★ サムネイルのタイルと同じ注意である</b>（{@code .claude/rules/desktop-ui.md}「画面の id と JavaFX」）——
      * <b>残すと、同じ id の節点が一覧に 2 つ並ぶ。</b>
      *
      * <p><b>ここでは 3 ファイルから 1 つ外して 2 つにする。</b>2 ファイルから外すと
@@ -120,7 +120,7 @@ class SourceLegendUiTest extends DesktopUiTest {
     /**
      * 「×」から名前が読める。
      *
-     * <p><b>★★ 支援技術から見えるのは Name だけである</b>（{@code CLAUDE.md}「JavaFX」）。
+     * <p><b>★★ 支援技術から見えるのは Name だけである</b>（{@code .claude/rules/desktop-ui.md}「JavaFX」）。
      * {@code setId} は届かない——JavaFX は AutomationId に内部の連番を返す。
      *
      * <p><b>名前を入れてあるのは、ファイルが並んだときに区別が付かないと危ういからである</b>

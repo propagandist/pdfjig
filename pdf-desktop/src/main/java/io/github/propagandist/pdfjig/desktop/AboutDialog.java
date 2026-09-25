@@ -150,7 +150,7 @@ final class AboutDialog {
     /**
      * 更新を確認する。
      *
-     * <p><b>通信はバックグラウンドスレッドで行う</b>（{@code CLAUDE.md}「JavaFX」）。
+     * <p><b>通信はバックグラウンドスレッドで行う</b>（{@code .claude/rules/desktop-ui.md}「JavaFX」）。
      * 遮断された環境では長く返らないため、JavaFX スレッドで待つと窓ごと固まる
      * （待たされる上限は決まっていない。{@link UpdateCheck#check()}）。
      *

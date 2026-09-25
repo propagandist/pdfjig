@@ -66,7 +66,7 @@ dependencies {
     "uiTestImplementation"(libs.junit.jupiter)
     "uiTestImplementation"(libs.testfx.junit5) {
         // TestFX は AssertJ を runtime スコープで引くが、こちらは JUnit の assertEquals しか
-        // 使っていない。持っているだけで CVE を見る対象が増える（CLAUDE.md「依存を放置しない」）。
+        // 使っていない。持っているだけで CVE を見る対象が増える（org security-baseline.md §2.2「依存を放置しない」）。
         // 2026-08-22 時点で assertj-core 3.13.2 に XXE の警告（high）が出ていた。
         exclude(group = "org.assertj")
     }

@@ -12,7 +12,7 @@ import javafx.concurrent.Task;
 /**
  * ファイル I/O を伴う仕事を、画面を止めずに走らせる。
  *
- * <p><b>JavaFX スレッドで待たない</b>（{@code CLAUDE.md}「JavaFX」）。100 ページの文書でも
+ * <p><b>JavaFX スレッドで待たない</b>（{@code .claude/rules/desktop-ui.md}「JavaFX」）。100 ページの文書でも
  * 開いた瞬間に固まらないためであり、<b>これは画面の都合ではなく約束である</b>。
  *
  * <p><b>走っている間 {@link #busy()} が立つ。</b>どの操作を止めるかを決めるのは画面である
@@ -41,7 +41,7 @@ import javafx.concurrent.Task;
  * <p><b>★ 仕事の始め方だけを差し替えられる</b>（{@link #BackgroundTasks(Executor)}）。
  * <b>「走っている間」をテストから作るためである</b>——実際の書き出しの速さで待ち合わせに
  * いくと、<b>落ちるかどうかが機械の速さで決まるテストになる</b>
- * （{@code CLAUDE.md}「不安定なテストの扱い」。{@code ThumbnailSource} に
+ * （{@code .claude/rules/ui-tests.md}「不安定なテストの扱い」。{@code ThumbnailSource} に
  * {@code PageRendering} を差し込んであるのと同じ形である）。
  */
 final class BackgroundTasks {

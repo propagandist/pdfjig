@@ -19,7 +19,7 @@ import javafx.stage.Stage;
  * 画面に散らしておくと、<b>次に窓を足す者がその線を知らないまま例外のメッセージを出す</b>。
  *
  * <p>取り消せない操作の確認もここが持つ。<b>問う文言と、その id が同じ場所にある</b>——
- * id はテストとの契約であり（{@code CLAUDE.md}「命名」）、文言だけ直して id を置き去りにする
+ * id はテストとの契約であり（{@code .claude/rules/desktop-ui.md}「画面の id と JavaFX」）、文言だけ直して id を置き去りにする
  * 形を作らない。
  *
  * <p><b>★★ 例外が 1 つある。</b>{@link ProtectionPrompt} は<b>ここを通らない</b>——

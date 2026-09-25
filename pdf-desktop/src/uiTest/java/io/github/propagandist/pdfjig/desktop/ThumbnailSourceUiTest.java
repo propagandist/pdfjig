@@ -41,7 +41,7 @@ import org.testfx.api.FxToolkit;
  * 開発機のマウスとキーボードを取り上げない。
  *
  * <p>描画は {@link GatedRendering} で止める。実際の描画の速さで待ち合わせを当てにいくと、
- * 落ちるかどうかが機械の速さで決まるテストになる（CLAUDE.md「不安定なテストの扱い」）。
+ * 落ちるかどうかが機械の速さで決まるテストになる（.claude/rules/ui-tests.md「不安定なテストの扱い」）。
  */
 class ThumbnailSourceUiTest {
 

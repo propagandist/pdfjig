@@ -41,7 +41,7 @@ import org.testfx.util.WaitForAsyncUtils;
  *
  * <p><b>★★ 「走っている間」は {@link HeldTasks} で作る。</b>実際の書き出しの速さで
  * 待ち合わせに行くと、<b>落ちるかどうかが機械の速さで決まるテストになる</b>
- * （{@code CLAUDE.md}「不安定なテストの扱い」）。<b>放すまで書き出しは始まらない</b>ので、
+ * （{@code .claude/rules/ui-tests.md}「不安定なテストの扱い」）。<b>放すまで書き出しは始まらない</b>ので、
  * その間に何を押しても取りこぼしにならない。
  *
  * <p><b>★★ 2 ファイルから書き出すと、文書情報の警告が必ず出る</b>（{@code Messages#warnings}。
@@ -129,7 +129,7 @@ class EditingGateUiTest extends DesktopUiTest {
         assertEquals(TWO_FILES, statusText(robot), "DELETE キーが素通りしてページが消えた");
 
         finishHeldSave(robot, output);
-        // ★ 画面が変わっていないことだけでは足りない（CLAUDE.md「画面のテスト」）。
+        // ★ 画面が変わっていないことだけでは足りない（.claude/rules/ui-tests.md「画面のテスト」）。
         //   書き出しの最中に並びが削られていれば、それはファイルの側に出る。
         assertEquals(TWO_FILE_PAGES, pageTexts(output));
     }
