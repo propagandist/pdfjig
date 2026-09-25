@@ -161,7 +161,7 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
 **読む契機はあちらの冒頭にある。**
 ★ **同 §1 を緩める判断は、このリポジトリではしていない。**
 
-同 §6 が「各リポジトリが決めておくこと」を挙げている。pdfjig の値は以下。
+同 §6「各リポジトリが決めておく値」の、pdfjig の値は以下。
 **あちらには書かない**（org §0）。
 
 | 決めるもの | pdfjig の値 |
@@ -170,9 +170,12 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
 | ブランチの接頭辞 | `feature/` `fix/` `chore/` `ci/` `docs/` `build/` `test/` |
 | ブランチ名に issue 番号を入れるか | **入れない。** 何のブランチかは名前で読めるほうがよい |
 | コミット subject の言語と型 | 日本語。Conventional Commits の型を前に置く（`feat:` `fix:` `docs:` `build(deps):` `test(archtest):`） |
+| トレーラー | `Co-Authored-By: <モデル名> <noreply@anthropic.com>`（大小はこの形）。**コミットと、エージェントが書いた issue の本文・コメントの末尾に置く。** 併用しているエージェントは Claude Code だけ（**2026-09-25 実測**。履歴にあるのは Claude と dependabot）。**モデル名はハーネスが示す文字列をそのまま使い、替わった日から新しい名前にする。** ★ **本文を別のエージェントが編集したら、元のトレーラーを消さずに編集した側を 1 行足す** |
 | merge 方式 | `--no-ff`。マージ済みのブランチは残さない（同上） |
 | ラベル集合 | 下の「ラベル」 |
-| マイルストーン運用 | **する。** 下の「マイルストーン」 |
+| マイルストーン運用 | **する。単位はリリース版、題は `vX.Y.Z`（タグと同じ綴り）。patch 版も作る**（`v0.1.1` / `v0.1.2`）。下の「マイルストーン」 |
+| `permissions` | **`.claude/settings.json` には 1 つも置かない**（2026-09-25 実測）。置いてあるのは hook 2 本だけ。**`allow` は各自の `settings.local.json` にあり、棚卸しは org「エージェントの設定」の「いつ見直すか」①〜③ で** |
+| permission mode | **リポジトリでは指定しない**（`defaultMode` を置かない。作業者が選ぶ）。★ **どのモードで何が止まるかは確かめていない**——止まると当てにしてよいのは hook 2 本だけ |
 | 本文の書式の見本にする issue 番号 | **#26** |
 | そのリポジトリ固有の関門 | 分類 P（利用者の手元で動くものを配る）。上の「セキュリティ」 |
 
@@ -249,7 +252,7 @@ org の `writing-baseline.md` が正である。**中身をここへ写さない
 gh api repos/propagandist/.github/contents/docs/writing-baseline.md --jq .content | base64 -d
 ```
 
-同 §9 が「各リポジトリが決めておくこと」を挙げている。pdfjig の値は以下。
+同 §9「各リポジトリが決めておく値」の、pdfjig の値は以下。
 **あちらには書かない**（org §0）。
 
 | 決めるもの | pdfjig の値 |
