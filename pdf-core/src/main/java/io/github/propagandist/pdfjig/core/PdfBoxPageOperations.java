@@ -1040,7 +1040,8 @@ public final class PdfBoxPageOperations implements PageOperations {
      */
     private void save(PDDocument document, Path output, Warnings warnings) {
         if (!saver.save(document, output)) {
-            warnings.add(Warning.NOT_DURABLE);
+            // 分割は出力ごとにここを通る。同じ警告を出力の数だけ伝えない。
+            warnings.addOnce(Warning.NOT_DURABLE);
         }
     }
 

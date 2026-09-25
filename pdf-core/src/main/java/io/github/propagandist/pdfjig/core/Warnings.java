@@ -52,6 +52,16 @@ final class Warnings {
     }
 
     /**
+     * まだ溜めていなければ溜める。<b>1 回の操作で何度起きても、伝えるのは 1 度でよいもの</b>のためにある
+     * ——分割は出力ごとに書くので、同じ警告が出力の数だけ積まれる。
+     */
+    void addOnce(Warning warning) {
+        if (!collected.contains(warning)) {
+            collected.add(warning);
+        }
+    }
+
+    /**
      * 溜めたものを利用者へ伝える。<b>包みの外で呼ぶこと。</b>
      *
      * <p><b>★★ ここで受け手が投げたとき、出力は既に書かれている。書けたものは消さない</b>

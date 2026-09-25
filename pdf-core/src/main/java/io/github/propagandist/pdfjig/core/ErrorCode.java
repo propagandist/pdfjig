@@ -59,7 +59,6 @@ public enum ErrorCode {
     /** 出力先に同名のファイルが既に存在する。 */
     OUTPUT_ALREADY_EXISTS("出力先に同名のファイルが既に存在します。"),
 
-    /** 読み書きの失敗。 */
     /**
      * 書き出したものがディスクへ届いたか確かめられなかったので、元のファイルを置き換えなかった（#219）。
      *
@@ -68,6 +67,7 @@ public enum ErrorCode {
      */
     OUTPUT_NOT_DURABLE("書き出したファイルがディスクへ届いたか確かめられなかったため、元のファイルを置き換えませんでした。元のファイルはそのままです。"),
 
+    /** 読み書きの失敗。 */
     IO_FAILURE("ファイルの読み書きに失敗しました。");
 
     private final String defaultMessage;

@@ -14,7 +14,8 @@ import java.nio.file.Path;
  * {@code pdf-core} 全体の契約である（{@code docs/SPEC.md} §4.2）。
  *
  * <p><b>書き出したものは、戻る前にディスクへ届けさせる</b>（#219。{@code docs/SPEC.md} §4.2）。
- * <b>警告を返す口が無いので、届いたか確かめられなければ {@link ErrorCode#OUTPUT_NOT_DURABLE} で失敗する。</b>
+ * <b>★ ただし届いたかは伝えない</b>——警告を返す口が無く、既存の出力を拒むので置き換えも起きない。
+ * <b>書き出したものを置き換えに使う呼ぶ側が現れたら、届いたかを返す口を先に足すこと。</b>
  */
 public interface Encryption {
 
