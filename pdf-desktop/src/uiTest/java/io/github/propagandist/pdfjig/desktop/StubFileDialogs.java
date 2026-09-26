@@ -109,6 +109,11 @@ final class StubFileDialogs implements FileDialogs {
         folder = path;
     }
 
+    /** 仕込んだ出力先がまだ使われていないか。 */
+    boolean folderPending() {
+        return folder != null;
+    }
+
     /** 直前の「保存」に渡された既定のファイル名。まだ呼ばれていなければ {@code null}。 */
     String lastSuggestedName() {
         return lastSuggestedName;

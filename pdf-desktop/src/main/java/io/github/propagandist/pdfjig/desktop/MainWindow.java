@@ -765,27 +765,27 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        // ★★ 窓は 3 つ挟む（保存先・保護の指定・鍵）。窓ごとに検め直す（#133）。
+        // ★★ 窓は 4 つ挟む（保護の指定・保護が落ちる確認・保存先・鍵）。窓ごとに検め直す（#133）。
         //   入れ替わった後に書くと、入れ替わった先の元のファイルを開いたまま置き換えうる。
+        // ★★ 何をするかを決めてから、場所を選ぶ（2026-09-26、v0.0.6 の実機確認で利用者が決めた）。
+        //   保護の指定と「保護は引き継がれません」を先に出し、保存先はその後に選ぶ。
+        //   ★ 以前は保存先が先だった。保存先を選んでから確認が出るのは、選んだ場所を後から取り消させる形で、
+        //   何に答えているのかが読みにくかった。書き出す前に訊くこと自体は変わらない（docs/SPEC.md §4.3.1）。
         Held held = hold();
-        Optional<Path> chosen = dialogs.savePdf(writingFolder().orElse(null), suggestedFileName());
-        if (chosen.isEmpty()) {
-            return;
-        }
-        if (!stillHolds(held)) {
-            abandonedBecauseSwapped("保存");
-            return;
-        }
-
         DocumentSession saving = held.target();
         List<Path> sources = held.sources();
         List<PageSelection> pages = saving.order().toPageSelections();
         // 区切りと選択位置は書き出しに関与しないが、寄せ直すと消える。持ち越すために控える（#118）。
         List<Boolean> breaks = saving.order().breaks();
         int selected = thumbnails.selectedIndex();
-        Path output = chosen.get();
+        // ★ 保存先の窓に渡す既定の名前と場所も、窓より前に控える。後で読むと、確認の窓の最中に
+        //   入れ替わった文書の名前と場所を出すことになる（#172 の門）。
+        String suggestedName = suggestedFileName();
+        Path initialFolder = writingFolder().orElse(null);
 
-        // ★ 書き出し先を決めた後に訊く。先に訊くと、行き先を取り消しただけで打った鍵が捨てられる。
+        // ★ 保護の指定で打った鍵は、保存先の窓の間も持つ（finally が必ず閉じる）。以前は保存先を先に選び、
+        //   鍵を持つ時間を短くしていた——順番を変えたぶん、ネイティブの保存の窓が開いている間も持つことになる。
+        //   INV-5 が禁じる String への写しや外への出力は増えない。保存先を取り消せば、打った鍵は捨てられる。
         Optional<Protection> requested = asksForProtection ? EncryptionPrompt.ask(stage) : Optional.empty();
         if (asksForProtection && requested.isEmpty()) {
             return;
@@ -820,6 +820,23 @@ public final class MainWindow {
             if (!needsAKey && !consentsToDroppingProtection(saving, pages, consequence)) {
                 return;
             }
+
+            // 保存先は、何をするかが決まった後に選ぶ（上の★★）。
+            // ★★ 確認の窓の後に検め直してから開く。入れ替わった文書のために保存先を選ばせない（#133）。
+            if (!stillHolds(held)) {
+                abandonedBecauseSwapped("保存");
+                return;
+            }
+            Optional<Path> chosen = dialogs.savePdf(initialFolder, suggestedName);
+            if (chosen.isEmpty()) {
+                return;
+            }
+            // 保存先の窓の後。ここで戻れば、打った鍵は finally が閉じる。
+            if (!stillHolds(held)) {
+                abandonedBecauseSwapped("保存");
+                return;
+            }
+            Path output = chosen.get();
 
             // ★★ 鍵は保存のたびに訊く。セッションは抱えない（#193）。
             //   ★ 訊くのは run の直前である。ここから run までの間に投げるものがあると、
@@ -1338,7 +1355,7 @@ public final class MainWindow {
     /**
      * 切り分けたページ列を書き出す。
      *
-     * <p>保存先を尋ねてから非同期で書く。既に同名のファイルがあれば 1 つも書かずに
+     * <p>保護が落ちる確認と出力先を尋ねてから非同期で書く。既に同名のファイルがあれば 1 つも書かずに
      * 失敗する（{@link DocumentWriter#splitInto}）。上書きするかどうかは利用者の判断である。
      *
      * @param segments     かたまりごとのページ指定。先頭から順に連番で書き出す
@@ -1347,7 +1364,7 @@ public final class MainWindow {
      */
     private void writeSegments(List<List<PageSelection>> segments, boolean writesBreaks) {
         // ★★ 窓より先に控える。segments は呼ぶ側が既に確定させたものであり、
-        //   窓（フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
+        //   窓（保護が落ちる確認・フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
         //   その間に文書が入れ替わりうる（#133）。★ 後で控えると、入れ替わった後の
         //   出どころ一覧へ入れ替わる前の出どころ番号を当てることになる——
         //   そこは素の IndexOutOfBoundsException になり、画面に何も出ない（#29 の門の 2 段目）。
@@ -1358,9 +1375,14 @@ public final class MainWindow {
         // ★ 始めたときの区切りの編集回数を控える。書き出している間に付け外しされた分は、
         //   まだ書き出されていない（markSaved と同じ理由）。
         int breakEditsAtStart = breakEdits;
+        // 出力先の窓を始める場所も窓より前に控える（save と同じ理由）。
+        Path initialFolder = writingFolder().orElse(null);
 
-        Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
-        if (directory.isEmpty()) {
+        // ★★ 分割は操作ごとに 1 回だけ問う（docs/SPEC.md §4.3.1。#29）。
+        //   N 回出すと「読まずに続行を押す」習慣ができる。
+        // ★★ 問うてから出力先を選ぶ。保存と同じ順である（save の★★。2026-09-26、利用者が決めた）。
+        List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
+        if (!consentsToDroppingProtection(writing, allPages, ProtectionPrompt.Outcome.PLAIN)) {
             return;
         }
         if (!stillHolds(held)) {
@@ -1368,10 +1390,8 @@ public final class MainWindow {
             return;
         }
 
-        // ★★ 分割は操作ごとに 1 回だけ問う（docs/SPEC.md §4.3.1。#29）。
-        //   N 回出すと「読まずに続行を押す」習慣ができる。
-        List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
-        if (!consentsToDroppingProtection(writing, allPages, ProtectionPrompt.Outcome.PLAIN)) {
+        Optional<Path> directory = dialogs.chooseFolder(initialFolder);
+        if (directory.isEmpty()) {
             return;
         }
         if (!stillHolds(held)) {

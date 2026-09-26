@@ -57,9 +57,12 @@ class ProtectionPromptUiTest extends DesktopUiTest {
 
         Path output = dir.resolve("saved.pdf");
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
 
         waitForNode(robot, "#protection-dialog");
+        // ★★ 保存先より先に訊く（2026-09-26、v0.0.6 の実機確認で利用者が決めた）。
+        //   何をするかを決めてから場所を選ぶ——保存先を選ばせてから取り消させる形にしない。
+        assertTrue(dialogs.savePending(), "保存先を先に訊いている。保護が落ちる確認はその前に出す");
 
         // ★ どのファイルの保護が落ちるのかを出す。数だけでは辿れない。
         assertTrue(textOf(robot, "#protection-sources").contains("locked.pdf"), "保護が落ちる出どころの名前が出ていない");
@@ -67,7 +70,8 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
 
-        // ★★ 中止したら、鍵も訊かれない。1 文字も打たせずに済む。
+        // ★★ 中止したら、保存先も鍵も訊かれない。1 文字も打たせずに済む。
+        assertTrue(dialogs.savePending(), "中止したのに保存先を訊いている");
         assertTrue(robot.lookup("#password-field").tryQuery().isEmpty(), "中止したのに鍵を訊いている");
         assertTrue(Files.notExists(output), "中止したのに書き出されている");
     }
@@ -77,7 +81,7 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         openProtected(dir, robot);
 
         dialogs.willSaveTo(dir.resolve("saved.pdf"));
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         waitForNode(robot, "#protection-dialog");
 
         // ★★ Enter を続けて押しても続行に倒れない（SPEC.md §4.3.1）。
@@ -95,7 +99,7 @@ class ProtectionPromptUiTest extends DesktopUiTest {
 
         Path output = dir.resolve("saved.pdf");
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
 
         waitForNode(robot, "#protection-dialog");
         clickWhenReady(robot, "#protection-proceed");
@@ -130,7 +134,7 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         //   下の assert には一度も届かない——読めない落ち方になる（ui-tests.md）。
         Path output = dir.resolve("saved.pdf");
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         WaitForAsyncUtils.waitForFxEvents();
         assertTrue(robot.lookup("#protection-dialog").tryQuery().isEmpty(), "鍵の要らない文書で窓が出ている");
 
@@ -141,6 +145,25 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         waitForNode(robot, "#message-dialog");
         clickWhenReady(robot, "#message-ok");
         WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /**
+     * 分割でも、中止すれば出力先を訊かない（保存と同じ順。2026-09-26 に利用者が決めた）。
+     */
+    @Test
+    void 分割でも中止すれば出力先を訊かない(@TempDir Path dir, FxRobot robot) throws Exception {
+        // 1 ページでは「1 枚ずつ」が押せない（分けても 1 つにしかならない）。3 ページにする。
+        openProtectedFixture(robot, TestPdfs.encrypted(dir.resolve("locked.pdf"), KEY, 3), KEY);
+        Path outputDir = dir.resolve("out");
+        dialogs.willChooseFolder(outputDir);
+        robot.clickOn("#tool-split-pages");
+
+        waitForNode(robot, "#protection-dialog");
+        clickWhenReady(robot, "#protection-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertTrue(dialogs.folderPending(), "中止したのに出力先を訊いている");
+        assertTrue(Files.notExists(outputDir), "中止したのに書き出されている");
     }
 
     @Test
@@ -161,6 +184,8 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         robot.clickOn("#tool-split-pages");
 
         waitForNode(robot, "#protection-dialog");
+        // ★★ 出力先より先に訊く（保存と同じ順。2026-09-26 に利用者が決めた）。
+        assertTrue(dialogs.folderPending(), "出力先を先に訊いている。保護が落ちる確認はその前に出す");
         clickWhenReady(robot, "#protection-proceed");
 
         // 続行のあと、鍵は出どころごとに 1 回だけ訊かれる（出どころは 1 つ）。

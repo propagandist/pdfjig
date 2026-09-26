@@ -123,7 +123,7 @@ class PasswordUiTest extends DesktopUiTest {
 
         Path output = dir.resolve("saved.pdf");
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
 
         // ★ 先に保護の窓が出る（#29 / #192）。鍵を訊くより前である——中止されたら
         //   1 文字も打たせずに済むため。あちらは ProtectionPromptUiTest が縛る。
@@ -153,7 +153,7 @@ class PasswordUiTest extends DesktopUiTest {
 
         Path output = dir.resolve("saved.pdf");
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         clickWhenReady(robot, "#protection-proceed");
 
         waitForNode(robot, "#password-field");
@@ -230,7 +230,7 @@ class PasswordUiTest extends DesktopUiTest {
         waitForNode(robot, "#source-remove-1");
 
         dialogs.willSaveTo(dir.resolve("saved.pdf"));
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         clickWhenReady(robot, "#protection-proceed");
 
         waitForNode(robot, "#password-field");

@@ -208,6 +208,23 @@ abstract class DesktopUiTest {
     }
 
     /**
+     * 「保存」ボタンを押す。押した結果が起きるまで押し直す（{@link #clickUntilAccepted}）。
+     *
+     * <p><b>★★ 押した結果は 2 通りある。</b>保存先が使われるか、<b>その前に保護の窓が出る</b>か——
+     * 保護が落ちるときは、保存先より先に「保護は引き継がれません」を出す（2026-09-26 に順番を変えた）。
+     * <b>保存先だけを見て待つと、窓が出ている間も押し直し続けて落ちる。</b>
+     * ★ <b>見るのはその窓の id である。</b>どの窓でもよいとすると、前の手順の窓が残っているだけで
+     * 押せたと読み、取りこぼしたクリックを押し直さない（#172 の門）。
+     */
+    void pressSave(FxRobot robot) throws Exception {
+        clickUntilAccepted(
+                robot,
+                "#tool-save",
+                () -> dialogs.savePending()
+                        && robot.lookup("#protection-dialog").tryQuery().isEmpty());
+    }
+
+    /**
      * 「保存」ボタンから書き出し、ファイルができるまで待つ。
      *
      * <p>押し直しを通すのは「開く」と同じ理由である（{@link #clickUntilAccepted}）。
@@ -219,7 +236,7 @@ abstract class DesktopUiTest {
      */
     Path saveAs(FxRobot robot, Path output) throws Exception {
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         waitFor(() -> Files.exists(output) && Files.size(output) > 0);
         WaitForAsyncUtils.waitForFxEvents();
         return output;
@@ -247,7 +264,7 @@ abstract class DesktopUiTest {
     Path saveOver(FxRobot robot, Path output) throws Exception {
         FileTime before = Files.getLastModifiedTime(output);
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         // ★ 存在を先に見る。置き換えは「元をどけてから入れる」2 本の改名なので（DocumentWriter#move。
         //   #119 より前は DeleteFile → MoveFileEx の 2 段だった）、どちらの形でも出力先が一瞬消える。
         //   TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく失敗として投げ直すため、
@@ -333,7 +350,7 @@ abstract class DesktopUiTest {
     void startHeldSave(FxRobot robot, HeldTasks held, Path output) throws Exception {
         held.hold();
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
         waitFor(() -> button(robot, "#tool-save").isDisabled());
     }
 
