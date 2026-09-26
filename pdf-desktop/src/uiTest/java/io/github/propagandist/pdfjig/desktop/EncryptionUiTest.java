@@ -19,8 +19,10 @@ import java.nio.file.Path;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.Labeled;
 import javafx.scene.control.TitledPane;
 import javafx.scene.input.KeyCode;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -120,6 +122,30 @@ class EncryptionUiTest extends DesktopUiTest {
                 new AccessPermissions(false, true, false, true, true, true, true, false),
                 info.permissions(),
                 "外した権限と残した権限が食い違っている");
+    }
+
+    /**
+     * 窓の文字が読める色で出る。
+     *
+     * <p><b>★★ 注意文と権限の見出しが、白に近い色で出ていた</b>（2026-09-26、捨てタグ {@code v0.0.6} の
+     * 実機確認で見つかった）。Modena は文字の色を {@code -fx-background} の明るさから決める
+     * （{@code -fx-text-background-color: ladder(-fx-background, …)}）。そこへ透明（明るさ 0）を当てると、
+     * <b>暗い地だと読んで明るい文字を選ぶ。</b>欄の中の文字は別の色から決まるので、<b>欄だけが普通に見えた。</b>
+     *
+     * <p><b>この窓は、読んで分からなければ守りが無い</b>（{@code docs/HANDOVER.md} 4-4 の 17〜19 番）。
+     * 見るのは色の明るさであって、読みやすさそのものではない。
+     */
+    @Test
+    void 窓の文字は読める色で出る(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+
+        for (String id : new String[] {"#encryption-owner-only-warning", "#encryption-allow-print"}) {
+            Color fill = (Color) ((Labeled) node(robot, id)).getTextFill();
+            assertTrue(fill.getBrightness() < 0.5, id + " の文字が明るすぎて読めない: " + fill);
+        }
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     @Test
