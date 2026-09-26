@@ -119,8 +119,9 @@ function Assert-ExeDescriptionReadable {
         throw 'PDFjig.exe の「ファイルの説明」が空である'
     }
     if ($description -match '[^\x20-\x7E]' -or $description.Contains('?')) {
-        throw ("PDFjig.exe の「ファイルの説明」が化けている: [$description]" +
-            '（pdf-desktop/build.gradle.kts の appDescription を ASCII にすること）')
+        # ★ ? も落とす。jpackage は非 ASCII を ? に置き換えるので、化けたものと見分けが付かない。
+        throw ("PDFjig.exe の「ファイルの説明」が化けているか、? を含んでいる: [$description]" +
+            '（pdf-desktop/build.gradle.kts の appDescription は、? を含まない ASCII で書くこと）')
     }
     Write-Step "「ファイルの説明」は読める: $description"
 }
