@@ -4,6 +4,7 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import javafx.scene.Node;
@@ -91,7 +92,7 @@ final class Messages {
         if (copies.isEmpty()) {
             return;
         }
-        show(AlertType.WARNING, new Notice(describeAbandoned(copies), copies));
+        show(AlertType.WARNING, describeAbandoned(copies));
     }
 
     /**
@@ -114,16 +115,18 @@ final class Messages {
      * それは自分にとって要らないだけである。<b>消してよいのは、自分のものだと分かったときだけにする。</b>
      *
      * @param copies 見つけた控え。空でないこと
-     * @return 画面に出す文言
+     * @return 画面に出す文言と、その中で出した在り処
      */
-    static String describeAbandoned(List<Path> copies) {
-        return "前の保存が途中で終わったときの、保存する前のファイルが次の場所に残っています。\n\n"
-                + copies.stream().map(Path::toString).collect(Collectors.joining("\n"))
-                + "\n\nどのファイルのものかは、開いて中身で確かめてください。"
-                + "元の名前のファイルが既にあるなら、それは保存が済んだ新しいほうかもしれません。"
-                + "上書きする前に中身を比べてください。"
-                + "\n\n自分のものだと確かめて、要るものを取り出したら、そのフォルダは消してかまいません。"
-                + "自分のものでなければ、消さずにおいてください。";
+    static Notice describeAbandoned(List<Path> copies) {
+        return new Notice(
+                "前の保存が途中で終わったときの、保存する前のファイルが次の場所に残っています。\n\n"
+                        + copies.stream().map(Path::toString).collect(Collectors.joining("\n"))
+                        + "\n\nどのファイルのものかは、開いて中身で確かめてください。"
+                        + "元の名前のファイルが既にあるなら、それは保存が済んだ新しいほうかもしれません。"
+                        + "上書きする前に中身を比べてください。"
+                        + "\n\n自分のものだと確かめて、要るものを取り出したら、そのフォルダは消してかまいません。"
+                        + "自分のものでなければ、消さずにおいてください。",
+                copies);
     }
 
     /**
@@ -210,6 +213,20 @@ final class Messages {
         Notice {
             locations = List.copyOf(locations);
         }
+
+        /**
+         * 写すフォルダ。在り処の入ったフォルダを、出した順に、重ねずに並べる。
+         *
+         * <p><b>★★ ファイルそのものは写さない。</b>エクスプローラのアドレス欄へ貼ると<b>ファイルが開く</b>——
+         * 消し損ねた平文なら、<b>消せと言ったものを開かせてロックさせる。</b>
+         * <b>控えと平文は同じ作業場所にある</b>（{@code OutputWorkspace#writtenBeside}）ので、
+         * その窓ではボタンが 1 つになる。
+         *
+         * @return 写すフォルダ
+         */
+        List<Path> folders() {
+            return locations.stream().map(Path::getParent).distinct().toList();
+        }
     }
 
     /** 消し損ねた平文の在り処（#184）。 */
@@ -255,7 +272,7 @@ final class Messages {
     }
 
     /**
-     * 窓を出す。在り処があれば、1 つずつ写すボタンを本文の下に添える（#137）。
+     * 窓を出す。在り処があれば、その入ったフォルダを写すボタンを本文の下に添える（#137）。
      *
      * <p><b>★★ 本文の {@code Label} は選択できない。</b>作業場所の名前は乱数であり
      * （{@code .pdfjig-6521790852410932614}）、<b>1 桁でも書き違えれば辿り着けない。</b>
@@ -265,8 +282,8 @@ final class Messages {
      * <b>窓の × でも Esc でも閉じなくなる</b>（{@code Dialog} の「Dialog Closing Rules」。
      * {@code AbandonedCopyUiTest} が赤にした）。OK だけのボタンバーは、その規則に掛からない。
      *
-     * <p><b>★ 在り処ごとに 1 つ。</b>繋いで 1 つにすると、エクスプローラのアドレス欄へ貼れるのは
-     * 先頭の 1 行だけになる——消し損ねた平文は 2 つ目なので、<b>先に消せと言ったものへ辿り着けない。</b>
+     * <p><b>★ フォルダごとに 1 つ。</b>繋いで 1 つにすると、エクスプローラのアドレス欄へ貼れるのは
+     * 先頭の 1 行だけになる。
      *
      * <p><b>在り処の無い窓は変えない。</b>
      */
@@ -289,10 +306,14 @@ final class Messages {
     }
 
     /**
-     * 本文の下に、在り処を 1 つずつ写すボタンを並べる。
+     * 本文の下に、フォルダを 1 つずつ写すボタンを並べる。
      *
      * <p>本文は {@code DialogPane} が作るものと同じ形にする（{@code createContentLabel}）——
      * 本文を差し替えると、あちらの折り返しと幅は付いてこない。
+     *
+     * <p><b>★ 「コピーしました」は、最後に押したボタンにだけ出す。</b>クリップボードが持つのは
+     * 最後の 1 つだけであり、<b>前に押したボタンに残すと、もう入っていないものを入っていると言う。</b>
+     * <b>書けなかったら、そう言う</b>——他のプログラムがクリップボードを掴んでいると失敗する。
      *
      * <p><b>★ 写したらフォーカスを OK へ戻す。</b>押したボタンに残すと、Windows では Enter が
      * <b>閉じるのではなく、もう一度写す</b>。
@@ -300,25 +321,31 @@ final class Messages {
     private static VBox withCopyButtons(Notice notice, Node ok) {
         Label text = new Label(notice.text());
         text.setId("message-text");
+        text.getStyleClass().add("content");
         text.setMaxWidth(Double.MAX_VALUE);
         text.setMaxHeight(Double.MAX_VALUE);
         text.setWrapText(true);
         text.setPrefWidth(360);
         VBox content = new VBox(8, text);
-        List<Path> locations = notice.locations();
-        for (int i = 0; i < locations.size(); i++) {
-            Path location = locations.get(i);
+        List<Path> folders = notice.folders();
+        List<Button> buttons = new ArrayList<>();
+        for (int i = 0; i < folders.size(); i++) {
+            Path folder = folders.get(i);
             // 並びの中で区別が付くこと（desktop-ui.md）。1 つなら番号は要らない。
-            String which = locations.size() == 1 ? "" : "（" + (i + 1) + " つ目）";
-            Button copy = new Button("場所をコピー" + which);
+            String which = folders.size() == 1 ? "" : "（" + (i + 1) + " つ目）";
+            String label = "フォルダの場所をコピー" + which;
+            Button copy = new Button(label);
             copy.setId("message-copy-location-" + i);
             copy.setOnAction(event -> {
                 ClipboardContent clipboard = new ClipboardContent();
-                clipboard.putString(location.toString());
-                Clipboard.getSystemClipboard().setContent(clipboard);
-                copy.setText("コピーしました" + which);
+                clipboard.putString(folder.toString());
+                boolean copied = Clipboard.getSystemClipboard().setContent(clipboard);
+                buttons.forEach(other -> other.setText(String.valueOf(other.getUserData())));
+                copy.setText((copied ? "コピーしました" : "コピーできませんでした。もう一度押してください") + which);
                 ok.requestFocus();
             });
+            copy.setUserData(label);
+            buttons.add(copy);
             content.getChildren().add(copy);
         }
         return content;

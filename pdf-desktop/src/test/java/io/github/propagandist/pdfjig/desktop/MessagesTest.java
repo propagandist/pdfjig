@@ -77,7 +77,7 @@ class MessagesTest {
                         + "上書きする前に中身を比べてください。"
                         + "\n\n自分のものだと確かめて、要るものを取り出したら、そのフォルダは消してかまいません。"
                         + "自分のものでなければ、消さずにおいてください。",
-                Messages.describeAbandoned(List.of(first, second)));
+                Messages.describeAbandoned(List.of(first, second)).text());
     }
 
     /**
@@ -191,6 +191,30 @@ class MessagesTest {
                 previous = at;
             }
         }
+    }
+
+    /**
+     * 写すのは在り処の入ったフォルダで、出した順に、重ねずに並べる（#137）。
+     *
+     * <p><b>★★ ファイルそのものを写すと、アドレス欄へ貼ったときにファイルが開く</b>——
+     * 消し損ねた平文なら、消せと言ったものを開かせる。<b>控えと平文は同じ作業場所にあるので、
+     * その窓で写すものは 1 つになる。</b>
+     */
+    @Test
+    void copiesTheFoldersNotTheFiles() {
+        Path kept = Path.of("C:", "work", ".pdfjig-1", "replaced.pdf");
+        Path plaintext = OutputWorkspace.writtenBeside(kept);
+        Path first = Path.of("C:", "work", ".pdfjig-2", "replaced.pdf");
+        Path second = Path.of("C:", "work", ".pdfjig-3", "replaced.pdf");
+
+        assertEquals(
+                List.of(kept.getParent()),
+                Messages.notice(new ReplacedFileKeptException(
+                                kept, plaintext, new PdfjigException(ErrorCode.IO_FAILURE)))
+                        .folders());
+        assertEquals(
+                List.of(first.getParent(), second.getParent()),
+                Messages.describeAbandoned(List.of(first, second)).folders());
     }
 
     /** ふつうの失敗には、写すものも無い。ボタンが出ないのはこのためである（#137）。 */

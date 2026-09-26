@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import javafx.scene.Node;
+import javafx.scene.control.Button;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.input.Clipboard;
@@ -80,28 +81,63 @@ class AbandonedCopyUiTest extends DesktopUiTest {
     }
 
     /**
-     * 在り処を写せる。写しても窓は閉じず、フォーカスは OK へ戻る（#137）。
+     * 在り処の入ったフォルダを写せる。写しても窓は閉じず、フォーカスは OK へ戻る（#137）。
      *
      * <p><b>★★ 作業場所の名前は乱数であり、1 桁でも書き違えれば辿り着けない。</b>
+     * <b>ファイルそのものは写さない</b>——アドレス欄へ貼るとファイルが開く。
      * <b>★ フォーカスが写したボタンに残ると、Windows では Enter がもう一度写す</b>——閉じるつもりの
      * Enter が効かない。
      */
     @Test
-    void 在り処を写せる(@TempDir Path dir, FxRobot robot) throws Exception {
+    void 在り処のフォルダを写せる(@TempDir Path dir, FxRobot robot) throws Exception {
         Path kept = crashedBeside(dir);
 
         openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
         saveAs(robot, dir.resolve("out.pdf"));
 
-        clickWhenReady(robot, "#message-copy-location-0");
+        // ★ 押した結果（文言が変わること）を見て押し直す。窓が前面に出る前の 1 回目は取りこぼされうる
+        //   （DesktopUiTest#clickUntilAccepted）——見ずにクリップボードを読むと、前に写したものが残っている。
+        waitForNode(robot, "#message-copy-location-0");
+        Button copy = button(robot, "#message-copy-location-0");
+        clickUntilAccepted(
+                robot, "#message-copy-location-0", () -> copy.getText().startsWith("フォルダ"));
+        assertEquals("コピーしました", copy.getText(), "クリップボードへ書けなかった");
         assertEquals(
-                kept.toString(),
+                kept.getParent().toString(),
                 WaitForAsyncUtils.asyncFx(() -> Clipboard.getSystemClipboard().getString())
                         .get(),
                 "在り処を写せない");
+        assertTrue(messageWindow(robot).isShowing(), "写しただけで窓が閉じた。本文を読み終える前に消える");
         Node ok = robot.lookup("#message-ok").query();
-        assertTrue(ok.isVisible(), "写しただけで窓が閉じた。本文を読み終える前に消える");
         assertTrue(ok.isFocused(), "写したボタンにフォーカスが残っている。Enter で閉じない");
+        clickWhenReady(robot, "#message-ok");
+    }
+
+    /**
+     * 「コピーしました」は、最後に押したボタンにだけ出る（#137）。
+     *
+     * <p><b>★ クリップボードが持つのは最後の 1 つだけである。</b>前に押したボタンに残すと、
+     * <b>もう入っていないものを入っていると言う</b>——戻ってきて貼った利用者は、別の作業場所へ行く。
+     */
+    @Test
+    void コピーしましたは最後に押したボタンにだけ出る(@TempDir Path dir, FxRobot robot) throws Exception {
+        crashedBeside(dir, ".pdfjig-1111111111");
+        crashedBeside(dir, ".pdfjig-2222222222");
+
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+        saveAs(robot, dir.resolve("out.pdf"));
+
+        waitForNode(robot, "#message-copy-location-1");
+        Button first = button(robot, "#message-copy-location-0");
+        Button second = button(robot, "#message-copy-location-1");
+        String firstLabel = first.getText();
+        clickUntilAccepted(
+                robot, "#message-copy-location-0", () -> first.getText().equals(firstLabel));
+        clickUntilAccepted(
+                robot, "#message-copy-location-1", () -> second.getText().startsWith("フォルダ"));
+
+        assertEquals(firstLabel, first.getText(), "もう入っていないものを「コピーしました」と言っている");
+        assertTrue(second.getText().startsWith("コピーしました"), "最後に押したほうが写したと言っていない");
         clickWhenReady(robot, "#message-ok");
     }
 
@@ -156,7 +192,11 @@ class AbandonedCopyUiTest extends DesktopUiTest {
      * @return 控えのファイル
      */
     private static Path crashedBeside(Path dir) throws Exception {
-        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-1234567890"));
+        return crashedBeside(dir, ".pdfjig-1234567890");
+    }
+
+    private static Path crashedBeside(Path dir, String name) throws Exception {
+        Path crashed = Files.createDirectory(dir.resolve(name));
         Files.createFile(crashed.resolve("held"));
         // ★ 本文は ASCII にする。TestPdfs は標準フォントで書くので、日本語を渡すと投げる。
         return TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
