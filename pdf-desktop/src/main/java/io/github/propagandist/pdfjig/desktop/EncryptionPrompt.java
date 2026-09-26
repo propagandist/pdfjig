@@ -168,7 +168,8 @@ final class EncryptionPrompt {
         //   白い文字になり、注意文も権限の見出しも読めなくなった（2026-09-26、v0.0.6 の実機確認で見つかった）。
         scroller.getStyleClass().add("edge-to-edge");
 
-        ButtonType apply = new ButtonType("保護して保存", ButtonData.OK_DONE);
+        // ★ 「…」を付ける。この後に保存先の窓が出る——押した時点ではまだ書かない（#172 の門）。
+        ButtonType apply = new ButtonType("保護して保存…", ButtonData.OK_DONE);
 
         Dialog<Protection> dialog = new Dialog<>();
         dialog.initOwner(owner);
