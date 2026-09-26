@@ -161,4 +161,41 @@ class MessagesTest {
         assertTrue(message.contains(plaintext.toString()), "消し損ねた平文の場所を言っていない: " + message);
         assertTrue(message.contains("保護されていない"), "何が残っているのかを言っていない: " + message);
     }
+
+    /**
+     * 写せる在り処は、窓に出した在り処と同じものを、同じ順に並べる（#137）。
+     *
+     * <p><b>★★ 片方だけ直すと、読んでいないパスを貼らせる</b>——あるいは、出したのに写せない。
+     * <b>本文の中の位置で順を見る</b>ので、並べ替えても落ちる。
+     */
+    @Test
+    void copiesTheSameLocationsItShowsInTheSameOrder() {
+        Path kept = Path.of("C:", "work", ".pdfjig-1", "replaced.pdf");
+        Path plaintext = OutputWorkspace.writtenBeside(kept);
+        List<RuntimeException> failures = List.of(
+                new ReplacedFileKeptException(kept, plaintext, new PdfjigException(ErrorCode.IO_FAILURE)),
+                new ReplacedFileKeptException(kept, null, new PdfjigException(ErrorCode.IO_FAILURE)),
+                new PlaintextLeftException(plaintext, new PdfjigException(ErrorCode.IO_FAILURE)));
+        List<List<Path>> expected = List.of(List.of(kept, plaintext), List.of(kept), List.of(plaintext));
+
+        for (int i = 0; i < failures.size(); i++) {
+            List<Path> locations = Messages.locations(failures.get(i));
+            String message = Messages.describe(failures.get(i));
+
+            assertEquals(expected.get(i), locations, "写せる在り処が違う: " + message);
+            int previous = -1;
+            for (Path location : locations) {
+                int at = message.indexOf(location.toString(), previous + 1);
+                assertTrue(at > previous, "窓に出ていない在り処、または出した順と違う: " + location + " / " + message);
+                previous = at;
+            }
+        }
+    }
+
+    /** ふつうの失敗には、写すものも無い。ボタンが出ないのはこのためである（#137）。 */
+    @Test
+    void copiesNothingFromAnOrdinaryFailure() {
+        assertEquals(List.of(), Messages.locations(new PdfjigException(ErrorCode.IO_FAILURE)));
+        assertEquals(List.of(), Messages.locations(null));
+    }
 }

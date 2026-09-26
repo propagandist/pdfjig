@@ -1,19 +1,25 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import javafx.scene.Node;
 import javafx.scene.control.DialogPane;
+import javafx.scene.input.Clipboard;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.testfx.api.FxRobot;
 import org.testfx.framework.junit5.Start;
 import org.testfx.framework.junit5.Stop;
+import org.testfx.util.WaitForAsyncUtils;
 
 /**
  * 前の書き出しがアプリごと落ちて残した控えを、次の保存で伝える（#138）。
@@ -63,9 +69,48 @@ class AbandonedCopyUiTest extends DesktopUiTest {
         String message =
                 robot.lookup("#message-dialog").queryAs(DialogPane.class).getContentText();
         assertTrue(message.contains(kept.toString()), "控えの在り処を伝えていない（#138）: " + message);
+
+        // ★ 作業場所の名前は乱数であり、1 桁でも書き違えれば辿り着けない（#137）。
+        clickWhenReady(robot, "#message-copy-location");
+        assertEquals(
+                kept.toString(),
+                WaitForAsyncUtils.asyncFx(() -> Clipboard.getSystemClipboard().getString())
+                        .get(),
+                "在り処を写せない（#137）");
+        assertTrue(
+                robot.lookup("#message-ok").tryQuery().map(Node::isVisible).orElse(false), "写しただけで窓が閉じた。本文を読み終える前に消える");
         clickWhenReady(robot, "#message-ok");
 
         assertEquals(List.of("A1"), pageTexts(output), "書き出しそのものが邪魔されている");
         assertEquals(List.of("OLD"), pageTexts(kept), "伝えただけでなく、控えに触っている");
+    }
+
+    /**
+     * 写すボタンを足した窓も、窓の × で閉じられる（#137）。
+     *
+     * <p><b>★★ JavaFX のダイアログは、ボタンが 2 つ以上あると、取り消し側のボタンが無い限り
+     * × で閉じない</b>（{@code Dialog} の「Dialog Closing Rules」）。OK だけの窓は 1 つなので閉じていた——
+     * <b>写すボタンを足しただけで、× が効かなくなる。</b>
+     *
+     * <p>× を押す代わりに、閉じる要求をその窓へ送る。OS の × が送るのと同じ出来事である。
+     */
+    @Test
+    void 在り処を出した窓も閉じる要求で閉じる(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-1234567890"));
+        Files.createFile(crashed.resolve("held"));
+        TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
+
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+        saveAs(robot, dir.resolve("out.pdf"));
+        waitForNode(robot, "#message-copy-location");
+
+        Window window = robot.lookup("#message-dialog")
+                .queryAs(DialogPane.class)
+                .getScene()
+                .getWindow();
+        robot.interact(() -> window.fireEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSE_REQUEST)));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertFalse(window.isShowing(), "写すボタンを足した窓が × で閉じない");
     }
 }

@@ -6,11 +6,17 @@ import io.github.propagandist.pdfjig.core.Warning;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
+import javafx.event.ActionEvent;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.Region;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 
 /**
  * 利用者に伝える。
@@ -85,7 +91,7 @@ final class Messages {
         if (copies.isEmpty()) {
             return;
         }
-        show(AlertType.WARNING, describeAbandoned(copies));
+        show(AlertType.WARNING, describeAbandoned(copies), copies);
     }
 
     /**
@@ -132,7 +138,7 @@ final class Messages {
      */
     void failure(Throwable failure) {
         Logs.warn(LogEvent.OPERATION_FAILED, failure);
-        show(AlertType.ERROR, describe(failure));
+        show(AlertType.ERROR, describe(failure), locations(failure));
     }
 
     /**
@@ -174,6 +180,27 @@ final class Messages {
         return stockPhrase(failure);
     }
 
+    /**
+     * 失敗の窓に出した在り処を、出した順に返す。
+     *
+     * <p><b>★★ {@link #describe} が出したものだけを返す。</b>写せるものが画面に出ていないと、
+     * <b>読んでいないパスを貼らせることになる。</b>足すときは両方を直すこと（{@code MessagesTest}）。
+     *
+     * @param failure 起きた失敗。{@code null} でもよい
+     * @return 在り処。無ければ空
+     */
+    static List<Path> locations(Throwable failure) {
+        if (failure instanceof ReplacedFileKeptException kept) {
+            return kept.plaintext()
+                    .map(plaintext -> List.of(kept.kept(), plaintext))
+                    .orElseGet(() -> List.of(kept.kept()));
+        }
+        if (failure instanceof PlaintextLeftException left) {
+            return List.of(left.plaintext());
+        }
+        return List.of();
+    }
+
     /** 消し損ねた平文の在り処（#184）。 */
     private static String plaintextNotice(Path plaintext) {
         return "\n\n★ パスワードで保護されていない中身のファイルが残っています。先に消してください。\n" + plaintext;
@@ -213,6 +240,20 @@ final class Messages {
     }
 
     private void show(AlertType type, String message) {
+        show(type, message, List.of());
+    }
+
+    /**
+     * 窓を出す。在り処があれば、それを写すボタンを添える（#137）。
+     *
+     * <p><b>★★ 本文の {@code Label} は選択できない。</b>作業場所の名前は乱数であり
+     * （{@code .pdfjig-6521790852410932614}）、<b>1 桁でも書き違えれば辿り着けない。</b>
+     * ログにはパスを書かない（{@code docs/SPEC.md} §10.4）ので、<b>伝える機会はこの窓 1 回だけである。</b>
+     *
+     * <p><b>在り処の無い窓には何も足さない。</b>ボタンを添えるのはここだけで、見た目も変えない。
+     * 形は {@link AboutDialog} の「情報をコピー」に揃えてある。
+     */
+    private void show(AlertType type, String message, List<Path> locations) {
         Alert alert = new Alert(type, message, ButtonType.OK);
         alert.setHeaderText(null);
         alert.initOwner(owner);
@@ -223,6 +264,30 @@ final class Messages {
         alert.setResizable(true);
         alert.getDialogPane().setId("message-dialog");
         alert.getDialogPane().lookupButton(ButtonType.OK).setId("message-ok");
+        if (!locations.isEmpty()) {
+            ButtonType copy = new ButtonType("場所をコピー", ButtonData.OTHER);
+            alert.getDialogPane().getButtonTypes().add(copy);
+            Button copyButton = (Button) alert.getDialogPane().lookupButton(copy);
+            copyButton.setId("message-copy-location");
+            copyButton.addEventFilter(ActionEvent.ACTION, event -> {
+                ClipboardContent clipboard = new ClipboardContent();
+                // 1 行に 1 つ。1 つだけならそのままエクスプローラのアドレス欄へ貼れる。
+                clipboard.putString(locations.stream().map(Path::toString).collect(Collectors.joining("\n")));
+                Clipboard.getSystemClipboard().setContent(clipboard);
+                copyButton.setText("コピーしました");
+                // 押した結果として窓が閉じては、本文を読み終える前に消える（AboutDialog と同じ）。
+                event.consume();
+            });
+            // ★★ ボタンが 2 つになると、取り消し側のボタンが無い限り窓の × で閉じない
+            //   （Dialog の「Dialog Closing Rules」。AbandonedCopyUiTest が赤にした）。
+            //   OK で閉じたのと同じ結果を置いてから閉じる——結果があれば、閉じてよいかを問われない。
+            //   OK の型は変えない。変えると Enter で閉じなくなり、id の掴み方も変わる。
+            alert.getDialogPane().getScene().getWindow().addEventFilter(WindowEvent.WINDOW_CLOSE_REQUEST, event -> {
+                alert.setResult(ButtonType.OK);
+                alert.close();
+                event.consume();
+            });
+        }
         alert.showAndWait();
     }
 }
