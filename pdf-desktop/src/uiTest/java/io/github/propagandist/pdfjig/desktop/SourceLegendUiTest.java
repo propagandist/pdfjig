@@ -5,10 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
@@ -220,6 +223,43 @@ class SourceLegendUiTest extends DesktopUiTest {
     }
 
     /**
+     * 同じ名前のファイルは、親フォルダで区別が付く（#128）。一覧・メニュー・外す確認のどれでも。
+     *
+     * <p><b>★★ 取り消せない操作の対象を、名前だけで指している。</b>同じ名前が 2 つ並ぶと、
+     * <b>帯の色しか手がかりが無く</b>、色が見えない利用者と読み上げには区別が付かない。
+     * <b>外す確認が最後の関門であり、そこまで見る。</b>
+     */
+    @Test
+    void 同じ名前のファイルは親フォルダで区別が付く(@TempDir Path dir, FxRobot robot) throws Exception {
+        // ★ 同じ名前のファイルは、2 つ目以降のファイルとして足す。1 行目の中身は足す前後で変わらず、
+        //   帯も既に出ている——ListView はその行を描き直さないので、名前が変わったことを知らせる
+        //   仕組みが無いと、先に開いたほうだけ曖昧なまま残る（#128 の門）。
+        //   1 つ目から 2 つ目へ増えるときは帯が出るので、そちらはどのみち描き直される。
+        openFixture(
+                robot, TestPdfs.plain(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), 12));
+        addFiles(robot, TestPdfs.withText(dir.resolve("other.pdf"), "O1"));
+        addFiles(
+                robot,
+                TestPdfs.withText(Files.createDirectory(dir.resolve("archive")).resolve("r.pdf"), "B1"));
+        waitForNode(robot, "#source-remove-2");
+
+        assertEquals("r.pdf（work） をこの編集から外す", accessibleTextOf(robot, "#source-remove-0"));
+        // ★★ 足す前から並んでいたページの説明も変わる。
+        assertEquals("r.pdf（work） の 1 ページ目", tooltipOf(robot, "#thumbnail-tile-0"));
+        assertEquals("r.pdf（archive） をこの編集から外す", accessibleTextOf(robot, "#source-remove-2"));
+        assertEquals(
+                "r.pdf（archive） を外す…",
+                menuItem(robot, "menu-remove-source-2").orElseThrow().getText());
+
+        robot.clickOn("#source-remove-2");
+        waitForNode(robot, "#remove-source-cancel");
+        String asked =
+                robot.lookup("#remove-source-dialog").queryAs(DialogPane.class).getContentText();
+        assertTrue(asked.startsWith("r.pdf（archive） の "), "外す確認がどちらの r.pdf かを言っていない: " + asked);
+        clickWhenReady(robot, "#remove-source-cancel");
+    }
+
+    /**
      * 1 ファイルしか開いていなければ押せない。
      *
      * <p>一覧を出さないのと同じ条件である。外すと何も残らない操作を、メニューからだけ押せては困る。
@@ -245,6 +285,17 @@ class SourceLegendUiTest extends DesktopUiTest {
     private void addFiles(FxRobot robot, Path... paths) throws Exception {
         addFixtures(robot, paths);
         waitForNode(robot, "#source-remove-0");
+    }
+
+    /**
+     * 節点に付いたツールチップの文言。
+     *
+     * <p>{@code Tooltip.install} は節点のプロパティに置く（JavaFX 21 の {@code Tooltip#TOOLTIP_PROP_KEY}）。
+     * <b>ツールチップを出すにはマウスを載せて待つことになり、テストが遅く揺れる</b>ので、置き場を直に読む。
+     */
+    private static String tooltipOf(FxRobot robot, String id) {
+        Tooltip tooltip = (Tooltip) robot.lookup(id).query().getProperties().get("javafx.scene.control.Tooltip");
+        return tooltip == null ? null : tooltip.getText();
     }
 
     /** 節点に付いた、支援技術から読まれる名前。 */
