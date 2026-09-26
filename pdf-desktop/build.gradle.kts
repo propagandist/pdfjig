@@ -119,18 +119,24 @@ val appName = "PDFjig"
 
 val appVendor = "PROPAGANDIST CORPORATION"
 
-/** ランチャー exe のバージョン情報に入る説明。エクスプローラのプロパティとタスクマネージャに出る。 */
-val appDescription = "PDF を綴じ、解き、取り出すためのデスクトップユーティリティ"
-
 /**
- * インストーラのメタデータに入る説明。
+ * jpackage の --description に渡す説明。**本体とインストーラで 1 つを使う**——2 つに分けていたので、
+ * 片方を直したときにもう片方が日本語のまま残った。
  *
- * MSI のサマリ情報ストリームはコードページ 1033（英語）で書かれるため、日本語を渡すと
- * 最初の非 ASCII 文字以降が黙って落ちて "PDF " だけが残る。切れた文字列を配るより、
- * 最初から ASCII で書いておくほうが正直である。
+ * ★★ ASCII で書く。行き先は 2 つあり、どちらも日本語を受け付けない。
+ * - **本体の EXE のバージョン情報**（エクスプローラのプロパティとタスクマネージャに出る）——ビルドする
+ *   ランナー（英語の Windows）で非 ASCII が `?` に置き換わり、タスクマネージャに `PDF ???…` と出ていた
+ *   （v0.1.0〜v0.1.2 で配った。2026-09-26、v0.0.6 の実機確認で見つかった）
+ * - **MSI のサマリ情報**——コードページ 1033（英語）で書かれ、最初の非 ASCII 文字以降が黙って落ちて
+ *   "PDF " だけが残る
  * 画面に出る文言（ProductName / Manufacturer / ダイアログ）は日本語のまま影響を受けない。
+ * ★ 下の require が設定を読む時点で止める。配布物では起動確認（tools/smoke/Verify-AppImage.ps1）も見る。
  */
-val installerDescription = "PDF utility - bind, split, rotate and extract pages"
+val appDescription = "PDF utility - bind, split, rotate and extract pages"
+
+require(appDescription.all { it.code in 0x20..0x7E } && !appDescription.contains('?')) {
+    "appDescription は ASCII（? を除く）で書くこと。jpackage が非 ASCII を ? に置き換える: $appDescription"
+}
 
 /**
  * MSI の ProductVersion は数値のみ（major.minor.build）でなければならず、
@@ -343,6 +349,11 @@ val jpackageAppImage =
         inputs.dir(runtimeDir)
         inputs.file(iconFile)
         inputs.property("appVersion", appVersion)
+        // ★ jpackage へ渡すメタデータも入力である。宣言しないと、説明を直しても「最新」と見なされ、
+        //   古い説明の EXE が残る（#172 の門）。
+        inputs.property("appName", appName)
+        inputs.property("appVendor", appVendor)
+        inputs.property("appDescription", appDescription)
         outputs.dir(imageDir)
 
         val mainJarName = tasks.jar.flatMap { it.archiveFileName }
@@ -393,6 +404,9 @@ fun Exec.jpackageInstaller(
     dependsOn(jpackageAppImage)
     inputs.dir(imageDir)
     inputs.property("appVersion", appVersion)
+    inputs.property("appName", appName)
+    inputs.property("appVendor", appVendor)
+    inputs.property("appDescription", appDescription)
     outputs.file(distDir.file("$appName-$appVersion.$type"))
 
     doFirst {
@@ -419,7 +433,7 @@ fun Exec.jpackageInstaller(
                 "--copyright",
                 "Copyright 2026 $appVendor",
                 "--description",
-                installerDescription,
+                appDescription,
                 "--license-file",
                 licenseFile.asFile.absolutePath,
                 "--win-menu",

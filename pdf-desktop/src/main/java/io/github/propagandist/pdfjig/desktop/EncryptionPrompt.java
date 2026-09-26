@@ -162,8 +162,11 @@ final class EncryptionPrompt {
         ScrollPane scroller = new ScrollPane(content);
         scroller.setFitToWidth(true);
         scroller.setHbarPolicy(ScrollBarPolicy.NEVER);
-        // 枠と地色を消す。中身は窓そのものの続きであって、囲まれた別の面ではない。
-        scroller.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        // 枠を消す。中身は窓そのものの続きであって、囲まれた別の面ではない。
+        // ★★ Modena の組み込みの edge-to-edge を使う。-fx-background を自分で書き換えない——
+        //   Modena は文字の色を -fx-background の明るさから決める（ladder）ので、透明を当てると
+        //   白い文字になり、注意文も権限の見出しも読めなくなった（2026-09-26、v0.0.6 の実機確認で見つかった）。
+        scroller.getStyleClass().add("edge-to-edge");
 
         ButtonType apply = new ButtonType("保護して保存", ButtonData.OK_DONE);
 

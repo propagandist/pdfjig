@@ -19,8 +19,11 @@ import java.nio.file.Path;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.DialogPane;
+import javafx.scene.control.Labeled;
 import javafx.scene.control.TitledPane;
 import javafx.scene.input.KeyCode;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -120,6 +123,75 @@ class EncryptionUiTest extends DesktopUiTest {
                 new AccessPermissions(false, true, false, true, true, true, true, false),
                 info.permissions(),
                 "外した権限と残した権限が食い違っている");
+    }
+
+    /**
+     * 窓の文字が読める色で出る。
+     *
+     * <p><b>★★ 注意文と権限の見出しが、白に近い色で出ていた</b>（2026-09-26、捨てタグ {@code v0.0.6} の
+     * 実機確認で見つかった）。Modena は文字の色を {@code -fx-background} の明るさから決める
+     * （{@code -fx-text-background-color: ladder(-fx-background, …)}）。そこへ透明（明るさ 0）を当てると、
+     * <b>暗い地だと読んで明るい文字を選ぶ。</b>欄の中の文字は別の色から決まるので、<b>欄だけが普通に見えた。</b>
+     *
+     * <p><b>この窓は、読んで分からなければ守りが無い</b>（{@code docs/HANDOVER.md} 4-4 の 17〜19 番）。
+     * 見るのは地とのコントラスト比であって、読みやすさそのものではない。
+     */
+    @Test
+    void 窓の文字は読める色で出る(@TempDir Path dir, FxRobot robot) throws Exception {
+        openPrompt(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1"), dir.resolve("protected.pdf"));
+        Color background = (Color) robot.lookup("#encryption-dialog")
+                .queryAs(DialogPane.class)
+                .getBackground()
+                .getFills()
+                .get(0)
+                .getFill();
+
+        // 申告制の注意と、権限の束。
+        assertReadable(robot, "#encryption-owner-only-warning", background);
+        assertReadable(robot, "#encryption-allow-print", background);
+
+        // 同じ鍵を両方に打つと出る注意（4-4 の 18 番が読めることを求める）。
+        clickWhenReady(robot, "#encryption-user-password");
+        robot.write(USER);
+        clickWhenReady(robot, "#encryption-owner-password");
+        robot.write(USER);
+        waitFor(() -> node(robot, "#encryption-no-owner-warning").isVisible());
+        assertReadable(robot, "#encryption-no-owner-warning", background);
+
+        // 詳細の中の 1 つずつの権限（4-4 の 19 番）。
+        clickWhenReady(robot, "#encryption-details");
+        waitFor(() ->
+                robot.lookup("#encryption-details").queryAs(TitledPane.class).isExpanded());
+        assertReadable(robot, "#encryption-flag-print", background);
+
+        clickWhenReady(robot, "#encryption-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /**
+     * 文字と窓の地のコントラスト比が 4.5 以上あること（WCAG 2.x の AA、通常の文字の基準）。
+     *
+     * <p><b>明るさだけで見ない。</b>読みやすい色の付いた文字を落とし、暗い地に暗い文字を通してしまう。
+     */
+    private static void assertReadable(FxRobot robot, String id, Color background) {
+        Color text = (Color) ((Labeled) node(robot, id)).getTextFill();
+        double ratio = contrast(text, background);
+        assertTrue(ratio >= 4.5, id + " の文字が地と見分けにくい（コントラスト比 " + ratio + "、文字 " + text + "、地 " + background + "）");
+    }
+
+    private static double contrast(Color a, Color b) {
+        double la = luminance(a);
+        double lb = luminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+
+    /** 相対輝度（WCAG 2.x の定義）。 */
+    private static double luminance(Color c) {
+        return 0.2126 * linear(c.getRed()) + 0.7152 * linear(c.getGreen()) + 0.0722 * linear(c.getBlue());
+    }
+
+    private static double linear(double channel) {
+        return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
     }
 
     @Test
