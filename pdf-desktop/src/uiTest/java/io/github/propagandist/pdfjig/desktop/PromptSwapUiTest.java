@@ -175,7 +175,7 @@ class PromptSwapUiTest extends DesktopUiTest {
                 () -> window.open(other), () -> stage.getTitle().contains("c.pdf"));
 
         dialogs.willSaveTo(output);
-        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        pressSave(robot);
 
         Optional<Node> notice = dialogButton(robot, "#message-ok");
         assertTrue(notice.isPresent(), "書かなかったことを伝えていない");
