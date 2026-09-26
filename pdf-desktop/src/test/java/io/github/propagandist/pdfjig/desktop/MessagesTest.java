@@ -77,7 +77,7 @@ class MessagesTest {
                         + "上書きする前に中身を比べてください。"
                         + "\n\n自分のものだと確かめて、要るものを取り出したら、そのフォルダは消してかまいません。"
                         + "自分のものでなければ、消さずにおいてください。",
-                Messages.describeAbandoned(List.of(first, second)));
+                Messages.describeAbandoned(List.of(first, second)).text());
     }
 
     /**
@@ -160,5 +160,69 @@ class MessagesTest {
 
         assertTrue(message.contains(plaintext.toString()), "消し損ねた平文の場所を言っていない: " + message);
         assertTrue(message.contains("保護されていない"), "何が残っているのかを言っていない: " + message);
+    }
+
+    /**
+     * 写せる在り処は、窓に出した在り処と同じものを、同じ順に並べる（#137）。
+     *
+     * <p><b>★★ 片方だけ直すと、読んでいないパスを貼らせる</b>——あるいは、出したのに写せない。
+     * <b>本文の中の位置で順を見る</b>ので、並べ替えても落ちる。
+     */
+    @Test
+    void copiesTheSameLocationsItShowsInTheSameOrder() {
+        Path kept = Path.of("C:", "work", ".pdfjig-1", "replaced.pdf");
+        Path plaintext = OutputWorkspace.writtenBeside(kept);
+        List<RuntimeException> failures = List.of(
+                new ReplacedFileKeptException(kept, plaintext, new PdfjigException(ErrorCode.IO_FAILURE)),
+                new ReplacedFileKeptException(kept, null, new PdfjigException(ErrorCode.IO_FAILURE)),
+                new PlaintextLeftException(plaintext, new PdfjigException(ErrorCode.IO_FAILURE)));
+        List<List<Path>> expected = List.of(List.of(kept, plaintext), List.of(kept), List.of(plaintext));
+
+        for (int i = 0; i < failures.size(); i++) {
+            Messages.Notice notice = Messages.notice(failures.get(i));
+            List<Path> locations = notice.locations();
+            String message = notice.text();
+
+            assertEquals(expected.get(i), locations, "写せる在り処が違う: " + message);
+            int previous = -1;
+            for (Path location : locations) {
+                int at = message.indexOf(location.toString(), previous + 1);
+                assertTrue(at > previous, "窓に出ていない在り処、または出した順と違う: " + location + " / " + message);
+                previous = at;
+            }
+        }
+    }
+
+    /**
+     * 写すのは在り処の入ったフォルダで、出した順に、重ねずに並べる（#137）。
+     *
+     * <p><b>★★ ファイルそのものを写すと、アドレス欄へ貼ったときにファイルが開く</b>——
+     * 消し損ねた平文なら、消せと言ったものを開かせる。<b>控えと平文は同じ作業場所にあるので、
+     * その窓で写すものは 1 つになる。</b>
+     */
+    @Test
+    void copiesTheFoldersNotTheFiles() {
+        Path kept = Path.of("C:", "work", ".pdfjig-1", "replaced.pdf");
+        Path plaintext = OutputWorkspace.writtenBeside(kept);
+        Path first = Path.of("C:", "work", ".pdfjig-2", "replaced.pdf");
+        Path second = Path.of("C:", "work", ".pdfjig-3", "replaced.pdf");
+
+        assertEquals(
+                List.of(kept.getParent()),
+                Messages.notice(new ReplacedFileKeptException(
+                                kept, plaintext, new PdfjigException(ErrorCode.IO_FAILURE)))
+                        .folders());
+        assertEquals(
+                List.of(first.getParent(), second.getParent()),
+                Messages.describeAbandoned(List.of(first, second)).folders());
+    }
+
+    /** ふつうの失敗には、写すものも無い。ボタンが出ないのはこのためである（#137）。 */
+    @Test
+    void copiesNothingFromAnOrdinaryFailure() {
+        assertEquals(
+                List.of(),
+                Messages.notice(new PdfjigException(ErrorCode.IO_FAILURE)).locations());
+        assertEquals(List.of(), Messages.notice(null).locations());
     }
 }
