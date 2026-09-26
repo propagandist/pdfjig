@@ -260,11 +260,27 @@ final class Messages {
         alert.setHeaderText("このファイルに対して行った並べ替えや回転も消えます。");
         alert.initOwner(owner);
         alert.getDialogPane().setId("remove-source-dialog");
-        alert.getDialogPane().lookupButton(ButtonType.OK).setId("remove-source-ok");
+        Button ok = (Button) alert.getDialogPane().lookupButton(ButtonType.OK);
+        ok.setId("remove-source-ok");
         // ★ 断る側にも id が要る（#115）。確認を出しておいて「キャンセル」でも外れるなら
         //   確認は嘘になるので、そこを自動テストで確かめられなければならない。
-        alert.getDialogPane().lookupButton(ButtonType.CANCEL).setId("remove-source-cancel");
+        Button cancel = (Button) alert.getDialogPane().lookupButton(ButtonType.CANCEL);
+        cancel.setId("remove-source-cancel");
+        // ★★ 既定は断る側にする（#171 の対象範囲。直した経路の隣）。素の Alert は OK が既定で、
+        //   Enter を続けて押すと取り消せない操作が通る。ProtectionPrompt と同じ形である。
+        preferCancel(alert, ok, cancel);
         return alert.showAndWait().filter(ButtonType.OK::equals).isPresent();
+    }
+
+    /**
+     * 既定のボタンと初期フォーカスを断る側に倒す。
+     *
+     * <p><b>Enter を続けて押しても、取り消せない側に倒れない</b>（{@link ProtectionPrompt} と同じ形）。
+     */
+    private static void preferCancel(Alert alert, Button proceed, Button cancel) {
+        proceed.setDefaultButton(false);
+        cancel.setDefaultButton(true);
+        alert.setOnShown(event -> cancel.requestFocus());
     }
 
     private void show(AlertType type, String message) {

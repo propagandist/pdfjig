@@ -92,6 +92,25 @@ class SourceLegendUiTest extends DesktopUiTest {
     }
 
     /**
+     * 外す確認は、Enter を続けて押しても外さない（#171 の対象範囲）。
+     *
+     * <p><b>★★ 唯一取り消せない操作である。</b>素の {@code Alert} は OK が既定で、
+     * <b>Enter を続けて押すと外れた</b>——閉じる前の確認を足した差分の「直した経路の隣」である。
+     */
+    @Test
+    void 外す確認はEnterでは外さない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openTwo(robot, dir);
+
+        robot.clickOn("#source-remove-1");
+        waitForNode(robot, "#remove-source-cancel");
+        robot.type(KeyCode.ENTER);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertTrue(robot.lookup("#remove-source-dialog").tryQuery().isEmpty(), "Enter で窓が閉じていない");
+        assertEquals("3 / 3 ページ（2 ファイル）", statusText(robot), "Enter だけで外れた");
+    }
+
+    /**
      * 外したファイルの id が一覧に残らない。
      *
      * <p><b>★ サムネイルのタイルと同じ注意である</b>（{@code .claude/rules/desktop-ui.md}「画面の id と JavaFX」）——
@@ -160,6 +179,11 @@ class SourceLegendUiTest extends DesktopUiTest {
         robot.type(KeyCode.DOWN); // b.pdf
         robot.type(KeyCode.ENTER);
         waitForNode(robot, "#remove-source-ok");
+        // ★★ 既定は断る側である（#171 の対象範囲）。Enter を続けて押しても外れない——
+        //   キーボードで承認するには、OK へフォーカスを移してから押す。
+        assertTrue(robot.lookup("#remove-source-cancel").query().isFocused(), "初めのフォーカスが断る側に無い");
+        robot.press(KeyCode.SHIFT).type(KeyCode.TAB).release(KeyCode.SHIFT);
+        assertTrue(robot.lookup("#remove-source-ok").query().isFocused(), "Shift+Tab で OK へ移れない");
         robot.type(KeyCode.ENTER);
 
         waitFor(() -> statusText(robot).equals("2 / 2 ページ"));
