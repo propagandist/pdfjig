@@ -995,7 +995,7 @@ public final class MainWindow {
             if (!stillHolds(held)) {
                 return;
             }
-            addDocument(held.target(), path);
+            addDocument(held.target(), path, sorted);
             // 足した分だけ出どころが伸びる。掴み直すのは同じ文書である——session を読むと入れ替わりを見逃す。
             held = new Held(held.target(), held.target().paths());
         }
@@ -1007,13 +1007,13 @@ public final class MainWindow {
      * <p>読み込みは短く、足した結果は画面にすぐ出したい。ここは同期で行う。
      * ページの描画は今までどおりサムネイル側が非同期で受け持つ。
      */
-    private void addDocument(DocumentSession target, Path path) {
+    private void addDocument(DocumentSession target, Path path, List<Path> coming) {
         folders.rememberReadFile(path);
         try {
             target.add(path);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.PASSWORD_REQUIRED) {
-                addWithPassword(target, path, false);
+                addWithPassword(target, path, coming, false);
             } else {
                 messages.failure(e);
             }
@@ -1021,13 +1021,18 @@ public final class MainWindow {
         afterOrderChanged();
     }
 
-    /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
-    private void addWithPassword(DocumentSession target, Path path, boolean retry) {
+    /**
+     * パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。
+     *
+     * @param coming 1 度に選んで一緒に足すファイル（{@code path} を含む）。鍵の窓に出す名前を、
+     *               まだ足していない同じ名前の相手とも区別するために使う（#128）
+     */
+    private void addWithPassword(DocumentSession target, Path path, List<Path> coming, boolean retry) {
         Held held = new Held(target, target.paths());
-        // ★ 足した後に出る名前で訊く。既に開いている同じ名前のファイルと区別が付かないと、
-        //   どちらの鍵を訊かれているのか分からない（#128）。
+        // ★ 足した後に出る名前で訊く。既に開いている、あるいは一緒に選んだ同じ名前のファイルと
+        //   区別が付かないと、どちらの鍵を訊かれているのか分からない（#128）。
         Optional<Password> entered =
-                PasswordPrompt.ask(stage, target.nameIfAdded(path), PasswordPrompt.Purpose.OPEN, retry);
+                PasswordPrompt.ask(stage, target.nameIfAdded(path, coming), PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -1041,7 +1046,7 @@ public final class MainWindow {
             target.add(path, password);
         } catch (PdfjigException e) {
             if (e.errorCode() == ErrorCode.INVALID_PASSWORD) {
-                addWithPassword(target, path, true);
+                addWithPassword(target, path, coming, true);
             } else {
                 messages.failure(e);
             }

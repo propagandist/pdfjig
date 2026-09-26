@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -17,6 +18,9 @@ import org.junit.jupiter.api.io.TempDir;
  * 鍵を訊く窓が、どれもこの名前で相手を指す。
  */
 class SourceNamesTest {
+
+    /** 区切りは動いている環境のものを使う。配るのは Windows だけだが、CI は ubuntu でも走る。 */
+    private static final String SEPARATOR = java.io.File.separator;
 
     /** ふだんの表示は変えない。同じ名前でなければ何も足さない。 */
     @Test
@@ -40,7 +44,7 @@ class SourceNamesTest {
     @Test
     void climbsUntilTheyDiffer(@TempDir Path dir) {
         assertEquals(
-                List.of("r.pdf（a\\work）", "r.pdf（b\\work）"),
+                List.of("r.pdf（a" + SEPARATOR + "work）", "r.pdf（b" + SEPARATOR + "work）"),
                 SourceNames.of(List.of(dir.resolve("a/work/r.pdf"), dir.resolve("b/work/r.pdf"))));
     }
 
@@ -62,7 +66,7 @@ class SourceNamesTest {
         List<String> names = SourceNames.of(
                 List.of(dir.resolve("a/work/r.pdf"), dir.resolve("b/work/r.pdf"), dir.resolve("b/home/r.pdf")));
 
-        assertEquals(List.of("r.pdf（a\\work）", "r.pdf（b\\work）", "r.pdf（home）"), names);
+        assertEquals(List.of("r.pdf（a" + SEPARATOR + "work）", "r.pdf（b" + SEPARATOR + "work）", "r.pdf（home）"), names);
     }
 
     /** 根でしか違わないなら、根を添える（Windows のドライブ）。 */
@@ -75,16 +79,27 @@ class SourceNamesTest {
     }
 
     /**
-     * 同じファイルを 2 度開いたときは、区別が付かないまま返す。
+     * 同じファイルを 2 度足したときは、何番目かを添える。
      *
-     * <p><b>遡っても違いが出ない</b>——同じものを指しているので、取り違えても害が無い。落ちないことを見る。
+     * <p><b>★★ 遡っても違いが出ないが、取り違えて害が無いわけではない</b>——並べ替えや削除は
+     * それぞれに掛かっているので、外す相手を取り違えれば失うものが違う。
      */
     @Test
-    void givesUpOnTheSameFileTwice(@TempDir Path dir) {
+    void numbersTheSameFileAddedTwice(@TempDir Path dir) {
         Path same = dir.resolve("work/r.pdf");
         List<String> names = SourceNames.of(List.of(same, same));
 
-        assertEquals(names.get(0), names.get(1));
-        assertNotEquals("r.pdf", names.get(0), "同じ名前があるのに、それと分かる形になっていない");
+        assertNotEquals(names.get(0), names.get(1), "同じファイルを 2 度足すと区別が付かない");
+        assertTrue(names.get(0).endsWith("、1 つ目）"), names.get(0));
+        assertTrue(names.get(1).endsWith("、2 つ目）"), names.get(1));
+    }
+
+    /** 大文字と小文字しか違わず、フォルダも同じなら、何番目かを添える。読み上げでは同じに聞こえる。 */
+    @Test
+    void numbersNamesThatDifferOnlyInCaseWithinOneFolder(@TempDir Path dir) {
+        List<String> names = SourceNames.of(List.of(dir.resolve("x/Report.pdf"), dir.resolve("x/report.pdf")));
+
+        assertTrue(names.get(0).startsWith("Report.pdf（") && names.get(0).endsWith("、1 つ目）"), names.get(0));
+        assertTrue(names.get(1).startsWith("report.pdf（") && names.get(1).endsWith("、2 つ目）"), names.get(1));
     }
 }

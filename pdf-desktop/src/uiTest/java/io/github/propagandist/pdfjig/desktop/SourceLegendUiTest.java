@@ -11,6 +11,7 @@ import java.util.List;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
@@ -230,20 +231,27 @@ class SourceLegendUiTest extends DesktopUiTest {
      */
     @Test
     void 同じ名前のファイルは親フォルダで区別が付く(@TempDir Path dir, FxRobot robot) throws Exception {
+        // ★ 同じ名前のファイルは、2 つ目以降のファイルとして足す。1 行目の中身は足す前後で変わらず、
+        //   帯も既に出ている——ListView はその行を描き直さないので、名前が変わったことを知らせる
+        //   仕組みが無いと、先に開いたほうだけ曖昧なまま残る（#128 の門）。
+        //   1 つ目から 2 つ目へ増えるときは帯が出るので、そちらはどのみち描き直される。
         openFixture(
-                robot,
-                TestPdfs.withText(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), "A1"));
+                robot, TestPdfs.plain(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), 12));
+        addFiles(robot, TestPdfs.withText(dir.resolve("other.pdf"), "O1"));
         addFiles(
                 robot,
                 TestPdfs.withText(Files.createDirectory(dir.resolve("archive")).resolve("r.pdf"), "B1"));
+        waitForNode(robot, "#source-remove-2");
 
         assertEquals("r.pdf（work） をこの編集から外す", accessibleTextOf(robot, "#source-remove-0"));
-        assertEquals("r.pdf（archive） をこの編集から外す", accessibleTextOf(robot, "#source-remove-1"));
+        // ★★ 足す前から並んでいたページの説明も変わる。
+        assertEquals("r.pdf（work） の 1 ページ目", tooltipOf(robot, "#thumbnail-tile-0"));
+        assertEquals("r.pdf（archive） をこの編集から外す", accessibleTextOf(robot, "#source-remove-2"));
         assertEquals(
                 "r.pdf（archive） を外す…",
-                menuItem(robot, "menu-remove-source-1").orElseThrow().getText());
+                menuItem(robot, "menu-remove-source-2").orElseThrow().getText());
 
-        robot.clickOn("#source-remove-1");
+        robot.clickOn("#source-remove-2");
         waitForNode(robot, "#remove-source-cancel");
         String asked =
                 robot.lookup("#remove-source-dialog").queryAs(DialogPane.class).getContentText();
@@ -277,6 +285,17 @@ class SourceLegendUiTest extends DesktopUiTest {
     private void addFiles(FxRobot robot, Path... paths) throws Exception {
         addFixtures(robot, paths);
         waitForNode(robot, "#source-remove-0");
+    }
+
+    /**
+     * 節点に付いたツールチップの文言。
+     *
+     * <p>{@code Tooltip.install} は節点のプロパティに置く（JavaFX 21 の {@code Tooltip#TOOLTIP_PROP_KEY}）。
+     * <b>ツールチップを出すにはマウスを載せて待つことになり、テストが遅く揺れる</b>ので、置き場を直に読む。
+     */
+    private static String tooltipOf(FxRobot robot, String id) {
+        Tooltip tooltip = (Tooltip) robot.lookup(id).query().getProperties().get("javafx.scene.control.Tooltip");
+        return tooltip == null ? null : tooltip.getText();
     }
 
     /** 節点に付いた、支援技術から読まれる名前。 */

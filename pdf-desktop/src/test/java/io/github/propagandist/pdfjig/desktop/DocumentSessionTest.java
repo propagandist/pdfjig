@@ -81,7 +81,7 @@ class DocumentSessionTest {
         try (Password key = Password.copyOf("key");
                 DocumentSession session = DocumentSession.open(plain)) {
             // 鍵の窓は足す前に出るので、足した後の名前をその時点で答えられなければならない。
-            assertEquals("report.pdf（archive）", session.nameIfAdded(locked));
+            assertEquals("report.pdf（archive）", session.nameIfAdded(locked, List.of(locked)));
             session.add(locked, key);
 
             assertEquals(

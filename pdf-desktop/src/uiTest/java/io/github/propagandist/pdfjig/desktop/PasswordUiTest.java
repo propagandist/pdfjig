@@ -188,7 +188,78 @@ class PasswordUiTest extends DesktopUiTest {
         WaitForAsyncUtils.waitForFxEvents();
     }
 
+    /**
+     * 1 度に選んだ中の同じ名前のファイルとも、鍵を訊く窓で区別が付く（#128 の門）。
+     *
+     * <p><b>鍵の窓は、まだ足していない相手がいるうちに出る。</b>足し終えたものとだけ比べると、
+     * <b>一緒に選んだもう 1 つの r.pdf と区別が付かない。</b>
+     */
+    @Test
+    void 一緒に選んだ同じ名前のファイルとも区別が付く(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+        // 名前が同じなので、並べ替えても選んだ順のまま残る。鍵の要るほうを先に足させる。
+        addFixtures(
+                robot,
+                TestPdfs.encrypted(Files.createDirectory(dir.resolve("archive")).resolve("r.pdf"), CORRECT),
+                TestPdfs.withText(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), "W1"));
+
+        waitForNode(robot, "#password-field");
+        String asked =
+                robot.lookup("#password-explanation").queryAs(Label.class).getText();
+        assertTrue(asked.startsWith("r.pdf（archive） "), "一緒に選んだ r.pdf と区別が付かない: " + asked);
+        clickWhenReady(robot, "#password-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /**
+     * 書き出しの鍵を訊く窓でも、同じ名前のファイルは区別が付く（#128 の門）。
+     *
+     * <p><b>★★ 鍵は出どころごとに違いうる。</b>どちらの鍵かが読めないと、<b>別の文書の鍵を打たせる。</b>
+     */
+    @Test
+    void 書き出しの鍵を訊く窓でも同じ名前のファイルは区別が付く(@TempDir Path dir, FxRobot robot) throws Exception {
+        dialogs.willOpen(
+                TestPdfs.encrypted(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), CORRECT));
+        robot.clickOn("#tool-open");
+        enterKey(robot);
+        waitForNode(robot, "#thumbnail-tile-0");
+        addFixtures(
+                robot,
+                TestPdfs.encrypted(Files.createDirectory(dir.resolve("archive")).resolve("r.pdf"), CORRECT));
+        enterKey(robot);
+        waitForNode(robot, "#source-remove-1");
+
+        dialogs.willSaveTo(dir.resolve("saved.pdf"));
+        clickUntilAccepted(robot, "#tool-save", dialogs::savePending);
+        clickWhenReady(robot, "#protection-proceed");
+
+        waitForNode(robot, "#password-field");
+        assertTrue(
+                explanation(robot).startsWith("r.pdf（work） "), "1 つ目の鍵がどちらの r.pdf のものか言っていない: " + explanation(robot));
+        enterKey(robot);
+        waitFor(() -> explanation(robot).startsWith("r.pdf（archive） "));
+        clickWhenReady(robot, "#password-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
     // ── 補助 ────────────────────────────────────────────────────────────────
+
+    /** 出ている鍵の窓に、正しい鍵を打って進める。 */
+    private void enterKey(FxRobot robot) throws Exception {
+        waitForNode(robot, "#password-field");
+        clickWhenReady(robot, "#password-field");
+        robot.write(CORRECT);
+        clickWhenReady(robot, "#password-unlock");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /** 出ている鍵の窓の説明。出ていなければ空の文字列。 */
+    private static String explanation(FxRobot robot) {
+        return robot.lookup("#password-explanation")
+                .tryQuery()
+                .map(node -> ((Label) node).getText())
+                .orElse("");
+    }
 
     /** 暗号化されたフィクスチャを、正しい鍵で開くところまで進める。 */
     private void openWithKey(Path dir, FxRobot robot) throws Exception {

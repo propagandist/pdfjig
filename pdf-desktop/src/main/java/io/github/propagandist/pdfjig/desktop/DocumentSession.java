@@ -32,6 +32,14 @@ public final class DocumentSession implements AutoCloseable {
     /** 出どころのファイル。並びの添字が {@code sourceIndex} になる。 */
     private final List<Path> paths = new ArrayList<>();
 
+    /**
+     * 画面に出す名前。{@link #paths} と同じ順。
+     *
+     * <p><b>★ 出どころが増えたり減ったりしたときにだけ組み直す</b>——名前は並び全体で決まり
+     * （{@link SourceNames}）、<b>サムネイル 1 枚ごとに組むと並びの数の 2 乗が掛かる。</b>
+     */
+    private List<String> names = List.of();
+
     private final List<PdfDocument> documents = new ArrayList<>();
 
     private final PageOrder order;
@@ -110,6 +118,7 @@ public final class DocumentSession implements AutoCloseable {
         order.removeSource(sourceIndex);
 
         paths.remove(sourceIndex);
+        names = SourceNames.of(paths);
         PdfDocument removed = documents.remove(sourceIndex);
         // 描画が文書を触っている間に閉じると壊れる。removeSource も走っている描画を待つので、
         // この順で閉じてよい（ThumbnailSource の契約）。上で待っているため、ここでは待たされない。
@@ -168,7 +177,20 @@ public final class DocumentSession implements AutoCloseable {
      * @return 拡張子を含むファイル名。同じ名前が他にあれば親フォルダを添えたもの
      */
     public String sourceName(int sourceIndex) {
-        return SourceNames.of(paths).get(sourceIndex);
+        return names.get(sourceIndex);
+    }
+
+    /**
+     * 出どころを画面に出す名前を、出どころ番号の順に並べたもの。
+     *
+     * <p><b>★★ 足したり外したりすると、残ったファイルの名前も変わる</b>——同じ名前の相手が来れば
+     * 親フォルダが付き、去れば落ちる。<b>名前を抱える画面は、これが変わったら描き直すこと</b>
+     * （{@code ThumbnailGrid} のツールチップ）。
+     *
+     * @return 画面に出す名前
+     */
+    public List<String> sourceNames() {
+        return names;
     }
 
     /**
@@ -177,13 +199,17 @@ public final class DocumentSession implements AutoCloseable {
      * <p><b>鍵を訊く窓は、足す前に出る</b>——そこで既に開いている同じ名前のファイルと区別が付かないと、
      * <b>どちらの鍵を訊かれているのか分からない。</b>
      *
-     * @param path 足そうとしているファイル
-     * @return 足した後の {@link #sourceName} と同じ名前
+     * <p><b>★ 一緒に足すものも数える。</b>1 度に選んだ中に同じ名前が 2 つあれば、
+     * <b>まだ足していない相手とも区別が付かなければならない。</b>
+     *
+     * @param path   足そうとしているファイル
+     * @param coming 一緒に足すファイル。足す順に並べる。{@code path} を含むこと
+     * @return 全部を足した後の {@link #sourceName} と同じ名前
      */
-    public String nameIfAdded(Path path) {
+    public String nameIfAdded(Path path, List<Path> coming) {
         List<Path> after = new ArrayList<>(paths);
-        after.add(path);
-        return SourceNames.of(after).get(after.size() - 1);
+        after.addAll(coming);
+        return SourceNames.of(after).get(paths.size() + coming.indexOf(path));
     }
 
     /** 編集中のページ並び。 */
@@ -342,6 +368,7 @@ public final class DocumentSession implements AutoCloseable {
     private int register(Path path, PdfDocument document) {
         int sourceIndex = thumbnails.addSource(document);
         paths.add(path);
+        names = SourceNames.of(paths);
         documents.add(document);
         return sourceIndex;
     }

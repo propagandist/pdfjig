@@ -71,6 +71,9 @@ final class ThumbnailGrid {
     /** 直前に出どころの帯を出していたか。含むファイルが 1 つと複数の間で切り替わると変わる。 */
     private boolean accentsShown;
 
+    /** ツールチップに出している出どころの名前。変わったら描き直す（#128）。 */
+    private List<String> namesShown = List.of();
+
     /** 表示中の編集セッション。ツールチップに出どころのファイル名を出すために持つ。 */
     private DocumentSession document;
 
@@ -296,8 +299,12 @@ final class ThumbnailGrid {
 
         // 出どころの帯が出るようになった（あるいは消えた）ときは、中身の変わっていない
         // ページも描き直す必要がある。ListView は同じ内容のセルを更新しない。
-        if (accentsShown != showsSources()) {
+        // ★ 出どころの名前が変わったときも同じである（#128）。同じ名前のファイルを足すと、
+        //   既に並んでいるページのツールチップにも親フォルダを添えなければ、そちらが曖昧なまま残る。
+        List<String> names = document == null ? List.of() : document.sourceNames();
+        if (accentsShown != showsSources() || !names.equals(namesShown)) {
             accentsShown = showsSources();
+            namesShown = names;
             rows.refresh();
         }
 
