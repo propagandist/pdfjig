@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
+import javafx.scene.control.DialogPane;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
 import org.junit.jupiter.api.Test;
@@ -238,7 +239,173 @@ class DiscardConfirmUiTest extends DesktopUiTest {
         assertFalse(statusText(robot).contains("終了します"), "閉じないと決めたのに、状態行が終了を待っていると言い続けている");
     }
 
+    /**
+     * 保存が済んでいれば訊かない。
+     *
+     * <p><b>★★ 「毎回訊く」に化けると、次に本物を扱ったときに読まずに押される</b>（{@code docs/SPEC.md} §4.3.1 と
+     * 同じ理由）。<b>訊かない側も縛る。</b>
+     */
+    @Test
+    void 保存した後は訊かない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
+        rotate(robot);
+        saveAs(robot, dir.resolve("out.pdf"));
+        dismissMessages(robot);
+
+        quitFromMenu(robot);
+
+        waitFor(() -> !stage.isShowing());
+    }
+
+    /**
+     * 分割で書いた区切りは、上書き保存で寄せ直した後も済みのままである（#171 の門）。
+     *
+     * <p><b>★★ 寄せ直しはふつうの「開く」であり、開いた文書に区切りを当て直す。</b>
+     * 開いたことで「消えるものは無い」とした後に当て直すので、<b>区切りをページで覚えていると別物に見える。</b>
+     */
+    @Test
+    void 分割してから上書き保存しても訊かない(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path doc = TestPdfs.plain(dir.resolve("doc.pdf"), 3);
+        openFixture(robot, doc);
+        splitAtSecondPage(robot, dir);
+        rotate(robot);
+        saveOver(robot, doc);
+        dismissMessages(robot);
+
+        quitFromMenu(robot);
+
+        waitFor(() -> !stage.isShowing());
+    }
+
+    /**
+     * 分割していない区切りは、上書き保存で寄せ直した後も未済のままである（#171 の門）。
+     *
+     * <p><b>保存は区切りを書かない。</b>寄せ直しで「開いたので消えるものは無い」に戻すと、
+     * <b>書き出していない区切りを黙って捨てる。</b>上の筋と対である。
+     */
+    @Test
+    void 区切りを付けて上書き保存しても区切りについては訊く(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path doc = TestPdfs.plain(dir.resolve("doc.pdf"), 3);
+        openFixture(robot, doc);
+        robot.clickOn("#thumbnail-tile-1");
+        robot.clickOn("#tool-toggle-break");
+        rotate(robot);
+        saveOver(robot, doc);
+        dismissMessages(robot);
+
+        quitFromMenu(robot);
+        waitForNode(robot, "#discard-cancel");
+        String text = robot.lookup("#discard-dialog").queryAs(DialogPane.class).getContentText();
+        clickWhenReady(robot, "#discard-cancel");
+        assertTrue(text.contains("区切りが失われます"), "書き出していない区切りを失うと言っていない: " + text);
+    }
+
+    /**
+     * 分割で書いた区切りのあるページを回して保存しても、区切りについては訊かない（#171 の門）。
+     *
+     * <p><b>ページ（回転を含む）で覚えていると、回しただけで書き出した区切りが別物に見える。</b>
+     */
+    @Test
+    void 区切りのあるページを回して保存しても訊かない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
+        splitAtSecondPage(robot, dir);
+        robot.clickOn("#thumbnail-tile-1");
+        robot.clickOn("#tool-rotate-right");
+        waitFor(() -> statusText(robot).contains("未保存"));
+        saveAs(robot, dir.resolve("rotated.pdf"));
+        dismissMessages(robot);
+
+        quitFromMenu(robot);
+
+        waitFor(() -> !stage.isShowing());
+    }
+
+    /**
+     * 窓は、実際に変えたものだけを挙げる（#171 の門）。
+     *
+     * <p><b>区切りを 1 つ付けただけの人に「並べ替え・回転・削除が失われます」と言うと、
+     * していない編集を探させる</b>（{@code CLAUDE.md} 優先順位 2）。
+     */
+    @Test
+    void 窓は実際に変えたものだけを挙げる(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
+        robot.clickOn("#thumbnail-tile-1");
+        robot.clickOn("#tool-toggle-break");
+        WaitForAsyncUtils.waitForFxEvents();
+
+        quitFromMenu(robot);
+        waitForNode(robot, "#discard-cancel");
+        String text = robot.lookup("#discard-dialog").queryAs(DialogPane.class).getContentText();
+        clickWhenReady(robot, "#discard-cancel");
+
+        assertTrue(text.contains("区切りが失われます"), "区切りが失われると言っていない: " + text);
+        assertFalse(text.contains("並べ替え"), "していない編集を挙げている: " + text);
+        assertTrue(text.contains("元の PDF は変更されません"), "元の PDF が変わらないと言っていない: " + text);
+    }
+
+    /**
+     * 確認の最中に「開く」が始まったら、捨てると答えても、それが終わるまで閉じない（#171 の門）。
+     *
+     * <p><b>★★ 確認の窓は入れ子のイベントループである。</b>積まれた {@code runLater}（ファイルの関連付けから
+     * の「開く」など）はそこで動き、仕事を始める。<b>答えを受けてすぐ閉じると、走っている仕事の途中で終わる</b>
+     * ——#134 の門を迂回する。
+     */
+    @Test
+    void 確認の最中に始まった仕事が終わるまで閉じない(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(robot, TestPdfs.plain(dir.resolve("doc.pdf"), 3));
+        rotate(robot);
+        Path other = TestPdfs.plain(dir.resolve("other.pdf"), 2);
+
+        quitFromMenu(robot);
+        waitForNode(robot, "#discard-ok");
+        held.hold();
+        // ★ 外から来た「開く」も、同じ編集を前にして訊く。窓は終了の窓の上に重なる。
+        //   先にそちらへ答えて開く仕事を始めさせ、それから終了の窓へ答える——利用者が踏む順である。
+        Platform.runLater(() -> window.open(other));
+        clickDiscard(robot, "保存せずに開く");
+        // 走り出したことは「開く」が押せなくなったことで見る（門は busy の間それを塞ぐ）。
+        waitFor(() -> button(robot, "#tool-open").isDisabled());
+        clickDiscard(robot, "保存せずに終了");
+
+        assertStillShowing();
+        assertTrue(statusText(robot).contains("終了します"), "待っていることが状態行に出ていない");
+
+        // 放せば開き終わり、開いたばかりの文書は消えるものを持たないので、そのまま閉じる。
+        held.release();
+        waitFor(() -> !stage.isShowing());
+    }
+
     // ── 補助 ────────────────────────────────────────────────────────────────
+
+    /**
+     * 重なった確認の窓のうち、ボタンの文言で選んで「保存せずに〜」を押す。
+     *
+     * <p><b>id は 3 つの経路で同じ</b>（{@code Messages#confirmDiscard}）なので、窓が重なると id だけでは
+     * どちらか決まらない。<b>文言で選ぶのはこのためだけである。</b>
+     */
+    private void clickDiscard(FxRobot robot, String text) throws Exception {
+        waitFor(() -> discardButton(robot, text) != null);
+        WaitForAsyncUtils.waitForFxEvents();
+        robot.clickOn(discardButton(robot, text));
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    private static Button discardButton(FxRobot robot, String text) {
+        return robot.lookup("#discard-ok").queryAllAs(Button.class).stream()
+                .filter(button -> text.equals(button.getText()) && button.isVisible())
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** 2 ページ目に区切りを付けて分割し、書き出しの報せを閉じる。区切りは書き出されて済みになる。 */
+    private void splitAtSecondPage(FxRobot robot, Path dir) throws Exception {
+        robot.clickOn("#thumbnail-tile-1");
+        robot.clickOn("#tool-toggle-break");
+        dialogs.willChooseFolder(Files.createDirectory(dir.resolve("split")));
+        robot.clickOn("#tool-split");
+        clickWhenReady(robot, "#message-ok");
+        WaitForAsyncUtils.waitForFxEvents();
+    }
 
     /** 選んでいるページを回す。並びの内容が変わるので {@code modified()} が立つ。 */
     private void rotate(FxRobot robot) throws Exception {

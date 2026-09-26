@@ -287,18 +287,21 @@ final class Messages {
      * テストとの契約は文言ではない。
      *
      * @param what  何をしようとしているか
-     * @param stale 保存が押せない状態か。<b>それでも窓の形は同じ</b>——断る手しか無い窓は
-     *              「閉じられない」と同じであり、#118 で塞いで戻した「閉じる」を塞ぎ直すことになる
+     * @param stale  保存が押せない状態か。<b>それでも窓の形は同じ</b>——断る手しか無い窓は
+     *               「閉じられない」と同じであり、#118 で塞いで戻した「閉じる」を塞ぎ直すことになる
+     * @param losses 失われるもの。<b>実際に変えたものだけを渡すこと</b>——していない編集を挙げると、
+     *               それを探させる（{@code CLAUDE.md} 優先順位 2）。空でないこと
      * @return 捨ててよければ {@code true}
      */
-    boolean confirmDiscard(Discarding what, boolean stale) {
+    boolean confirmDiscard(Discarding what, boolean stale, List<String> losses) {
         ButtonType discard = new ButtonType(what.discardText, ButtonData.OK_DONE);
         ButtonType cancel = new ButtonType("キャンセル", ButtonData.CANCEL_CLOSE);
         Alert alert = new Alert(
                 AlertType.CONFIRMATION,
                 (stale ? "保存できない状態です（開き直してください）。" : "")
                         + what.consequence
-                        + "並べ替え・回転・削除・区切り、ファイルの追加や取り外しが失われます。"
+                        + String.join("、", losses)
+                        + "が失われます。"
                         + "\n\n元の PDF は変更されません。",
                 discard,
                 cancel);
