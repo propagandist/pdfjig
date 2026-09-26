@@ -175,10 +175,50 @@ public final class MainWindow {
     /**
      * 終了を頼まれたが、走っている仕事があるので待っている。
      *
-     * <p><b>一度立ったら下ろさない</b>（#134）。取り消す手を用意しない——
+     * <p><b>待っている間は下ろさない</b>（#134）。取り消す手を用意しない——
      * <b>押した意思を打ち消す操作は、押した本人にしか意味が無く、それを表す入口が無い。</b>
+     *
+     * <p><b>★ 下ろすのは、閉じる直前の確認で「キャンセル」が選ばれたときだけである</b>（#171）。
+     * そこで下ろさないと、<b>閉じないと決めたのに状態行が「処理が終わったら終了します」と言い続ける。</b>
      */
     private boolean quitWhenIdle;
+
+    /**
+     * 閉じたら消えるものがあるかを確かめる窓を出している最中か（#171）。
+     *
+     * <p><b>番人である。</b>{@link #closeWhenNoOtherWindowIsUp} は窓が閉じるたびに自分へ戻ってくる
+     * ——<b>いまの入れ子では二重にならないと読めるが、#134 は同じ場所の読みを 2 回外している。</b>
+     */
+    private boolean confirmingDiscard;
+
+    /**
+     * 最後に書き出した（または開いた）ときの出どころ一覧（#171）。
+     *
+     * <p><b>ファイルの追加と取り外しは {@code PageOrder#modified()} に出ない</b>——並びと基準を
+     * 同じだけずらすからである。<b>閉じたら消えるかどうかは、ここと比べて見る</b>（{@link #hasUnsavedWork}）。
+     */
+    private List<Path> savedSources = List.of();
+
+    /**
+     * 区切りを付け外しした回数（#171）。{@link #breakEditsWritten} と比べて、区切りが書き出されたかを見る。
+     *
+     * <p><b>★★ ページでも位置でも持たない。</b>ページで持つと、区切りのあるページを回したり、
+     * 前のファイルを外して出どころ番号が繰り下がったり、上書き保存の後に書き出したファイルへ
+     * 寄せ直したりするたびに、<b>書き出した区切りが別物に見える</b>（#171 の門）。
+     * 位置で持つと、ほかのページを消すたびにずれる。<b>見たいのは「区切りを書き出した後に、
+     * 区切りを触ったか」だけである。</b>
+     *
+     * <p>数えるのは区切りを直に触る 4 つ（付け外し・N ページごと・すべて外す・元に戻す）である。
+     * <b>並べ替えと削除でも区切りは動くが、それは {@code modified()} に出る。</b>
+     */
+    private int breakEdits;
+
+    /**
+     * 区切りを最後に書き出した（または文書を開いた）ときの {@link #breakEdits}（#171）。
+     *
+     * <p><b>区切りを済みにするのは、区切りに従って分割したときだけである。</b>保存は区切りを書かない。
+     */
+    private int breakEditsWritten;
 
     /**
      * 窓の × を受ける口。<b>外せるように持っておく</b>（{@link #dispose}）。
@@ -312,7 +352,9 @@ public final class MainWindow {
             updateStatus();
             return;
         }
-        stage.close();
+        // ★★ 待たされた経路と同じ 1 か所を通す（#171）。stage.close() を直に呼ぶと、
+        //   閉じたら消えるものがあるかを確かめる窓が、待たずに閉じる側だけ抜ける。
+        closeWhenNoOtherWindowIsUp();
     }
 
     /**
@@ -334,7 +376,7 @@ public final class MainWindow {
     private void closeWhenNoOtherWindowIsUp() {
         Window blocking = otherShowingWindow();
         if (blocking == null) {
-            stage.close();
+            closeIfDiscardConfirmed();
             return;
         }
         blocking.showingProperty().addListener(new ChangeListener<Boolean>() {
@@ -348,6 +390,130 @@ public final class MainWindow {
                 }
             }
         });
+    }
+
+    /**
+     * 閉じたら消えるものがあれば確かめてから、主画面を閉じる（#171）。
+     *
+     * <p><b>★★ 実際に閉じる直前の 1 か所である。</b>待たずに閉じる経路も、書き出しを待った経路も
+     * ここを通る（{@link #requestQuit}）。<b>書き出しが成功していれば訊かない</b>——
+     * {@link #markSaved} が済んでいるので消えるものが無い。<b>失敗したときだけ訊く</b>。
+     * それは「処理が終わったら終了します」の約束を破るのではなく、<b>約束が成り立たなくなったことを言う。</b>
+     *
+     * <p><b>★★ 窓を出す時点では何も走っていないが、窓の最中に始まりうる</b>（#171 の門）。
+     * 窓は入れ子のイベントループで、<b>積まれた {@code runLater} はそこで動く</b>——
+     * <b>答えを受けた後に、もう一度 busy を見る。</b>
+     */
+    private void closeIfDiscardConfirmed() {
+        if (confirmingDiscard) {
+            return;
+        }
+        boolean discard;
+        confirmingDiscard = true;
+        try {
+            discard = discardConfirmed(Messages.Discarding.QUIT);
+        } finally {
+            confirmingDiscard = false;
+        }
+        if (!discard) {
+            // 閉じないと決めた。待っていた印も下ろす——下ろさないと状態行が嘘を言い続ける。
+            quitWhenIdle = false;
+            updateStatus();
+            return;
+        }
+        if (tasks.busy().get()) {
+            // ★★ 窓の最中に仕事が始まった（#171 の門）。窓は入れ子のイベントループであり、
+            //   積まれた runLater（ファイルの関連付けからの「開く」など）はそこで動く。
+            //   ここで閉じると走っている仕事の途中で終わる（#134 の門を迂回する）——待ってからもう一度来る。
+            //   来たときに閉じたら消えるものがあれば、そのときにまた訊く。
+            quitWhenIdle = true;
+            tasks.whenIdle(this::closeWhenNoOtherWindowIsUp);
+            updateStatus();
+            return;
+        }
+        stage.close();
+    }
+
+    /**
+     * 閉じたら消えるものがあるか（#171）。
+     *
+     * <p><b>★★ {@code PageOrder#modified()} とは答えている問いが違う。</b>あちらは
+     * <b>「書き出す内容が変わったか」</b>で、状態行の「未保存の変更があります」と、
+     * 上書き保存の後の寄せ直し（{@link #reopenAt}）が使う。こちらは<b>「閉じたら消えるものがあるか」</b>で、
+     * 閉じる前の確認だけが使う。<b>違いは 2 つある</b>——
+     *
+     * <ul>
+     *   <li><b>区切り。</b>書き出す内容を変えないので {@code modified()} には出ない。
+     *       <b>それでも閉じれば消える。</b>済みにするのは、区切りを実際に書き出した分割だけである
+     *   <li><b>ファイルの追加と取り外し。</b>{@code PageOrder} が並びと基準を同じだけずらすので、
+     *       {@code modified()} には出ない（#114）
+     * </ul>
+     *
+     * <p><b>{@code modified()} を広げない。</b>区切りを含めると、区切りのある文書を上書き保存するたびに
+     * 寄せ直しが「書き出している間に編集された」と読んで保存を押せなくする（#118）。
+     */
+    private boolean hasUnsavedWork() {
+        return !unsavedWork().isEmpty();
+    }
+
+    /**
+     * 閉じたら消えるものを、窓に出す言葉で並べる。無ければ空。
+     *
+     * <p><b>★ 実際に変えたものだけを挙げる</b>（#171 の門）。区切りを 1 つ付けただけの人に
+     * 「並べ替え・回転・削除が失われます」と言うと、<b>していない編集を探させる</b>（優先順位 2）。
+     */
+    private List<String> unsavedWork() {
+        if (session == null) {
+            return List.of();
+        }
+        List<String> losses = new ArrayList<>();
+        if (session.order().modified()) {
+            losses.add("並べ替え・回転・削除");
+        }
+        // 区切りが 1 つも無ければ、区切りについて失うものは無い（全部外したのを「失う」とは言わない）。
+        if (session.order().breakCount() > 0 && breakEdits != breakEditsWritten) {
+            losses.add("区切り");
+        }
+        if (!session.paths().equals(savedSources)) {
+            losses.add("ファイルの追加や取り外し");
+        }
+        return losses;
+    }
+
+    /**
+     * 閉じたら消えるものがあれば訊き、捨ててよいかを返す。無ければ訊かずに {@code true}（#171）。
+     *
+     * <p><b>入口の 3 か所がここを通る</b>——終了・閉じる・別の PDF を開く。判定と窓を 1 か所に置く。
+     */
+    private boolean discardConfirmed(Messages.Discarding what) {
+        List<String> losses = unsavedWork();
+        return losses.isEmpty() || messages.confirmDiscard(what, stale.get(), losses);
+    }
+
+    /** 区切りを直に触ったことを数える（{@link #breakEdits}）。 */
+    private void countBreakEdit() {
+        breakEdits++;
+    }
+
+    /**
+     * メニューの「閉じる」。閉じたら消えるものがあれば確かめてから閉じる（#171）。
+     *
+     * <p><b>★ 確認は {@link #closeSession} には置かない。</b>あちらは窓が消えた後の片づけ
+     * （{@link #dispose}）からも呼ばれ、<b>そこでモーダルを出すと誰も答えられない。</b>
+     * <b>押せるのは仕事が走っていないときだけだが、窓の最中に始まりうる</b>ので検め直す。
+     */
+    private void closeDocument() {
+        Held held = hold();
+        if (!discardConfirmed(Messages.Discarding.CLOSE)) {
+            return;
+        }
+        // ★★ 窓の最中に文書が入れ替わった、あるいは開く仕事が始まった（#171 の門。#133 と同じ形）。
+        //   入れ替わった先は利用者が閉じると決めた文書ではない。走っている間は閉じない（#114）。
+        //   どちらも黙って戻る——いま来た文書がそのまま出ているので、何が起きたかは画面で分かる。
+        if (!stillHolds(held) || tasks.busy().get()) {
+            return;
+        }
+        closeSession();
     }
 
     /**
@@ -405,7 +571,7 @@ public final class MainWindow {
                         new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN),
                         this::saveAs,
                         editingBlocked),
-                new Action("close", "閉じる", null, null, null, this::closeSession, needsDocument),
+                new Action("close", "閉じる", null, null, null, this::closeDocument, needsDocument),
                 new Action("quit", "終了", null, null, null, this::requestQuit, null),
                 new Action(
                         "delete",
@@ -481,6 +647,13 @@ public final class MainWindow {
      * @param path 開くファイル
      */
     public void open(Path path) {
+        // ★★ 開けば、いまの文書は閉じる（adopt）。閉じたら消えるものがあれば先に確かめる（#171）。
+        //   ★ ここに置く。openDocument ではない——起動引数とファイルの関連付けも同じ口を通る。
+        //   ★ 走っている間は run が断るので、訊かない。訊いてから断ると、答えた意味が無い。
+        //   ★ 窓の最中に別の「開く」が始まっていたら、下の run が断る——何も捨てない。
+        if (!tasks.busy().get() && !discardConfirmed(Messages.Discarding.OPEN)) {
+            return;
+        }
         boolean started = tasks.run(() -> DocumentSession.open(path), this::adopt, failure -> {
             if (errorCodeOf(failure) == ErrorCode.PASSWORD_REQUIRED) {
                 askPasswordAndOpen(path, false);
@@ -804,8 +977,15 @@ public final class MainWindow {
                             }
                             return;
                         }
+                        // ★★ 区切りの済み／未済を持ち越す（#171 の門）。adopt は「開いたので消えるものは無い」
+                        //   とするが、寄せ直しは書き出す前の区切りを当て直す——書き出していない区切りは
+                        //   保存では書かれないので、未済のまま残す。書き出した区切りは済みのまま。
+                        boolean breaksUnwritten = breakEdits != breakEditsWritten;
                         adopt(opened);
                         opened.order().applyBreaks(breaks);
+                        if (breaksUnwritten) {
+                            countBreakEdit();
+                        }
                         // 先頭へ戻されているので、控えておいた位置へ返す。
                         thumbnails.selectAndReveal(selected);
                     },
@@ -859,6 +1039,8 @@ public final class MainWindow {
             return;
         }
         session.order().markSaved(pages);
+        // 書き出したときの出どころで済みにする。区切りは保存が書かないので触らない（#171）。
+        savedSources = List.copyOf(sources);
         updateStatus();
     }
 
@@ -1131,7 +1313,7 @@ public final class MainWindow {
                     + "1 枚ずつバラすなら「1 ページずつに分割…」を使います。");
             return;
         }
-        writeSegments(order.toSegments());
+        writeSegments(order.toSegments(), true);
     }
 
     /**
@@ -1150,7 +1332,7 @@ public final class MainWindow {
         if (session == null) {
             return;
         }
-        writeSegments(session.order().toSinglePageSegments());
+        writeSegments(session.order().toSinglePageSegments(), false);
     }
 
     /**
@@ -1159,9 +1341,11 @@ public final class MainWindow {
      * <p>保存先を尋ねてから非同期で書く。既に同名のファイルがあれば 1 つも書かずに
      * 失敗する（{@link DocumentWriter#splitInto}）。上書きするかどうかは利用者の判断である。
      *
-     * @param segments かたまりごとのページ指定。先頭から順に連番で書き出す
+     * @param segments     かたまりごとのページ指定。先頭から順に連番で書き出す
+     * @param writesBreaks 区切りに従って切り分けたか。<b>書き出せたら区切りを済みにする</b>（#171）——
+     *                     1 枚ずつの分割は区切りを見ないので、済みにしない
      */
-    private void writeSegments(List<List<PageSelection>> segments) {
+    private void writeSegments(List<List<PageSelection>> segments, boolean writesBreaks) {
         // ★★ 窓より先に控える。segments は呼ぶ側が既に確定させたものであり、
         //   窓（フォルダ選択・鍵の入力）が出ている間も Platform.runLater は回るので、
         //   その間に文書が入れ替わりうる（#133）。★ 後で控えると、入れ替わった後の
@@ -1171,6 +1355,9 @@ public final class MainWindow {
         //   （#133。理由は abandonedBecauseSwapped）。先に検めれば、閉じた文書の鍵を打たせずに済む。
         Held held = hold();
         DocumentSession writing = held.target();
+        // ★ 始めたときの区切りの編集回数を控える。書き出している間に付け外しされた分は、
+        //   まだ書き出されていない（markSaved と同じ理由）。
+        int breakEditsAtStart = breakEdits;
 
         Optional<Path> directory = dialogs.chooseFolder(writingFolder().orElse(null));
         if (directory.isEmpty()) {
@@ -1212,10 +1399,13 @@ public final class MainWindow {
         }
         Path outputDir = directory.get();
 
-        if (run(
-                sources,
-                () -> DocumentWriter.splitInto(sources, segments, outputDir),
-                result -> showSplitResult(result, asked))) {
+        if (run(sources, () -> DocumentWriter.splitInto(sources, segments, outputDir), result -> {
+            // 区切りを書き出せたので済みにする。同じ文書のままのときだけ（markSaved と同じ）。
+            if (writesBreaks && stillHolds(held)) {
+                breakEditsWritten = breakEditsAtStart;
+            }
+            showSplitResult(result, asked);
+        })) {
             folders.rememberWrittenFolder(outputDir);
         }
     }
@@ -1227,6 +1417,7 @@ public final class MainWindow {
             return;
         }
         session.order().toggleBreakAt(index);
+        countBreakEdit();
     }
 
     /** 枚数で機械的に区切り直す。書き出しはせず、画面で確かめてから分割する。 */
@@ -1243,23 +1434,37 @@ public final class MainWindow {
             return;
         }
         held.target().order().applyEveryNPages(every.get());
+        countBreakEdit();
     }
 
     private void clearBreaks() {
         if (session != null) {
             session.order().clearBreaks();
+            countBreakEdit();
         }
     }
 
     private void resetOrder() {
         if (session != null) {
             session.order().reset();
+            countBreakEdit();
         }
     }
 
+    /**
+     * 開いた文書を受け取り、いまの文書と入れ替える。
+     *
+     * <p><b>★★ ここは機構であって入口ではない。閉じる前の確認はここに置かない</b>（#171）——
+     * 上書き保存の後の寄せ直し（{@link #reopenAt}）も通り、そこで捨てるのは<b>いま書き出したばかりの
+     * 文書</b>である。<b>確認は入口の 3 か所が持つ</b>：{@link #closeIfDiscardConfirmed}（終了）、
+     * {@link #closeDocument}（閉じる）、{@link #open}（別の PDF を開く）。
+     */
     private void adopt(DocumentSession opened) {
         closeSession();
         session = opened;
+        // 開いたのだから、閉じても消えるものは無い（#171）。
+        savedSources = opened.paths();
+        breakEditsWritten = breakEdits;
         // 開き直したので食い違いは無い。
         stale.set(false);
 
@@ -1271,6 +1476,13 @@ public final class MainWindow {
         onOrderChanged();
     }
 
+    /**
+     * いまの文書を手放す。
+     *
+     * <p><b>★★ ここは機構であって入口ではない。閉じる前の確認はここに置かない</b>（#171）——
+     * {@link #dispose} から、<b>窓が消えた後にも</b>呼ばれる。<b>確認は入口の 3 か所が持つ</b>
+     * （{@link #adopt} の Javadoc）。
+     */
     private void closeSession() {
         // 閉じたのだから食い違いようが無い。次に開くまで印は要らない。
         stale.set(false);
