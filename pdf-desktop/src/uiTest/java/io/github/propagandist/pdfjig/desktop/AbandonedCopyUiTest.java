@@ -10,7 +10,9 @@ import java.nio.file.Path;
 import java.util.List;
 import javafx.scene.Node;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.input.Clipboard;
+import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.stage.WindowEvent;
@@ -33,6 +35,10 @@ import org.testfx.util.WaitForAsyncUtils;
  * <p><b>落ちた状態は手で作る。</b>印（{@code held}）と控え（{@code replaced.pdf}）を抱えた
  * 作業場所を出力先の隣に置く——アプリごと落ちた後に残るものと同じ形である
  * （{@code OutputWorkspace}）。
+ *
+ * <p><b>★ 在り処を写すボタン（#137）もここで見る。</b>在り処を出す窓のうち、画面のテストから
+ * 狙って出せるのはこの窓だけである（失敗の窓は {@code KeptCopyReportTest} が文言まで見る）。
+ * <b>写すと、手元の実行ではクリップボードを上書きする。</b>
  */
 class AbandonedCopyUiTest extends DesktopUiTest {
 
@@ -57,28 +63,16 @@ class AbandonedCopyUiTest extends DesktopUiTest {
      */
     @Test
     void 前の書き出しが残した控えの在り処を伝える(@TempDir Path dir, FxRobot robot) throws Exception {
-        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-1234567890"));
-        Files.createFile(crashed.resolve("held"));
-        // ★ 本文は ASCII にする。TestPdfs は標準フォントで書くので、日本語を渡すと投げる。
-        Path kept = TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
+        Path kept = crashedBeside(dir);
 
         openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
         Path output = saveAs(robot, dir.resolve("out.pdf"));
 
         waitForNode(robot, "#message-ok");
-        String message =
-                robot.lookup("#message-dialog").queryAs(DialogPane.class).getContentText();
+        // ★ 画面に出ている本文を読む。在り処を出す窓は本文を差し替えている（#137）ので、
+        //   DialogPane#getContentText は画面に出ていない文字列でも通ってしまう。
+        String message = robot.lookup("#message-text").queryAs(Label.class).getText();
         assertTrue(message.contains(kept.toString()), "控えの在り処を伝えていない（#138）: " + message);
-
-        // ★ 作業場所の名前は乱数であり、1 桁でも書き違えれば辿り着けない（#137）。
-        clickWhenReady(robot, "#message-copy-location");
-        assertEquals(
-                kept.toString(),
-                WaitForAsyncUtils.asyncFx(() -> Clipboard.getSystemClipboard().getString())
-                        .get(),
-                "在り処を写せない（#137）");
-        assertTrue(
-                robot.lookup("#message-ok").tryQuery().map(Node::isVisible).orElse(false), "写しただけで窓が閉じた。本文を読み終える前に消える");
         clickWhenReady(robot, "#message-ok");
 
         assertEquals(List.of("A1"), pageTexts(output), "書き出しそのものが邪魔されている");
@@ -86,31 +80,92 @@ class AbandonedCopyUiTest extends DesktopUiTest {
     }
 
     /**
-     * 写すボタンを足した窓も、窓の × で閉じられる（#137）。
+     * 在り処を写せる。写しても窓は閉じず、フォーカスは OK へ戻る（#137）。
      *
-     * <p><b>★★ JavaFX のダイアログは、ボタンが 2 つ以上あると、取り消し側のボタンが無い限り
-     * × で閉じない</b>（{@code Dialog} の「Dialog Closing Rules」）。OK だけの窓は 1 つなので閉じていた——
-     * <b>写すボタンを足しただけで、× が効かなくなる。</b>
+     * <p><b>★★ 作業場所の名前は乱数であり、1 桁でも書き違えれば辿り着けない。</b>
+     * <b>★ フォーカスが写したボタンに残ると、Windows では Enter がもう一度写す</b>——閉じるつもりの
+     * Enter が効かない。
+     */
+    @Test
+    void 在り処を写せる(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path kept = crashedBeside(dir);
+
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+        saveAs(robot, dir.resolve("out.pdf"));
+
+        clickWhenReady(robot, "#message-copy-location-0");
+        assertEquals(
+                kept.toString(),
+                WaitForAsyncUtils.asyncFx(() -> Clipboard.getSystemClipboard().getString())
+                        .get(),
+                "在り処を写せない");
+        Node ok = robot.lookup("#message-ok").query();
+        assertTrue(ok.isVisible(), "写しただけで窓が閉じた。本文を読み終える前に消える");
+        assertTrue(ok.isFocused(), "写したボタンにフォーカスが残っている。Enter で閉じない");
+        clickWhenReady(robot, "#message-ok");
+    }
+
+    /**
+     * 在り処を出した窓も、窓の × で閉じる（#137）。
+     *
+     * <p><b>★★ JavaFX のダイアログは、ボタンバーにボタンが 2 つ以上あると、取り消し側のボタンが無い限り
+     * × でも Esc でも閉じない</b>（{@code Dialog} の「Dialog Closing Rules」）。
+     * <b>写すボタンをボタンバーへ足した形が、実際にこれで赤になった。</b>
      *
      * <p>× を押す代わりに、閉じる要求をその窓へ送る。OS の × が送るのと同じ出来事である。
      */
     @Test
     void 在り処を出した窓も閉じる要求で閉じる(@TempDir Path dir, FxRobot robot) throws Exception {
-        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-1234567890"));
-        Files.createFile(crashed.resolve("held"));
-        TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
+        crashedBeside(dir);
 
         openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
         saveAs(robot, dir.resolve("out.pdf"));
-        waitForNode(robot, "#message-copy-location");
+        waitForNode(robot, "#message-copy-location-0");
 
-        Window window = robot.lookup("#message-dialog")
-                .queryAs(DialogPane.class)
-                .getScene()
-                .getWindow();
+        Window window = messageWindow(robot);
         robot.interact(() -> window.fireEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSE_REQUEST)));
         WaitForAsyncUtils.waitForFxEvents();
 
-        assertFalse(window.isShowing(), "写すボタンを足した窓が × で閉じない");
+        assertFalse(window.isShowing(), "在り処を出した窓が × で閉じない");
+    }
+
+    /**
+     * 在り処を出した窓も、Esc で閉じる（#137）。
+     *
+     * <p><b>★★ Esc は × と別の経路である</b>（{@code HeavyweightDialog} がキーを直に受け、
+     * 閉じる要求を出さない）。<b>× だけを直しても Esc は閉じないまま残る</b>——門の 2 段目がそこを出した。
+     */
+    @Test
+    void 在り処を出した窓もEscで閉じる(@TempDir Path dir, FxRobot robot) throws Exception {
+        crashedBeside(dir);
+
+        openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1"));
+        saveAs(robot, dir.resolve("out.pdf"));
+        waitForNode(robot, "#message-copy-location-0");
+
+        Window window = messageWindow(robot);
+        robot.type(KeyCode.ESCAPE);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertFalse(window.isShowing(), "在り処を出した窓が Esc で閉じない");
+    }
+
+    /**
+     * アプリごと落ちた後に残るものと同じ形の作業場所を、出力先の隣に置く。
+     *
+     * @return 控えのファイル
+     */
+    private static Path crashedBeside(Path dir) throws Exception {
+        Path crashed = Files.createDirectory(dir.resolve(".pdfjig-1234567890"));
+        Files.createFile(crashed.resolve("held"));
+        // ★ 本文は ASCII にする。TestPdfs は標準フォントで書くので、日本語を渡すと投げる。
+        return TestPdfs.withText(crashed.resolve("replaced.pdf"), "OLD");
+    }
+
+    private static Window messageWindow(FxRobot robot) {
+        return robot.lookup("#message-dialog")
+                .queryAs(DialogPane.class)
+                .getScene()
+                .getWindow();
     }
 }

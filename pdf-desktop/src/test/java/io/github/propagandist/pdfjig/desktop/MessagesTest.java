@@ -179,8 +179,9 @@ class MessagesTest {
         List<List<Path>> expected = List.of(List.of(kept, plaintext), List.of(kept), List.of(plaintext));
 
         for (int i = 0; i < failures.size(); i++) {
-            List<Path> locations = Messages.locations(failures.get(i));
-            String message = Messages.describe(failures.get(i));
+            Messages.Notice notice = Messages.notice(failures.get(i));
+            List<Path> locations = notice.locations();
+            String message = notice.text();
 
             assertEquals(expected.get(i), locations, "写せる在り処が違う: " + message);
             int previous = -1;
@@ -195,7 +196,9 @@ class MessagesTest {
     /** ふつうの失敗には、写すものも無い。ボタンが出ないのはこのためである（#137）。 */
     @Test
     void copiesNothingFromAnOrdinaryFailure() {
-        assertEquals(List.of(), Messages.locations(new PdfjigException(ErrorCode.IO_FAILURE)));
-        assertEquals(List.of(), Messages.locations(null));
+        assertEquals(
+                List.of(),
+                Messages.notice(new PdfjigException(ErrorCode.IO_FAILURE)).locations());
+        assertEquals(List.of(), Messages.notice(null).locations());
     }
 }

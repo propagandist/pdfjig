@@ -68,7 +68,7 @@ class SplitUiTest extends DesktopUiTest {
         // 全ページを 1 ファイルに書き出しても分割にならない。黙ってそうするより断る。
         waitForNode(robot, "#message-ok");
         // 在り処の無い窓には、写すボタンを足さない（#137）。
-        assertTrue(robot.lookup("#message-copy-location").tryQuery().isEmpty(), "写すものが無いのに写すボタンがある");
+        assertTrue(robot.lookup("#message-copy-location-0").tryQuery().isEmpty(), "写すものが無いのに写すボタンがある");
         clickWhenReady(robot, "#message-ok");
         WaitForAsyncUtils.waitForFxEvents();
 
