@@ -109,6 +109,36 @@ class PromptSwapUiTest extends DesktopUiTest {
      * <b>★ 2 つ目も足さない。</b>鍵の窓は 1 つごとに出るので、1 つ目の窓で入れ替わると、
      * <b>2 つ目が入れ替わった先へ足される</b>（#133 の門）。{@code locked} は名前順で先に来る。
      */
+    /**
+     * 保存の「保護は引き継がれません」の最中に入れ替わったら、保存先を訊かずに断る（#172 の門）。
+     *
+     * <p><b>★★ 確認を保存先より先に出すようにした</b>（2026-09-26）ので、<b>確認の窓が最初の入れ子の
+     * イベントループになった。</b>そこで入れ替わった文書のために保存先を選ばせると、
+     * 選び終えてから「保存しませんでした」と言うことになる。
+     */
+    @Test
+    void 保存の保護の窓の最中に文書が入れ替わったら保存先を訊かずに断る(@TempDir Path dir, FxRobot robot) throws Exception {
+        openProtectedFixture(robot, TestPdfs.encrypted(dir.resolve("locked.pdf"), KEY, 3), KEY);
+        Path other = TestPdfs.withText(dir.resolve("c.pdf"), "C1");
+        Path output = dir.resolve("out.pdf");
+
+        dialogs.willSaveTo(output);
+        pressSave(robot);
+        waitForNode(robot, "#protection-dialog");
+
+        Platform.runLater(() -> window.open(other));
+        waitFor(() -> stage.getTitle().contains("c.pdf"));
+        clickWhenReady(robot, "#protection-proceed");
+
+        Optional<Node> notice = dialogButton(robot, "#message-ok");
+        assertTrue(notice.isPresent(), "書かなかったことを伝えていない");
+        String text = robot.lookup("#message-dialog").queryAs(DialogPane.class).getContentText();
+        robot.clickOn(notice.get());
+        assertTrue(text.contains("保存しませんでした"), "断りの文言が違う: " + text);
+        assertTrue(dialogs.savePending(), "入れ替わった文書のために保存先を訊いている");
+        assertTrue(Files.notExists(output), "入れ替わった後に書き出した（#133）");
+    }
+
     @Test
     void 追加の鍵の窓の最中に文書が入れ替わったら残りも足さない(@TempDir Path dir, FxRobot robot) throws Exception {
         openFixture(robot, TestPdfs.withText(dir.resolve("a.pdf"), "A1", "A2"));

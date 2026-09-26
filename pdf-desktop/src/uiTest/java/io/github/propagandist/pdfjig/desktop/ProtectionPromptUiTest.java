@@ -147,6 +147,25 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         WaitForAsyncUtils.waitForFxEvents();
     }
 
+    /**
+     * 分割でも、中止すれば出力先を訊かない（保存と同じ順。2026-09-26 に利用者が決めた）。
+     */
+    @Test
+    void 分割でも中止すれば出力先を訊かない(@TempDir Path dir, FxRobot robot) throws Exception {
+        // 1 ページでは「1 枚ずつ」が押せない（分けても 1 つにしかならない）。3 ページにする。
+        openProtectedFixture(robot, TestPdfs.encrypted(dir.resolve("locked.pdf"), KEY, 3), KEY);
+        Path outputDir = dir.resolve("out");
+        dialogs.willChooseFolder(outputDir);
+        robot.clickOn("#tool-split-pages");
+
+        waitForNode(robot, "#protection-dialog");
+        clickWhenReady(robot, "#protection-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertTrue(dialogs.folderPending(), "中止したのに出力先を訊いている");
+        assertTrue(Files.notExists(outputDir), "中止したのに書き出されている");
+    }
+
     @Test
     void 分割では出力の数によらず一度だけ問う(@TempDir Path dir, FxRobot robot) throws Exception {
         // ★★ N 回出ると「読まずに続行を押す」習慣ができる（SPEC.md §4.3.1）。

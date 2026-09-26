@@ -27,7 +27,6 @@ import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.stage.Stage;
-import javafx.stage.Window;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.testfx.api.FxRobot;
@@ -211,17 +210,18 @@ abstract class DesktopUiTest {
     /**
      * 「保存」ボタンを押す。押した結果が起きるまで押し直す（{@link #clickUntilAccepted}）。
      *
-     * <p><b>★★ 押した結果は 2 通りある。</b>保存先が使われるか、<b>その前に窓が出る</b>か——
+     * <p><b>★★ 押した結果は 2 通りある。</b>保存先が使われるか、<b>その前に保護の窓が出る</b>か——
      * 保護が落ちるときは、保存先より先に「保護は引き継がれません」を出す（2026-09-26 に順番を変えた）。
      * <b>保存先だけを見て待つと、窓が出ている間も押し直し続けて落ちる。</b>
+     * ★ <b>見るのはその窓の id である。</b>どの窓でもよいとすると、前の手順の窓が残っているだけで
+     * 押せたと読み、取りこぼしたクリックを押し直さない（#172 の門）。
      */
     void pressSave(FxRobot robot) throws Exception {
-        clickUntilAccepted(robot, "#tool-save", () -> dialogs.savePending() && !anotherWindowShowing());
-    }
-
-    /** 主画面のほかに窓（ダイアログ）が出ているか。 */
-    boolean anotherWindowShowing() {
-        return Window.getWindows().stream().anyMatch(w -> w != stage && w instanceof Stage && w.isShowing());
+        clickUntilAccepted(
+                robot,
+                "#tool-save",
+                () -> dialogs.savePending()
+                        && robot.lookup("#protection-dialog").tryQuery().isEmpty());
     }
 
     /**

@@ -325,7 +325,7 @@ class EncryptionUiTest extends DesktopUiTest {
         // ★★ 文言はこちら向けである。保護を掛けている最中に「保護を外して書き出す」と
         //   出すと、何を押しているのかが読んで分からなくなる（優先順位 2）
         //   ——オーナーパスワードと権限フラグは、確かに出力へ載る。
-        assertEquals("このまま書き出す", button(robot, "#protection-proceed").getText(), "保護を掛けているのに「外す」と出ている");
+        assertEquals("このまま書き出す…", button(robot, "#protection-proceed").getText(), "保護を掛けているのに「外す」と出ている");
 
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
