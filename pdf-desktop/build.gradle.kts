@@ -119,8 +119,15 @@ val appName = "PDFjig"
 
 val appVendor = "PROPAGANDIST CORPORATION"
 
-/** ランチャー exe のバージョン情報に入る説明。エクスプローラのプロパティとタスクマネージャに出る。 */
-val appDescription = "PDF を綴じ、解き、取り出すためのデスクトップユーティリティ"
+/**
+ * ランチャー exe のバージョン情報に入る説明。エクスプローラのプロパティとタスクマネージャに出る。
+ *
+ * ★★ ASCII で書く。日本語を渡すと、ビルドするランナー（英語の Windows）で非 ASCII が `?` に置き換わり、
+ * タスクマネージャに `PDF ???…` と出ていた（v0.1.0 から配っていた。2026-09-26、v0.0.6 の実機確認で見つかった）。
+ * インストーラの側（下の installerDescription）は同じ理由で ASCII にしてあったが、こちらは日本語のまま残っていた。
+ * ★ 起動確認（tools/smoke/Verify-AppImage.ps1）が、ここに ASCII 以外が混じらないことを見る。
+ */
+val appDescription = "PDFjig - bind, split, rotate and extract PDF pages"
 
 /**
  * インストーラのメタデータに入る説明。

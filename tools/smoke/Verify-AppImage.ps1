@@ -96,6 +96,35 @@ function Assert-RuntimeHasModules {
     Write-Step ("モジュールの確認は通った: " + ($required -join ', '))
 }
 
+<#
+.SYNOPSIS
+    PDFjig.exe のバージョン情報の「ファイルの説明」が、化けずに入っているかを検める。
+
+.DESCRIPTION
+    タスクマネージャとエクスプローラのプロパティに出る。jpackage はここへ --description を書くが、
+    ビルドするランナー（英語の Windows）では非 ASCII が '?' に置き換わる。
+    v0.1.0 から v0.1.2 まで、タスクマネージャに "PDF ???…" と出たまま配っていた
+    （2026-09-26、v0.0.6 の実機確認で見つかった）。
+    ★ 正本は pdf-desktop/build.gradle.kts の appDescription。ここは化けていないかだけを見る。
+#>
+function Assert-ExeDescriptionReadable {
+    param(
+        [Parameter(Mandatory)]
+        [string] $ExePath
+    )
+
+    Write-Step 'PDFjig.exe の「ファイルの説明」を検める'
+    $description = (Get-Item $ExePath).VersionInfo.FileDescription
+    if ([string]::IsNullOrWhiteSpace($description)) {
+        throw 'PDFjig.exe の「ファイルの説明」が空である'
+    }
+    if ($description -match '[^\x20-\x7E]' -or $description.Contains('?')) {
+        throw ("PDFjig.exe の「ファイルの説明」が化けている: [$description]" +
+            '（pdf-desktop/build.gradle.kts の appDescription を ASCII にすること）')
+    }
+    Write-Step "「ファイルの説明」は読める: $description"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 $ZipPath = (Resolve-Path $ZipPath).Path
@@ -116,6 +145,8 @@ try {
     }
 
     Assert-RuntimeHasModules $exe.Directory.FullName
+
+    Assert-ExeDescriptionReadable $exe.FullName
 
     Assert-AppLaunches $exe.FullName $TimeoutSeconds $ArtifactDir
     Write-Step '起動の確認は通った'
