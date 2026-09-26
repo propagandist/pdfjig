@@ -592,8 +592,9 @@ gh api "repos/propagandist/pdfjig/code-scanning/alerts?ref=refs/heads/develop&st
 
 タグを打つ前に捨てタグでワークフローを一度通しておくと、CI 側の失敗を本番のタグで
 踏まずに済む。確認後にタグとドラフトを消す（`gh release delete v0.0.4 --cleanup-tag`）。
-★ **捨てタグを消せるのは `v0.0.*` だけである**——ほかの `v*` は ruleset 24034278 が消去と打ち直しを止める
-（上の「ブランチをどう使っているか」。#155）。**`v0.0.x` 以外の名前で捨てタグを打たないこと。**
+★ **`v` で始まるタグのうち、消せるのは `v0.0.*` だけにしてある**（#155）。
+ほかの `v*` は、ruleset 24034278 が消去と打ち直しを止める設定である（**止まることは未確認**）。
+**`v0.0.x` 以外の名前で捨てタグを打たないこと**——理由と設定は下の「ブランチをどう使っているか」にある。
 
 **実機確認はこの成果物で行う**（4-3 の 1 番）。**配るものと同じバイト列である。**
 
@@ -1461,7 +1462,7 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
 どこにも書いていなかったので残す。
 
 - **`develop` が既定である。** GitHub の default branch も `develop`。開発はここに集まる。
-  ★ **保護は ruleset id 22361998**（`pull_request` ／ `code_scanning` ／ `non_fast_forward`。
+  ★ **保護は ruleset id 22361998**（`pull_request` ／ `code_scanning` ／ `non_fast_forward` ／ `deletion`。
   **bypass 無し**）。**2026-09-06 に入れた**——理由と、何が止まらないかは下の記録にある（#106）
 - 作業は `feature/` `fix/` `chore/` `ci/` を切り、`--no-ff` で `develop` へマージする。
   マージ済みのブランチは残さない（`git branch --merged develop` が `develop` だけになる状態を保つ）
@@ -1472,14 +1473,18 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
   （それまでは作らなかった——まだ公開していないものを指す「公開用ブランチ」は嘘になる）。
   **次のリリースでは、そのタグのコミットまで `main` を進める。**
   保護は ruleset id 21228747（`deletion` / `non_fast_forward`）。理由は下の記録にある。
-  ★ **bypass は 2026-09-26 に外した**（#155）。**外しても fast-forward の push は止まらない**ので、
-  4-3 の 9 番（`main` を進める）は変わらない。止まるのは force push と削除だけである
-- ★ **配ったタグは打ち直せず、消せない**（ruleset id 24034278。`refs/tags/v*` の `update` ／ `deletion`。
-  **bypass 無し**。2026-09-26 に置いた。#155）。**作るのは止めない**——止めると `release.yml` を走らせる
-  手段が無くなる。**捨てタグ（`refs/tags/v0.0.*`）は外してある**——確認のたびに消して打ち直すためである。
-  ★★ **間違えて打った本番タグを消すときは、この ruleset を一時的に無効にする。** bypass を置くより、
-  **無効にしたことが監査ログに残る**ほうを採った。
-  ★ **止まることはまだ確かめていない**（2026-09-26 時点。設定を読み返しただけである）
+  ★ **bypass は 2026-09-26 に外した**（#155）。rule は `deletion` と `non_fast_forward` のままなので、
+  **設定の上では、止まるのは force push と削除だけである。** 4-3 の 9 番（`main` を進める）は
+  fast-forward の push であり、変わらない想定である。
+  ★ **外した後に `main` を進めたことはまだ無い**（次は v0.2.0 の公開のとき）
+- ★ **配ったタグを打ち直させず、消させない設定を置いた**（ruleset id 24034278。2026-09-26。#155）。
+  対象は `refs/tags/v*`、rule は `update` ／ `deletion`、**bypass は無し**である。
+  **作るのは止めない**——止めると `release.yml` を走らせる手段が無くなる。
+  **捨てタグ（`refs/tags/v0.0.*`）は外してある**——確認のたびに消して打ち直すためである。
+  ★★ **間違えて打った本番タグを消すときは、この ruleset を一時的に無効にする。**
+  bypass を置くより、**無効にしたことが監査ログに残る**ほうを採った。
+  ★★ **止まることはまだ確かめていない**（**2026-09-26 実測**。設定を読み返しただけで、
+  打ち直しも消去も試していない）
 
 ### 撮影用サンプルの生成器（2026-08-24）
 
@@ -1598,6 +1603,7 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページである。**枚数�
       確かめた。`/security/policy` への絶対 URL にした——**版にもパスにも依存しない**
 - [x] **`main` を作り、`main` だけを保護した**（#22、2026-08-23）。ruleset id 21228747。
       `deletion` と `non_fast_forward` の 2 つだけで、bypass は RepositoryRole=admin。
+      → **2026-09-26 に bypass を外した**（#155。「ブランチをどう使っているか」）
       ★ **`required_status_checks` は入れていない。** `**/*.md` の変更では `build` が
       走らないため、check run が存在しないコミットが `main` に来た瞬間に詰まる。
       **v0.1.0 が指す 72df4ad がまさに docs だけのコミットであり、入れていたら初回から
@@ -2749,9 +2755,10 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページである。**枚数�
       **残るのは 2 つ**——**ruleset を置いた 2026-09-06 より前の列**（直接 push を含む）と、
       **tag の ruleset が 0 本のまま**であること（配った版の打ち直し・消去は止まらない）。
       **`main` の bypass も残っている**（下の項）
-      → **2026-09-26 追記（#155）: 2 つとも塞いだ。** tag の ruleset（24034278）が配ったタグの
-      打ち直しと消去を止め、`main` の bypass は外した（上の「ブランチをどう使っているか」）。
-      **残るのは ruleset を置く前の列だけである**
+      → **2026-09-26 追記（#155）: 2 つのうち「tag の ruleset が 0 本」には、ruleset 24034278 を置いた。**
+      配ったタグの打ち直しと消去を止める設定である（**止まることは未確認**）。
+      **「ruleset を置く前の列」は残る。** あわせて、**`main` の bypass は外した**
+      （上の「ブランチをどう使っているか」）
     - **`build` が赤くてもマージできる。** `required_status_checks` を入れていないためである
     - **`main` には `code_scanning` rule が無い**（ruleset 21228747 は `deletion` と
       `non_fast_forward` のまま。**admin bypass も付いている**）。
@@ -2760,8 +2767,8 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページである。**枚数�
       **「保護してある」と読める名前で弱いほうが残っている。**
       **#22 のコメントが警告した誤読と同じ形なので、ここに書いておく**
       → **2026-09-26 追記（#155）: admin bypass は外した。** `code_scanning` は足していない——
-      入るものは `develop` で既に見られており、**`pull_request` を足すと `main` がタグを指さなくなる**
-      （PR のマージは fast-forward できない）
+      **入るものは `develop` で既に見られている**（#155 の判断）。
+      ★ `code_scanning` rule が PR を通らない直接の push に掛かるかは、確かめていない
     - **medium 以下の alert は止めない**（`high_or_higher`）
 - [x] ★★ **MSI / EXE を入れて消すところまで CI で見るようにした**（#44、2026-09-06）。
       `release.yml` の「MSI / EXE を入れて消す」である。**v0.1.1 まで一度も入れられたことが
