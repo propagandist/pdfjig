@@ -164,6 +164,11 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         robot.clickOn("#tool-split-pages");
 
         waitForNode(robot, "#protection-dialog");
+        // ★★ 分割では保存へ案内しない。「パスワードで保護して保存」は分割しない 1 ファイルを書くので、
+        //   従うと分割の出力を保護したつもりになる（#172 の門）。
+        String advice = textOf(robot, "#protection-advice");
+        assertFalse(advice.contains("パスワードで保護して保存"), "分割の代わりにならない保存へ案内している: " + advice);
+        assertTrue(advice.contains("できません"), "分割の出力を保護できないことを書いていない: " + advice);
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
 

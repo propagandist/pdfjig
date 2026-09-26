@@ -1382,7 +1382,7 @@ public final class MainWindow {
         //   N 回出すと「読まずに続行を押す」習慣ができる。
         // ★★ 問うてから出力先を選ぶ。保存と同じ順である（save の★★。2026-09-26、利用者が決めた）。
         List<PageSelection> allPages = segments.stream().flatMap(List::stream).toList();
-        if (!consentsToDroppingProtection(writing, allPages, ProtectionPrompt.Outcome.PLAIN)) {
+        if (!consentsToDroppingProtection(writing, allPages, ProtectionPrompt.Outcome.PLAIN_SPLIT)) {
             return;
         }
         if (!stillHolds(held)) {
@@ -1531,7 +1531,7 @@ public final class MainWindow {
 
     private void showSplitResult(DocumentWriter.SplitResult result, int asked) {
         messages.information(result.fileCount() + " 個のファイルを書き出しました。");
-        messages.warnings(exceptWhatWasAsked(result.warnings(), ProtectionPrompt.Outcome.PLAIN.preempts, asked));
+        messages.warnings(exceptWhatWasAsked(result.warnings(), ProtectionPrompt.Outcome.PLAIN_SPLIT.preempts, asked));
     }
 
     /**
