@@ -105,11 +105,29 @@ final class ProtectionPrompt {
      */
     enum Outcome {
 
-        /** 保護を何も掛けない。出力は平文である。 */
+        /** 保存で、保護を何も掛けない。出力は平文である。 */
         PLAIN(
                 "保護は引き継がれません",
                 "書き出すファイルはパスワードで保護されません",
-                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator() + "保護したまま渡すには、書き出したあとで改めてパスワードを設定してください。",
+                // ★★ 「書き出したあとで設定」を勧めない。その順だと、保護されていない中身が一度ディスクに落ちる
+                //   （共有フォルダならそこに平文が置かれる）。中止して「パスワードで保護して保存」を使えば、
+                //   平文は一度もディスクに書かれない（#199）。2026-09-26、v0.2.0 のリリース本文の門で見つかった。
+                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator()
+                        + "パスワードで保護して書き出すには、中止して「ツール」→「パスワードで保護して保存…」を使ってください。",
+                "保護を外して書き出す…",
+                Warning.ENCRYPTION_NOT_PROPAGATED),
+
+        /**
+         * 分割で、保護を掛けられない。出力はどれも平文である。
+         *
+         * <p><b>★★ 保存へ案内しない。</b>「パスワードで保護して保存」は分割しない 1 ファイルを書くので、
+         * 分割の代わりにならない。後から掛け直す順も勧めない（{@link #PLAIN} と同じ理由）——
+         * <b>分割の出力を保護する道は今は無い</b>ので、無いと書く（{@code CLAUDE.md} 優先順位 2。#172 の門）。
+         */
+        PLAIN_SPLIT(
+                "保護は引き継がれません",
+                "分割したファイルはパスワードで保護されません",
+                "分割したファイルは、どれもパスワードなしで開けるようになります。" + System.lineSeparator() + "分割したファイルにパスワードを掛けることは、この版ではできません。",
                 "保護を外して書き出す…",
                 Warning.ENCRYPTION_NOT_PROPAGATED),
 
@@ -176,6 +194,7 @@ final class ProtectionPrompt {
         sources.setWrapText(true);
 
         Label consequence = new Label(outcome.adviceText);
+        consequence.setId("protection-advice");
         consequence.setWrapText(true);
 
         VBox content = new VBox(8, sources, consequence);

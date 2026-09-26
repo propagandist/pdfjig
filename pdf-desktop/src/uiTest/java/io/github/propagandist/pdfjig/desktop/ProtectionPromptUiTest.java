@@ -66,6 +66,11 @@ class ProtectionPromptUiTest extends DesktopUiTest {
 
         // ★ どのファイルの保護が落ちるのかを出す。数だけでは辿れない。
         assertTrue(textOf(robot, "#protection-sources").contains("locked.pdf"), "保護が落ちる出どころの名前が出ていない");
+        // ★★ 保護を守る道を案内する。「書き出したあとで設定」を勧めると、保護されていない中身が
+        //   一度ディスクに落ちる順を踏ませる（2026-09-26、v0.2.0 のリリース本文の門で見つかった）。
+        String advice = textOf(robot, "#protection-advice");
+        assertTrue(advice.contains("パスワードで保護して保存"), "保護したまま書き出す道を案内していない: " + advice);
+        assertFalse(advice.contains("書き出したあとで"), "平文を一度ディスクに落とす順を勧めている: " + advice);
 
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
@@ -159,6 +164,11 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         robot.clickOn("#tool-split-pages");
 
         waitForNode(robot, "#protection-dialog");
+        // ★★ 分割では保存へ案内しない。「パスワードで保護して保存」は分割しない 1 ファイルを書くので、
+        //   従うと分割の出力を保護したつもりになる（#172 の門）。
+        String advice = textOf(robot, "#protection-advice");
+        assertFalse(advice.contains("パスワードで保護して保存"), "分割の代わりにならない保存へ案内している: " + advice);
+        assertTrue(advice.contains("できません"), "分割の出力を保護できないことを書いていない: " + advice);
         clickWhenReady(robot, "#protection-cancel");
         WaitForAsyncUtils.waitForFxEvents();
 
