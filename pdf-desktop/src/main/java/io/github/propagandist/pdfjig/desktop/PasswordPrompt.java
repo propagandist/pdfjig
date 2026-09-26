@@ -1,7 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.core.Password;
-import java.nio.file.Path;
 import java.util.Optional;
 import javafx.geometry.Insets;
 import javafx.scene.control.ButtonBar.ButtonData;
@@ -70,17 +69,20 @@ final class PasswordPrompt {
      * （{@link Password} の Javadoc）。
      *
      * @param owner   親ウィンドウ
-     * @param path    対象ファイル
+     * @param name    対象ファイルを画面に出す名前。<b>★ 同じ名前のファイルが開いていれば、
+     *                区別の付いた名前を渡すこと</b>（{@link DocumentSession#sourceName}。#128）——
+     *                どちらの鍵を訊かれているのか分からないと、別の文書の鍵を打たせる
      * @param purpose 何のために訊いているか
      * @param retry   入力し直しかどうか。true なら誤りである旨を添える
      * @return 入力されたパスワード。取り消された場合は空
      */
-    static Optional<Password> ask(Stage owner, Path path, Purpose purpose, boolean retry) {
+    static Optional<Password> ask(Stage owner, String name, Purpose purpose, boolean retry) {
         PasswordField field = new PasswordField();
         field.setId("password-field");
         field.setPromptText("パスワード");
 
-        Label explanation = new Label(path.getFileName() + " " + purpose.explanation);
+        Label explanation = new Label(name + " " + purpose.explanation);
+        explanation.setId("password-explanation");
         explanation.setWrapText(true);
 
         VBox content = new VBox(8, explanation, field);

@@ -506,7 +506,9 @@ public final class MainWindow {
      * 起きるものであり、開き直しからやらせる理由がない。取り消せば終わる。
      */
     private void askPasswordAndOpen(Path path, boolean retry) {
-        Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
+        // 開くのは 1 つ目なので、並ぶ相手がいない。ファイル名だけで区別が付く。
+        Optional<Password> entered =
+                PasswordPrompt.ask(stage, path.getFileName().toString(), PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -868,9 +870,9 @@ public final class MainWindow {
      * 出どころが 1 つ外れると<b>後ろの番号が繰り下がる</b>ので、
      * <b>掴んでおいた番号も並びも、いまの一覧に対しては別のファイルを指す。</b>
      *
-     * <p><b>★ 名前ではなくパスの並びで見る。</b>{@code sourceName} はファイル名しか返さないので、
-     * <b>別のフォルダにある同じ名前のファイルを見分けられない</b>——
-     * <b>取り消せない操作の番人がそこで通ると、確認していないファイルが外れる。</b>
+     * <p><b>★ 名前ではなくパスの並びで見る。</b>{@code sourceName} は画面に出す名前であり、
+     * <b>並びが変わると同じファイルの名前も変わる</b>（同じ名前の相手が外れれば親フォルダが落ちる。#128）——
+     * <b>取り消せない操作の番人を画面の都合に預けると、確認していないファイルが外れる。</b>
      *
      * @param target  掴んでおいた文書
      * @param sources 掴んだときの出どころ一覧
@@ -1022,7 +1024,10 @@ public final class MainWindow {
     /** パスワードを尋ねて足す。誤っていれば、誤りである旨を添えてもう一度尋ねる。 */
     private void addWithPassword(DocumentSession target, Path path, boolean retry) {
         Held held = new Held(target, target.paths());
-        Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.OPEN, retry);
+        // ★ 足した後に出る名前で訊く。既に開いている同じ名前のファイルと区別が付かないと、
+        //   どちらの鍵を訊かれているのか分からない（#128）。
+        Optional<Password> entered =
+                PasswordPrompt.ask(stage, target.nameIfAdded(path), PasswordPrompt.Purpose.OPEN, retry);
         if (entered.isEmpty()) {
             return;
         }
@@ -1453,7 +1458,8 @@ public final class MainWindow {
                     inputs.add(Source.of(path));
                     continue;
                 }
-                Optional<Password> entered = PasswordPrompt.ask(stage, path, PasswordPrompt.Purpose.WRITE, false);
+                Optional<Password> entered =
+                        PasswordPrompt.ask(stage, saving.sourceName(sourceIndex), PasswordPrompt.Purpose.WRITE, false);
                 if (entered.isEmpty()) {
                     return Optional.empty();
                 }

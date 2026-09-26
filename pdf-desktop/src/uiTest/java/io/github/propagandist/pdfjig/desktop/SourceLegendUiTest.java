@@ -5,8 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.input.KeyCode;
@@ -217,6 +219,36 @@ class SourceLegendUiTest extends DesktopUiTest {
         MenuItem item = menuItem(robot, "menu-remove-source-0").orElseThrow();
         assertEquals("scan_01.pdf を外す…", item.getText());
         assertFalse(item.isMnemonicParsing(), "ファイル名の _ がニーモニックとして読まれる");
+    }
+
+    /**
+     * 同じ名前のファイルは、親フォルダで区別が付く（#128）。一覧・メニュー・外す確認のどれでも。
+     *
+     * <p><b>★★ 取り消せない操作の対象を、名前だけで指している。</b>同じ名前が 2 つ並ぶと、
+     * <b>帯の色しか手がかりが無く</b>、色が見えない利用者と読み上げには区別が付かない。
+     * <b>外す確認が最後の関門であり、そこまで見る。</b>
+     */
+    @Test
+    void 同じ名前のファイルは親フォルダで区別が付く(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(
+                robot,
+                TestPdfs.withText(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), "A1"));
+        addFiles(
+                robot,
+                TestPdfs.withText(Files.createDirectory(dir.resolve("archive")).resolve("r.pdf"), "B1"));
+
+        assertEquals("r.pdf（work） をこの編集から外す", accessibleTextOf(robot, "#source-remove-0"));
+        assertEquals("r.pdf（archive） をこの編集から外す", accessibleTextOf(robot, "#source-remove-1"));
+        assertEquals(
+                "r.pdf（archive） を外す…",
+                menuItem(robot, "menu-remove-source-1").orElseThrow().getText());
+
+        robot.clickOn("#source-remove-1");
+        waitForNode(robot, "#remove-source-cancel");
+        String asked =
+                robot.lookup("#remove-source-dialog").queryAs(DialogPane.class).getContentText();
+        assertTrue(asked.startsWith("r.pdf（archive） の "), "外す確認がどちらの r.pdf かを言っていない: " + asked);
+        clickWhenReady(robot, "#remove-source-cancel");
     }
 
     /**

@@ -158,13 +158,32 @@ public final class DocumentSession implements AutoCloseable {
     }
 
     /**
-     * 出どころのファイル名。
+     * 出どころを画面に出す名前。
+     *
+     * <p><b>同じ名前のファイルが並んだときだけ、区別が付くところまで親フォルダを添える</b>
+     * （{@link SourceNames}。#128）。一覧・外す確認・保護が落ちる窓・鍵を訊く窓が、
+     * <b>どれもこの名前で相手を指す。</b>
      *
      * @param sourceIndex 出どころ番号
-     * @return 拡張子を含むファイル名
+     * @return 拡張子を含むファイル名。同じ名前が他にあれば親フォルダを添えたもの
      */
     public String sourceName(int sourceIndex) {
-        return paths.get(sourceIndex).getFileName().toString();
+        return SourceNames.of(paths).get(sourceIndex);
+    }
+
+    /**
+     * 足そうとしているファイルを、足した後に出る名前で返す。
+     *
+     * <p><b>鍵を訊く窓は、足す前に出る</b>——そこで既に開いている同じ名前のファイルと区別が付かないと、
+     * <b>どちらの鍵を訊かれているのか分からない。</b>
+     *
+     * @param path 足そうとしているファイル
+     * @return 足した後の {@link #sourceName} と同じ名前
+     */
+    public String nameIfAdded(Path path) {
+        List<Path> after = new ArrayList<>(paths);
+        after.add(path);
+        return SourceNames.of(after).get(after.size() - 1);
     }
 
     /** 編集中のページ並び。 */

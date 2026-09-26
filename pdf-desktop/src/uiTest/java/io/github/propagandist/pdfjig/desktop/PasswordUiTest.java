@@ -8,6 +8,7 @@ import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
@@ -162,6 +163,29 @@ class PasswordUiTest extends DesktopUiTest {
         // ★ 書き出しに入る前に止まる。作業場所も作らない。
         assertTrue(Files.notExists(output), "取り消したのに書き出されている");
         waitFor(() -> !button(robot, "#tool-save").isDisabled());
+    }
+
+    /**
+     * 足すファイルの鍵を訊く窓は、既に開いている同じ名前のファイルと区別が付く（#128）。
+     *
+     * <p><b>★★ 窓は足す前に出る。</b>名前だけだと、<b>どちらの鍵を訊かれているのか分からず、
+     * 別の文書の鍵を打たせる。</b>
+     */
+    @Test
+    void 足すファイルの鍵を訊く窓は同じ名前のファイルと区別が付く(@TempDir Path dir, FxRobot robot) throws Exception {
+        openFixture(
+                robot,
+                TestPdfs.withText(Files.createDirectory(dir.resolve("work")).resolve("r.pdf"), "A1"));
+        addFixtures(
+                robot,
+                TestPdfs.encrypted(Files.createDirectory(dir.resolve("archive")).resolve("r.pdf"), CORRECT));
+
+        waitForNode(robot, "#password-field");
+        String asked =
+                robot.lookup("#password-explanation").queryAs(Label.class).getText();
+        assertTrue(asked.startsWith("r.pdf（archive） "), "どちらの r.pdf の鍵を訊いているのかを言っていない: " + asked);
+        clickWhenReady(robot, "#password-cancel");
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     // ── 補助 ────────────────────────────────────────────────────────────────

@@ -71,6 +71,26 @@ class DocumentSessionTest {
     }
 
     @Test
+    @DisplayName("★★ 保護が落ちる窓でも、同じ名前のファイルは区別が付く（#128）")
+    void namesKeyedContributorsApartFromTheirNamesakes(@TempDir Path dir) throws Exception {
+        // ★★ 暗号化されたほうと平文のほうが同じ名前だと、窓が挙げた名前がどちらのことか読めない。
+        Path plain = TestPdfs.plain(Files.createDirectory(dir.resolve("work")).resolve("report.pdf"), 1);
+        Path locked =
+                TestPdfs.encrypted(Files.createDirectory(dir.resolve("archive")).resolve("report.pdf"), "key");
+
+        try (Password key = Password.copyOf("key");
+                DocumentSession session = DocumentSession.open(plain)) {
+            // 鍵の窓は足す前に出るので、足した後の名前をその時点で答えられなければならない。
+            assertEquals("report.pdf（archive）", session.nameIfAdded(locked));
+            session.add(locked, key);
+
+            assertEquals(
+                    List.of("report.pdf（archive）"),
+                    session.keyedContributors(List.of(PageSelection.of(0, 1), PageSelection.of(1, 1))));
+        }
+    }
+
+    @Test
     @DisplayName("同じ出どころを何ページ使っても 1 度しか挙げない")
     void namesEachSourceOnce(@TempDir Path dir) throws Exception {
         Path locked = TestPdfs.encrypted(dir.resolve("locked.pdf"), "key", 2);
