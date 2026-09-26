@@ -11,6 +11,7 @@ import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar.ButtonData;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.input.Clipboard;
@@ -270,6 +271,75 @@ final class Messages {
         //   Enter を続けて押すと取り消せない操作が通る。ProtectionPrompt と同じ形である。
         preferCancel(alert, ok, cancel);
         return alert.showAndWait().filter(ButtonType.OK::equals).isPresent();
+    }
+
+    /**
+     * 閉じると何が消えるのかを見せて、閉じてよいかを尋ねる（#171）。
+     *
+     * <p><b>★ 2 択である。</b>「保存して閉じる」は出さない——門を通らずに保存が走り、
+     * 同じ変換が二重に掛かる口を開ける（#118）。
+     *
+     * <p><b>★ 元の PDF が変わらないことを言う。</b>利用者がいちばん恐れるのは「ファイルが壊れたのでは」であり、
+     * この道具についてはそれは起きない。<b>失うのは並べ替えの手間であって、データではない。</b>
+     *
+     * <p><b>★★ 既定は断る側にする。</b>Enter を続けて押しても捨てない。× と Esc も断る側へ倒れる
+     * （{@code ButtonData.CANCEL_CLOSE}）。<b>id は 3 つの経路で同じ</b>——変わるのはボタンの文言だけで、
+     * テストとの契約は文言ではない。
+     *
+     * @param what  何をしようとしているか
+     * @param stale 保存が押せない状態か。<b>それでも窓の形は同じ</b>——断る手しか無い窓は
+     *              「閉じられない」と同じであり、#118 で塞いで戻した「閉じる」を塞ぎ直すことになる
+     * @return 捨ててよければ {@code true}
+     */
+    boolean confirmDiscard(Discarding what, boolean stale) {
+        ButtonType discard = new ButtonType(what.discardText, ButtonData.OK_DONE);
+        ButtonType cancel = new ButtonType("キャンセル", ButtonData.CANCEL_CLOSE);
+        Alert alert = new Alert(
+                AlertType.CONFIRMATION,
+                (stale ? "保存できない状態です（開き直してください）。" : "")
+                        + what.consequence
+                        + "並べ替え・回転・削除・区切り、ファイルの追加や取り外しが失われます。"
+                        + "\n\n元の PDF は変更されません。",
+                discard,
+                cancel);
+        alert.setHeaderText("保存していない編集があります。");
+        alert.initOwner(owner);
+        alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+        alert.getDialogPane().setId("discard-dialog");
+        Button discardButton = (Button) alert.getDialogPane().lookupButton(discard);
+        Button cancelButton = (Button) alert.getDialogPane().lookupButton(cancel);
+        discardButton.setId("discard-ok");
+        cancelButton.setId("discard-cancel");
+        preferCancel(alert, discardButton, cancelButton);
+        // ★ 閉じられた（× / Esc）ときも捨てない。showAndWait が CANCEL_CLOSE を返す経路がそれである。
+        return alert.showAndWait().filter(discard::equals).isPresent();
+    }
+
+    /**
+     * 何をしようとして、いまの編集を捨てることになるのか（#171）。
+     *
+     * <p><b>ボタンの文言だけが変わる。</b>「保存せずに閉じる」を押そうとしているのに「終了」と書くと、
+     * <b>何を押しているのか読んで分からない</b>（{@code CLAUDE.md} 優先順位 2）。
+     */
+    enum Discarding {
+
+        /** メニューの「終了」と、窓の ×。 */
+        QUIT("このまま終了すると、", "保存せずに終了"),
+
+        /** メニューの「閉じる」。 */
+        CLOSE("このまま閉じると、", "保存せずに閉じる"),
+
+        /** 別の PDF を開く。<b>開くと、いまの文書は閉じる。</b> */
+        OPEN("別の PDF を開くと、いまの文書は閉じられ、", "保存せずに開く");
+
+        private final String consequence;
+
+        private final String discardText;
+
+        Discarding(String consequence, String discardText) {
+            this.consequence = consequence;
+            this.discardText = discardText;
+        }
     }
 
     /**

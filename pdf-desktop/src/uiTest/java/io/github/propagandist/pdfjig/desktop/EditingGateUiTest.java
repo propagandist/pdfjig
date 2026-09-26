@@ -197,6 +197,8 @@ class EditingGateUiTest extends DesktopUiTest {
         // ★ 確認の窓は入力を止めるが、積まれた runLater は止めない。ここが通ることそのものが、
         //   この不具合の前提である。
         Platform.runLater(() -> window.open(other));
+        // ★ ファイルを足してあるので、開く前に閉じたら消えるものを確かめる窓が出る（#171）。捨てて進む。
+        clickWhenReady(robot, "#discard-ok");
         waitFor(() -> statusText(robot).equals("1 / 1 ページ"));
 
         clickWhenReady(robot, "#remove-source-ok");

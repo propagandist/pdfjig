@@ -89,6 +89,8 @@ class PromptSwapUiTest extends DesktopUiTest {
         waitForNode(robot, "#password-field");
 
         Platform.runLater(() -> window.open(other));
+        // ★ 区切りを付けてあるので、開く前に閉じたら消えるものを確かめる窓が出る（#171）。捨てて進む。
+        clickWhenReady(robot, "#discard-ok");
         waitFor(() -> stage.getTitle().contains("c.pdf"));
 
         clickWhenReady(robot, "#password-field");
