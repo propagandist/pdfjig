@@ -155,8 +155,12 @@ EXE と MSI は同じ製品であり、両方を同時にインストールす�
 
 ビルドには JDK 21 が必要。JavaFX は Gradle が解決するため、JavaFX 同梱の JDK でなくてよい。
 
-配布物を作る場合は、加えて [WiX Toolset 3.14](https://github.com/wixtoolset/wix3/releases)
-を PATH に通しておく。jpackage が要求するのは 3.x であり、v4 では動かない。
+配布物を作る場合は、加えて 2 つ要る。
+
+- **JDK 25**（jpackage だけに使う。アプリに入る Java は 21 のまま）。
+  JDK 21 の jpackage が作るインストーラは、上から入れても前の版を消さない（#251）
+- [WiX Toolset 3.14](https://github.com/wixtoolset/wix3/releases) を PATH に通す。
+  ★ WiX 4 以降（`wix.exe`）が入っていると、jpackage はそちらを先に使う
 
 ```
 ./gradlew :pdf-desktop:packageAll -Pversion=0.1.0

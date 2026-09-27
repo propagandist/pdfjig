@@ -209,8 +209,10 @@ M0 では「開く」だけ。設定・解除は M1。
 ### 4-1. jpackage（実装済み）
 
 `installDist` → `jlink` → `jpackage` の 3 段。`./gradlew :pdf-desktop:packageAll -Pversion=0.1.0`
-で `dist/` に 3 つの成果物ができる。手元で回すには WiX 3.14 を PATH に通す必要がある
-（jpackage が要求するのは 3.x で、v4 では動かない）。
+で `dist/` に 3 つの成果物ができる。手元で回すには、JDK 21 に加えて **JDK 25** と、
+PATH に通した WiX 3.14 が要る。★ jpackage だけを 25 から呼ぶ（理由は
+`pdf-desktop/build.gradle.kts` の `jpackageHome`。#251）。25 の jpackage は WiX 4 以降（`wix.exe`）を
+3 より先に使うので、`wix.exe` は入れないこと（`release.yml` は無いことを確かめている）。
 
 配布形式は役割で分けた。同じものを 2 つ並べるのではなく、
 
