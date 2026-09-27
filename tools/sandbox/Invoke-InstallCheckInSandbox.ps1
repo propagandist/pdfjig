@@ -43,6 +43,12 @@ param(
     [ValidateSet('machine', 'userUnmanaged', 'userManaged')]
     [string] $ExpectedExeContext,
 
+    # 前の版の MSI / EXE の置き場。渡すと「前の版の上に入れて、前の版が消えるか」も見る。
+    # ★★ この壊れ方は CI のランナーでは出なかったが、Sandbox では 4 回とも出た
+    #   （2026-09-27 実測。pdf-desktop/build.gradle.kts の jpackageHome）。
+    #   **赤を確かめられるのはここである。**
+    [string] $PreviousDir,
+
     # Sandbox に渡すメモリ。ホストのコミットにそのまま乗る（SandboxHost.ps1 の
     # Assert-HostHasHeadroom）。
     [int] $MemoryInMB = 4096,
@@ -91,6 +97,9 @@ $mapped = @(
     @{ Host = $repoRoot;  Sandbox = 'C:\src';  ReadOnly = $true }
     @{ Host = $outputDir; Sandbox = 'C:\out';  ReadOnly = $false }
 )
+if ($PreviousDir) {
+    $mapped += @{ Host = (Resolve-Path $PreviousDir).Path; Sandbox = 'C:\previous'; ReadOnly = $true }
+}
 
 if (-not (Test-Path $outputDir)) {
     New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -109,6 +118,9 @@ if ($ExpectedMsiContext) {
 }
 if ($ExpectedExeContext) {
     $logon += (' -ExpectedExeContext "' + $ExpectedExeContext + '"')
+}
+if ($PreviousDir) {
+    $logon += ' -PreviousDir "C:\previous"'
 }
 
 $null = New-SandboxConfigFile `
