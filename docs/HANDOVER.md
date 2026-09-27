@@ -376,7 +376,8 @@ gh api "repos/propagandist/pdfjig/code-scanning/alerts?ref=refs/heads/develop&st
    `tools/sandbox/Invoke-InstallCheckInSandbox.ps1 -PreviousDir <前の版>` で回すこと
    ── ★ **既に 2 つ並んでいる機械では、1 つしか消えない。** jpackage のカスタムアクションは、
    見つけた旧版のうち最初の 1 つだけを消す対象に渡す（2026-09-27 実測）。
-   ★★ **残った旧版だけを消すと、新しい版のファイルも消える**——どの版も同じフォルダに入るため。
+   ★★ **残った旧版だけを消すと、新しい版のファイルも消える**——同じフォルダに入るためと読んでいる
+   （仕組みは確かめていない）。
    EXE で 248 個が消え、`PDFjig.exe` が無くなった。**全部消してから入れ直すと戻る**（同日 Sandbox で実測）
    ── ★ **`UpgradeCode` が変わっていないことも機械が見る**（`InstallCheck.ps1`。
    MSI の Property 表は入れる前に読める）
