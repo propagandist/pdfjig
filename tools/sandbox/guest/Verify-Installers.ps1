@@ -29,7 +29,10 @@ param(
 
     [string] $ExpectedMsiContext,
 
-    [string] $ExpectedExeContext
+    [string] $ExpectedExeContext,
+
+    # 前の版の置き場（中の C:\previous）。渡されたときだけ上書きも検める。
+    [string] $PreviousDir
 )
 
 Set-StrictMode -Version Latest
@@ -50,6 +53,7 @@ try {
     if ($ExpectedUpgradeCode) { $arguments['ExpectedUpgradeCode'] = $ExpectedUpgradeCode }
     if ($ExpectedMsiContext) { $arguments['ExpectedMsiContext'] = $ExpectedMsiContext }
     if ($ExpectedExeContext) { $arguments['ExpectedExeContext'] = $ExpectedExeContext }
+    if ($PreviousDir) { $arguments['PreviousDir'] = $PreviousDir }
 
     & 'C:\src\tools\smoke\InstallCheck.ps1' @arguments
     $code = 0

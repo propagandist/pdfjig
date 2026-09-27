@@ -209,8 +209,10 @@ M0 では「開く」だけ。設定・解除は M1。
 ### 4-1. jpackage（実装済み）
 
 `installDist` → `jlink` → `jpackage` の 3 段。`./gradlew :pdf-desktop:packageAll -Pversion=0.1.0`
-で `dist/` に 3 つの成果物ができる。手元で回すには WiX 3.14 を PATH に通す必要がある
-（jpackage が要求するのは 3.x で、v4 では動かない）。
+で `dist/` に 3 つの成果物ができる。手元で回すには、JDK 21 に加えて **JDK 25** と、
+PATH に通した WiX 3.14 が要る。★ jpackage だけを 25 から呼ぶ（理由は
+`pdf-desktop/build.gradle.kts` の `jpackageHome`。#251）。25 の jpackage は WiX 4 以降（`wix.exe`）を
+3 より先に使うので、`wix.exe` は入れないこと（`release.yml` は無いことを確かめている）。
 
 配布形式は役割で分けた。同じものを 2 つ並べるのではなく、
 
@@ -363,12 +365,18 @@ gh api "repos/propagandist/pdfjig/code-scanning/alerts?ref=refs/heads/develop&st
    `--win-dir-chooser` の画面が出ないからである。**ここは人が見る**
 4. **アンインストールでファイルが残らない**（機械が見る。マシン単位とユーザー単位の
    両方の置き場・ショートカット・アンインストール情報を見る）
-5. **同じ MSI をもう一度入れて上書きになる**
-   ── ★★ **いまの機械の検めは、これについては落ちようがない。** 同じ MSI を 2 回入れるので
-   `ProductCode` が同じであり、**アンインストール情報は必ず 1 件になる。**
-   **守りたいのは「版が上がったときに旧版が残らないこと」で、それには 2 つの版が要る**
-   （#159）。**当面ここは人が見る。**
-   ── ★ **`UpgradeCode` が変わっていないことは機械が見る**（`InstallCheck.ps1`。
+5. **前の版の上に入れると、前の版が消えて今回の版だけが残る**（MSI と EXE の両方）
+   ── ★ **機械が見る。** `release.yml` は公開済みの最新の版を落として下に入れ、
+   `InstallCheck.ps1 -PreviousDir` が UpgradeCode の関連製品を数える（#251）。
+   ── ★★ **ただし CI の緑は、直っている根拠にならない。** JDK 21 の jpackage が作るインストーラは
+   旧版を消さなかったが、**解放済みの領域を読む不具合なので、出るかどうかは機械による**——
+   CI のランナーでは旧版が消え、Windows Sandbox では残った（2026-09-27 実測。理由は
+   `pdf-desktop/build.gradle.kts` の `jpackageHome`）。**赤を確かめられたのは Sandbox である。**
+   jpackage の JDK を変えるときは、
+   `tools/sandbox/Invoke-InstallCheckInSandbox.ps1 -PreviousDir <前の版>` で回すこと
+   ── ★ **既に 2 つ並んでいる機械では、1 つしか消えない。** jpackage のカスタムアクションは、
+   見つけた旧版のうち最初の 1 つだけを消す対象に渡す（2026-09-27 実測）
+   ── ★ **`UpgradeCode` が変わっていないことも機械が見る**（`InstallCheck.ps1`。
    MSI の Property 表は入れる前に読める）
 6. **ネットワークを遮断したまま**一連の操作が動く（INV-3 の確認）
    ── ランナーで遮断すると Gradle も止まる。何が原因で落ちたのか切り分けられない
