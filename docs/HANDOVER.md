@@ -261,7 +261,8 @@ M1 で POI を戻せば元の水準へ戻る。
 7. Actions が draft リリースを作るので、**成果物を触ってから公開する**
 8. **同時に公開するものがあれば、公開と同じ場で出す**（Security Advisory など。
    `SECURITY.md`「修正版の届き方」）
-9. **`main` をその版まで進める**
+9. **`main` をその版まで進める**——`git push origin vX.Y.Z^{commit}:refs/heads/main`（fast-forward。
+   止まらないことは下の「ブランチをどう使っているか」に実測がある）
 10. **その版のマイルストーンを閉じ、「vX.Y.Z をリリースする」issue を閉じる**
     ── **閉じる条件はマイルストーンの description が持つ。ここへ写さない。**
     ★ **閉じる前に、残っている open を見る。** 閉じる条件は「**中身 ＋ 公開**」の連言で
@@ -1494,8 +1495,9 @@ Spotless には `spotlessInstallGitPrePushHook` があり、push 時に `spotles
   保護は ruleset id 21228747（`deletion` / `non_fast_forward`）。理由は下の記録にある。
   ★ **bypass は 2026-09-26 に外した**（#155）。rule は `deletion` と `non_fast_forward` のままなので、
   **設定の上では、止まるのは force push と削除だけである。** 4-3 の 9 番（`main` を進める）は
-  fast-forward の push であり、変わらない想定である。
-  ★ **外した後に `main` を進めたことはまだ無い**（次は v0.2.0 の公開のとき）
+  fast-forward の push なので止まらない（下の実測）。
+  ★ **外した後も、`main` を進める push は止まらなかった**（**2026-09-27 実測**。v0.2.1 の公開で、
+  `7042ecc` → `bf6e2ff` を `git push origin v0.2.1^{commit}:refs/heads/main` で fast-forward した）
 - ★ **配ったタグを打ち直させず、消させない設定を置いた**（ruleset id 24034278。2026-09-26。#155）。
   対象は `refs/tags/v*`、rule は `update` ／ `deletion`、**bypass は無し**である。
   **作るのは止めない**——止めると `release.yml` を走らせる手段が無くなる。
