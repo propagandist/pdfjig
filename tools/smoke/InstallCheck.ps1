@@ -61,6 +61,16 @@ param(
     [ValidateSet('machine', 'userUnmanaged', 'userManaged')]
     [string] $ExpectedExeContext = 'userUnmanaged',
 
+    # 前の版の MSI / EXE の置き場。渡すと「前の版の上に入れて、前の版が消えるか」も見る。
+    # CI は公開済みの最新の版を落としてきて渡す（release.yml）。
+    #
+    # ★★ 同じ成果物を 2 回入れても、この壊れ方は再現しない（#159）。ProductCode が同じなので、
+    #   旧版を消す経路（FindRelatedProducts → RemoveExistingProducts）を通らない。
+    #   **JDK 21 の jpackage の作るインストーラは、この経路で旧版を消さなかった**——
+    #   v0.1.1 → v0.1.2 でも v0.1.2 → v0.2.0 でも、EXE でも MSI でも 2 つ並んだ
+    #   （2026-09-27 実測。理由は pdf-desktop/build.gradle.kts の jpackageHome）。
+    [string] $PreviousDir,
+
     # ★★ 使い捨てでない機械で走らせるときの明示の同意。
     #   既定では断る（下の Assert-DisposableHost）。
     [switch] $AllowNonDisposableHost
@@ -197,6 +207,66 @@ function Get-InstallContexts([string] $ProductCode) {
         $found += $(if ($names.ContainsKey($context)) { $names[$context] } else { "context=$context" })
     }
     return @($found)
+}
+
+<#
+    UpgradeCode が同じ製品を Windows Installer に訊く。ProductCode の並びを返す。
+
+    ★ アンインストール情報の鍵で数えない。旧版と新版は ProductCode が違うので鍵も別であり、
+      数えるなら両方の ProductCode を知っている必要がある。ここは UpgradeCode 1 つで足りる。
+#>
+function Get-RelatedProducts([string] $UpgradeCode) {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $codes = $installer.GetType().InvokeMember(
+        'RelatedProducts', 'GetProperty', $null, $installer, @($UpgradeCode))
+    $found = @()
+    foreach ($code in $codes) { $found += [string] $code }
+    return @($found)
+}
+
+<#
+    前の版の上に今回の版を入れ、前の版が消えて今回の版だけが残ることを検める。
+    最後に今回の版を消し、両方の残骸が無いことまで見る。
+#>
+function Assert-UpgradesFrom(
+    [string] $PreviousInstaller, [string] $PreviousProductCode,
+    [string] $Installer, [string] $ProductCode, [string] $Kind) {
+    $isMsi = $Installer -like '*.msi'
+    $install = {
+        param([string] $File, [string] $LogName, [string] $What)
+        if ($isMsi) {
+            $args2 = @('/i', $File, '/qn', '/norestart', '/l*v', (Join-Path $Out $LogName))
+            $code = Invoke-Installer 'msiexec.exe' $args2 $What
+        } else {
+            $args2 = @($ExeSilentArgs -split ' ') + @('/l*v', (Join-Path $Out $LogName))
+            $code = Invoke-Installer $File $args2 $What
+        }
+        Assert-InstallerSucceeded $code $What
+    }
+
+    Write-Log ('--- 前の版の上に入れる（{0}）---' -f $Kind)
+    & $install $PreviousInstaller ('{0}-previous-install.log' -f $Kind) ('前の版の {0} を入れる' -f $Kind)
+    $before = @(Get-RelatedProducts $ExpectedUpgradeCode)
+    if ($before -notcontains $PreviousProductCode) {
+        throw ('{0} : 前の版が入っていない（{1}）。上書きを検める前提が崩れている' -f $Kind, $PreviousProductCode)
+    }
+
+    & $install $Installer ('{0}-upgrade.log' -f $Kind) ('今回の {0} を上から入れる' -f $Kind)
+    $after = @(Get-RelatedProducts $ExpectedUpgradeCode)
+    Write-Log ('  入っている製品: [{0}]' -f ($after -join ', '))
+    if ($after.Count -ne 1 -or $after[0] -ne $ProductCode) {
+        throw ('{0} : 前の版の上に入れたのに、前の版が消えていない。想定 [{1}] / 実際 [{2}]。' -f
+            $Kind, $ProductCode, ($after -join ', ') +
+            '利用者の手元に 2 つ並ぶ。')
+    }
+    Write-Log '  前の版が消え、今回の版だけが残った'
+
+    $c = Invoke-Installer 'msiexec.exe' @(
+        '/x', $ProductCode, '/qn', '/norestart',
+        '/l*v', (Join-Path $Out ('{0}-upgrade-uninstall.log' -f $Kind))) ('上書きした {0} を消す' -f $Kind)
+    Assert-InstallerSucceeded $c ('上書きした {0} のアンインストール' -f $Kind)
+    Assert-Removed @($machineRoot, $userRoot) $ProductCode ('上書きした ' + $Kind)
+    Assert-Removed @() $PreviousProductCode ('前の版の ' + $Kind)
 }
 
 <# スタートメニューのショートカット。目で見る必要はない。 #>
@@ -369,5 +439,27 @@ $c = Invoke-Installer 'msiexec.exe' @(
     '/l*v', (Join-Path $Out 'exe-uninstall.log')) 'EXE を消す'
 Assert-InstallerSucceeded $c 'EXE のアンインストール'
 Assert-Removed @($machineRoot, $userRoot) $productCode 'EXE'
+
+# ── 前の版の上に入れる ──────────────────────────────────────────────────
+if ($PreviousDir) {
+    $prevMsi = @(Get-ChildItem -Path $PreviousDir -Filter '*.msi' -File)
+    $prevExe = @(Get-ChildItem -Path $PreviousDir -Filter 'PDFjig-*.exe' -File)
+    if ($prevMsi.Count -ne 1) { throw ('{0} の MSI が 1 つでない（{1} 個）' -f $PreviousDir, $prevMsi.Count) }
+    if ($prevExe.Count -ne 1) { throw ('{0} の EXE が 1 つでない（{1} 個）' -f $PreviousDir, $prevExe.Count) }
+    $prevProps = Get-MsiProperties $prevMsi[0].FullName
+    Write-Log ('前の版: {0}（{1}）' -f $prevProps['ProductVersion'], $prevProps['ProductCode'])
+    # ★ 同じ版どうしなら上書きの経路を通らない。公開した版の run をやり直したときに当たる。
+    #   落とさずに理由を書いて飛ばす——ここで落とすと、正しい配布物で draft が作れない。
+    if ($prevProps['ProductCode'] -eq $productCode) {
+        Write-Log '  前の版と今回の版が同じなので、上書きは検めない'
+    } else {
+        Assert-UpgradesFrom $prevMsi[0].FullName $prevProps['ProductCode'] `
+            $msi[0].FullName $productCode 'MSI'
+        Assert-UpgradesFrom $prevExe[0].FullName $prevProps['ProductCode'] `
+            $exe[0].FullName $productCode 'EXE'
+    }
+} else {
+    Write-Log '前の版を渡されていないので、上書きは検めない'
+}
 
 Write-Log '== すべて通った =='

@@ -200,6 +200,18 @@ jobs:
       #
       # ★ ランナーが汚れることは気にしなくてよい。GitHub ホストランナーは run ごとに
       #   新品で、run が終われば破棄される。
+      # 利用者の手元にある版は、公開済みの最新の版である。その上に入れて、前の版が消えるかを見る。
+      # ★ draft は取らない。まだ誰の手元にも無い——公開しなかった v0.2.0 がそれに当たる。
+      - name: 前の版を落とす
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName'
+          if (-not $tag) { throw "公開済みの版が見つからない" }
+          "前の版: $tag"
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern '*.msi' --pattern '*.exe' --dir "$env:RUNNER_TEMP/previous"
+          if ($LASTEXITCODE -ne 0) { throw "前の版を落とせなかった: $tag" }
+
       - name: MSI / EXE を入れて消す
         shell: powershell
         # ★ 上限を置く。2026-09-06 実測で 19 秒である。msiexec が黙って待つ形（サイレントの
@@ -209,7 +221,8 @@ jobs:
         run: |
           & "tools/smoke/InstallCheck.ps1" `
             -DistDir "dist" `
-            -OutDir "$env:RUNNER_TEMP/install-check"
+            -OutDir "$env:RUNNER_TEMP/install-check" `
+            -PreviousDir "$env:RUNNER_TEMP/previous"
 
       # msiexec の失敗は終了コードだけでは読めない。/l*v のログが要る。
       #
