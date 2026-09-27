@@ -72,11 +72,16 @@ jobs:
             "develop の第 1 親の列に無い: $env:GITHUB_SHA。成果物は作って検めるが、draft は作らない。"
           }
 
-      - name: Set up JDK 21
+      # ★ 25 は jpackage のためだけに入れる（pdf-desktop/build.gradle.kts の jpackageHome）。
+      #   JDK 21 の jpackage が作るインストーラは、上から入れても古い版を消さない。
+      #   最後に書いた版が JAVA_HOME になるので、21 を後ろに置く。
+      - name: Set up JDK 25 and 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: |
+            25
+            21
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
@@ -135,7 +140,8 @@ jobs:
       #   Gradle は `.0.1` をタスク名だと解釈して "Task '.0.1' not found" で落ちる。
       #   ビルドは通ってパッケージだけが落ちるので、リリースのときに初めて分かる形だった。
       - name: Package
-        run: ./gradlew :pdf-desktop:packageAll "-Pversion=${{ steps.version.outputs.version }}" --stacktrace
+        # ★ JDK 25 の在り処は、Gradle の自動検出に頼らず明示して渡す（setup-java が JAVA_HOME_25_X64 に置く）。
+        run: ./gradlew :pdf-desktop:packageAll "-Pversion=${{ steps.version.outputs.version }}" "-Porg.gradle.java.installations.fromEnv=JAVA_HOME_25_X64" --stacktrace
 
       - name: 成果物を検める
         run: |

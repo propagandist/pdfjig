@@ -220,10 +220,32 @@ val toolchainHome =
         .launcherFor { languageVersion = JavaLanguageVersion.of(21) }
         .map { it.metadata.installationPath }
 
+/**
+ * jpackage だけは JDK 25 のものを使う。**アプリが動く Java は 21 のまま**である（jlink は
+ * [toolchainHome] の 21 で作り、`--runtime-image` で渡す）。
+ *
+ * ★★ JDK 21 の jpackage が作るインストーラは、**上から入れても古い版を消さない。**
+ * jpackage が足すカスタムアクション（`JpFindRelatedProducts`）が、消えた一時文字列を
+ * `MsiEnumRelatedProducts` へ渡してエラー 87 で失敗し、標準の `FindRelatedProducts` が
+ * 見つけた旧版まで消してしまう。本流では JDK-8311104 で直ったが、**jdk21u には入っていない**。
+ * v0.1.1 → v0.1.2 でも v0.1.2 → v0.2.0 でも、EXE でも MSI でも旧版が残った
+ * （2026-09-27 実測。Windows Sandbox で `/l*v` のログを取った）。
+ * ★ 解放済みの領域を読む不具合なので、**出るかどうかは機械による。** 同じ日に CI のランナーで
+ * 同じ組を入れると旧版は消えた——**CI の緑は、ここが直っている根拠にならない。**
+ * 赤を確かめられたのは Sandbox である（tools/sandbox/Invoke-InstallCheckInSandbox.ps1 -PreviousDir）。
+ *
+ * ★ アプリイメージも 25 で作る。25 の jpackage は、21 の jpackage が作ったアプリイメージを
+ * 「別の jpackage バージョンで生成された」と断る（2026-09-27 実測）。
+ */
+val jpackageHome =
+    javaToolchains
+        .launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+        .map { it.metadata.installationPath }
+
 val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
 fun jdkTool(name: String): String =
-    toolchainHome
+    (if (name == "jpackage") jpackageHome else toolchainHome)
         .get()
         .file("bin/" + if (isWindows) "$name.exe" else name)
         .asFile.absolutePath
