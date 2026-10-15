@@ -13,6 +13,7 @@ import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSNull;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
 /**
@@ -81,13 +82,14 @@ final class CarriedPageLabels {
     void read(int sourceIndex, PDDocument document) {
         reads.put(sourceIndex, new Read(document, document.getNumberOfPages()));
 
-        COSDictionary catalog = document.getDocumentCatalog().getCOSObject();
-        if (!catalog.containsKey(COSName.PAGE_LABELS)) {
+        // 宛先の無い参照と null は、閲覧ソフトから見てラベルが無いのと同じである。
+        COSBase entry = document.getDocumentCatalog().getCOSObject().getDictionaryObject(COSName.PAGE_LABELS);
+        if (entry == null || entry instanceof COSNull) {
             return;
         }
         TreeMap<Integer, COSDictionary> ranges;
         try {
-            ranges = rangesOf(catalog.getDictionaryObject(COSName.PAGE_LABELS));
+            ranges = rangesOf(entry);
         } catch (RuntimeException e) {
             // 参照は辿った時点で読み込まれる。そこで投げる経路があるかは確かめていない。
             // 投げても保存を止めないための備えである——読めないのと同じに扱う。
