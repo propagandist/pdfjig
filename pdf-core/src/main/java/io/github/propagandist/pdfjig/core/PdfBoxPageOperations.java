@@ -135,12 +135,9 @@ public final class PdfBoxPageOperations implements PageOperations {
                 int before = merged.getNumberOfPages();
                 merger.appendDocument(merged, source.delegate());
                 // ★ 数えるのは実際に足されたページである。appendDocument は木を歩いて足すので、
-                //   /Count が実体と違えば数が合わない。合わなければ、どのページにどのラベルが
-                //   付くかを決められない（#257 の門）。
+                //   /Count が実体と違っても、足されるのは木の順のページである（#257 の門）。
+                //   ★ /Type の無い葉は飛ばされ、その後ろのラベルは 1 つずれる（#263）。
                 int appended = merged.getNumberOfPages() - before;
-                if (appended != source.pageCount()) {
-                    labels.leaveAlone();
-                }
                 for (int pageNumber = 1; pageNumber <= appended; pageNumber++) {
                     pages.add(PageSelection.of(sourceIndex, pageNumber));
                 }

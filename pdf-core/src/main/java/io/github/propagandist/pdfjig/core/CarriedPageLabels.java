@@ -42,17 +42,21 @@ import org.apache.pdfbox.pdmodel.PDDocument;
  * （整数でないキーの葉を捨てる・値の {@code null} をそのまま返す）、<b>循環で
  * {@code StackOverflowError} を投げ</b>、<b>接頭辞を文字列に直して書き戻すのでバイト列が変わる</b>
  * （UTF-8 の「中」の 0xAD が 0x00 になる）。どれも 2026-10-15 に実測した。
- * ここでは型が 1 つでも合わなければ「読めない」とし、書くときは {@code /St} だけを直す。
+ * ここでは<b>解釈するもの</b>（節・{@code /Kids}・{@code /Nums}・キー・範囲の辞書・{@code /St}）の型を
+ * 確かめ、合わなければ「読めない」とする。{@code /S} と {@code /P} は解釈せず、そのまま運ぶ。
+ * 書くときは {@code /St} だけを直す。
  */
 final class CarriedPageLabels {
 
     /** ラベルを持つ出どころだけの、出どころの添字から範囲への写像。 */
     private final Map<Integer, TreeMap<Integer, COSDictionary>> labelled = new HashMap<>();
 
-    /** 出どころの添字からページ数への写像。並びがそのままかを見るのに使う。 */
-    private final Map<Integer, Integer> pageCounts = new HashMap<>();
+    /** 出どころの添字から、読んだ文書とそのページ数への写像。並びがそのままかを見るのに使う。 */
+    private final Map<Integer, Read> reads = new HashMap<>();
 
     private boolean leftAlone;
+
+    private record Read(PDDocument document, int pageCount) {}
 
     /**
      * 1 ページのラベル。
@@ -60,7 +64,7 @@ final class CarriedPageLabels {
      * @param range 元の範囲の辞書。ラベルを持たない出どころのページなら {@code null}
      * @param number そのページの番号
      */
-    private record Label(COSDictionary range, int number) {
+    private record Label(COSDictionary range, long number) {
 
         /** {@code previous} と同じ範囲の、すぐ次のページとして書けるか。 */
         boolean follows(Label previous) {
@@ -75,30 +79,30 @@ final class CarriedPageLabels {
      * 出どころのページ数を控えるが、並べ替えた後はそれが出力のページ数になっている。
      */
     void read(int sourceIndex, PDDocument document) {
-        int pageCount = document.getNumberOfPages();
-        pageCounts.put(sourceIndex, pageCount);
+        reads.put(sourceIndex, new Read(document, document.getNumberOfPages()));
 
         COSDictionary catalog = document.getDocumentCatalog().getCOSObject();
         if (!catalog.containsKey(COSName.PAGE_LABELS)) {
             return;
         }
-        TreeMap<Integer, COSDictionary> ranges = rangesOf(catalog.getDictionaryObject(COSName.PAGE_LABELS));
+        TreeMap<Integer, COSDictionary> ranges;
+        try {
+            ranges = rangesOf(catalog.getDictionaryObject(COSName.PAGE_LABELS));
+        } catch (RuntimeException e) {
+            // 参照は辿った時点で読み込まれる。そこで投げる経路があるかは確かめていない。
+            // 投げても保存を止めないための備えである——読めないのと同じに扱う。
+            ranges = null;
+        }
+        if (ranges != null && ranges.isEmpty()) {
+            // 範囲を 1 つも持たない木は、閲覧ソフトから見てラベルが無いのと同じである。
+            return;
+        }
         // 範囲が添字 0 から始まらない木は、0 の手前をどう出すかが閲覧ソフトに任されている。運べない。
         if (ranges == null || !ranges.containsKey(0)) {
             leftAlone = true;
             return;
         }
-        labelled.put(sourceIndex, new TreeMap<>(ranges.headMap(pageCount)));
-    }
-
-    /**
-     * 控えた範囲では、どのページにどのラベルが付くかを決められない。何もしないことにする。
-     *
-     * <p>{@code merge} で、{@code /Count} が言うページ数と実際に足されたページの数が
-     * 食い違ったときに使う。
-     */
-    void leaveAlone() {
-        leftAlone = true;
+        labelled.put(sourceIndex, ranges);
     }
 
     /**
@@ -108,7 +112,7 @@ final class CarriedPageLabels {
      * @param pages 出力の各ページがどの出どころの何ページ目か
      */
     void write(PDDocument document, List<PageSelection> pages) {
-        if (leftAlone || labelled.isEmpty() || unchanged(pages)) {
+        if (leftAlone || labelled.isEmpty() || unchanged(document, pages)) {
             return;
         }
 
@@ -127,13 +131,20 @@ final class CarriedPageLabels {
         document.getDocumentCatalog().getCOSObject().setItem(COSName.PAGE_LABELS, labels);
     }
 
-    /** 出力が、1 つの出どころの全ページを元の順に並べたものか。 */
-    private boolean unchanged(List<PageSelection> pages) {
+    /**
+     * 出力が、<b>その出どころの文書そのもの</b>に、全ページを元の順に並べたものか。
+     *
+     * <p>★ 結合先の文書は当てはまらない。並びが元のままでも、結合先の {@code /PageLabels} は
+     * {@code PDFMergerUtility} が写したもので、元の木そのものではない——
+     * 根の {@code /Nums} しか写さないので、{@code /Kids} に置かれた範囲が落ちている（#257 の門）。
+     */
+    private boolean unchanged(PDDocument document, List<PageSelection> pages) {
         if (pages.isEmpty()) {
             return true;
         }
         int sourceIndex = pages.get(0).sourceIndex();
-        if (pages.size() != pageCounts.getOrDefault(sourceIndex, -1)) {
+        Read read = reads.get(sourceIndex);
+        if (read == null || read.document() != document || pages.size() != read.pageCount()) {
             return false;
         }
         for (int index = 0; index < pages.size(); index++) {
@@ -153,7 +164,7 @@ final class CarriedPageLabels {
         }
         int index = selection.pageNumber() - 1;
         Map.Entry<Integer, COSDictionary> range = ranges.floorEntry(index);
-        int start = range.getValue().getInt(COSName.ST, 1);
+        long start = range.getValue().getLong(COSName.ST, 1);
         return new Label(range.getValue(), start + (index - range.getKey()));
     }
 
@@ -168,7 +179,7 @@ final class CarriedPageLabels {
         }
         // /St の既定は 1 である。元の辞書が書いていなかったなら、1 のときは書かない。
         if (label.number() != 1 || range.containsKey(COSName.ST)) {
-            range.setInt(COSName.ST, label.number());
+            range.setLong(COSName.ST, label.number());
         }
         return range;
     }
