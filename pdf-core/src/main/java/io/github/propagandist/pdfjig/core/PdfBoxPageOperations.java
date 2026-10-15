@@ -122,15 +122,29 @@ public final class PdfBoxPageOperations implements PageOperations {
                 PDDocument merged = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
             PDDocumentInformation information = null;
-            for (Source input : inputs.all()) {
+            CarriedPageLabels labels = new CarriedPageLabels();
+            List<PageSelection> pages = new ArrayList<>();
+            for (int sourceIndex = 0; sourceIndex < inputs.size(); sourceIndex++) {
                 // appendDocument は入力のページを参照でつなぐ。保存が終わるまで
                 // 入力を閉じられないため、まとめて開いたまま保持する。
-                PdfDocument source = sources.open(input, warnings);
+                PdfDocument source = sources.open(inputs.get(sourceIndex), warnings);
                 if (information == null) {
                     information = detachedInformationOf(source);
                 }
+                labels.read(sourceIndex, source.delegate());
+                int before = merged.getNumberOfPages();
                 merger.appendDocument(merged, source.delegate());
+                // ★ 数えるのは実際に足されたページである。appendDocument は木を歩いて足すので、
+                //   /Count が実体と違っても、足されるのは木の順のページである（#257 の門）。
+                //   ★ /Type の無い葉は飛ばされ、その後ろのラベルは 1 つずれる（#263）。
+                int appended = merged.getNumberOfPages() - before;
+                for (int pageNumber = 1; pageNumber <= appended; pageNumber++) {
+                    pages.add(PageSelection.of(sourceIndex, pageNumber));
+                }
             }
+            // PDFMergerUtility はラベルを持つ入力の範囲だけを足すので、ラベルの無い入力のページが
+            // 前の入力の最後の範囲を引き継ぐ。各ページの元のラベルで上書きする（#257）。
+            labels.write(merged, pages);
             applyInformation(merged, information, inputs.size() > 1, warnings);
             save(merged, output, warnings);
         }
@@ -380,7 +394,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <ul>
      *   <li><b>1 つの入力から、同じページを二度使わずに出す場合</b>は、元の文書から
      *       要らないページを取り除いて並べ替え、その文書を保存する。しおり・フォーム・
-     *       添付ファイル・文書情報・ページラベル・タグ構造は、この方法でのみ残せる</li>
+     *       添付ファイル・文書情報・タグ構造は、この方法でのみ残せる</li>
      *   <li><b>複数の入力を混ぜる場合と、同じページを複数回出す場合</b>は上の方法が使えない。
      *       必要なページだけに切り詰めた複製を作り、{@code PDFMergerUtility} で結合する。
      *       こちらは深い複製を作るため、入力のオブジェクトを参照したまま
@@ -500,12 +514,18 @@ public final class PdfBoxPageOperations implements PageOperations {
         List<PDPage> all = new ArrayList<>();
         document.getPages().forEach(all::add);
 
+        // 並べ替える前に読む。並びがそのままかを見るのに、元のページ数が要る（#257）。
+        // ★ ページの無い文書の reorder は空の並びで来る。
+        CarriedPageLabels labels = new CarriedPageLabels();
+        labels.read(pages.isEmpty() ? 0 : pages.get(0).sourceIndex(), document);
+
         List<PDPage> ordered = new ArrayList<>(pages.size());
         for (PageSelection selection : pages) {
             ordered.add(document.getPage(selection.pageNumber() - 1));
         }
         replacePages(document, ordered);
         applyRotations(ordered, pages);
+        labels.write(document, pages);
 
         if (PageReferences.removeDangling(document)) {
             warnings.add(Warning.DANGLING_REFERENCES_REMOVED);
@@ -548,6 +568,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
             // 「出どころ・ページ番号・何回目」が結合後の何ページ目になるか。
             Map<List<Integer>, Integer> positions = new HashMap<>();
+            CarriedPageLabels labels = new CarriedPageLabels();
             PDDocumentInformation information = null;
             int appended = 0;
 
@@ -558,6 +579,10 @@ public final class PdfBoxPageOperations implements PageOperations {
                     PdfDocument copy = copies.openQuietly(inputs.get(sourceIndex));
                     if (information == null) {
                         information = detachedInformationOf(copy);
+                    }
+                    if (round == 0) {
+                        // 切り詰める前に読む。並びがそのままかを見るのに、元のページ数が要る（#257）。
+                        labels.read(sourceIndex, copy.delegate());
                     }
                     trimTo(copy, wanted, warnings);
                     merger.appendDocument(target, copy.delegate());
@@ -573,6 +598,8 @@ public final class PdfBoxPageOperations implements PageOperations {
             List<PDPage> ordered = orderedPagesOf(target, pages, positions);
             replacePages(target, ordered);
             applyRotations(ordered, pages);
+            // PDFMergerUtility が継いだラベルは、切り詰めた複製の添字のままである。上書きする。
+            labels.write(target, pages);
 
             boolean mixed = pages.stream()
                             .mapToInt(PageSelection::sourceIndex)

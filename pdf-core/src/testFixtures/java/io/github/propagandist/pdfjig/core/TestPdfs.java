@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Map;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
@@ -85,6 +87,9 @@ public final class TestPdfs {
 
     /** {@link #withNestedOutline} の子項目の表題。3 ページ目を指す。 */
     public static final String NESTED_CHILD_TITLE = "Child";
+
+    /** {@link #withPageLabels} の各ページのラベル。各ページの本文も同じ文字列である。 */
+    public static final List<String> LABELLED_PAGES = List.of("i", "ii", "1", "2", "3", "A-1");
 
     /** {@link #signed} が署名辞書に書く名前。 */
     public static final String SIGNER_NAME = "pdfjig test";
@@ -276,6 +281,88 @@ public final class TestPdfs {
             labels.setLabelItem(0, roman);
             catalog.setPageLabels(labels);
 
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * ページラベルの範囲を 3 つ持つ 6 ページの PDF を作る。
+     *
+     * <p>ラベルは {@code i, ii, 1, 2, 3, A-1}——表紙と目次にローマ数字、本文に算用数字、
+     * 付録に接頭辞付きの算用数字を振った形である。各ページには自分のラベルと同じ文字列を描く。
+     *
+     * <p><b>{@link #rich} とは別に置く。</b>あちらは範囲が 1 つしか無いので、
+     * ページを並べ替えても消しても、範囲の境目がずれたかどうかが見えない（#257）。
+     */
+    public static Path withPageLabels(Path target) throws IOException {
+        withText(target, LABELLED_PAGES.toArray(String[]::new));
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            PDPageLabels labels = new PDPageLabels(document);
+
+            PDPageLabelRange front = new PDPageLabelRange();
+            front.setStyle(PDPageLabelRange.STYLE_ROMAN_LOWER);
+            labels.setLabelItem(0, front);
+
+            PDPageLabelRange body = new PDPageLabelRange();
+            body.setStyle(PDPageLabelRange.STYLE_DECIMAL);
+            labels.setLabelItem(2, body);
+
+            PDPageLabelRange appendix = new PDPageLabelRange();
+            appendix.setStyle(PDPageLabelRange.STYLE_DECIMAL);
+            appendix.setPrefix("A-");
+            labels.setLabelItem(5, appendix);
+
+            document.getDocumentCatalog().setPageLabels(labels);
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * 読めない {@code /PageLabels} を持つ PDF を作る。
+     *
+     * <p>{@code /Nums} の値が、範囲の辞書が在るべきところで数になっている（{@code [0 1]}）。
+     * PDFBox はこれを読もうとすると投げる。
+     */
+    public static Path withBrokenPageLabels(Path target, String... pageTexts) throws IOException {
+        COSArray nums = new COSArray();
+        nums.add(COSInteger.ZERO);
+        nums.add(COSInteger.ONE);
+        COSDictionary labels = new COSDictionary();
+        labels.setItem(COSName.NUMS, nums);
+        return withPageLabelsEntry(target, labels, pageTexts);
+    }
+
+    /**
+     * カタログの {@code /PageLabels} に、与えた値をそのまま置いた PDF を作る。
+     *
+     * <p>仕様に反する値も置ける。<b>読めない・型の合わない数の木</b>に対する書き出しの振る舞いを
+     * 確かめるために使う（#257 の門）。辞書は既定で間接オブジェクトとして書かれるので、
+     * 自分自身を {@code /Kids} に持つ循環も作れる。
+     */
+    public static Path withPageLabelsEntry(Path target, COSBase entry, String... pageTexts) throws IOException {
+        withText(target, pageTexts);
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            document.getDocumentCatalog().getCOSObject().setItem(COSName.PAGE_LABELS, entry);
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * ページツリーの根の {@code /Count} が、実際のページ数と違う PDF を作る。
+     *
+     * <p>{@code PDFMergerUtility} はページを木の反復子で数えるので、{@code /Count} を信じた側と
+     * 足されたページの数が食い違う（#257 の門）。
+     */
+    public static Path withDeclaredPageCount(Path target, int declared, String... pageTexts) throws IOException {
+        withText(target, pageTexts);
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            document.getDocumentCatalog().getPages().getCOSObject().setInt(COSName.COUNT, declared);
             document.save(target.toFile());
         }
         return target;

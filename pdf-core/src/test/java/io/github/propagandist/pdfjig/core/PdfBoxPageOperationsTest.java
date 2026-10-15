@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.core;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -22,8 +23,13 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSFloat;
+import org.apache.pdfbox.cos.COSInteger;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSNull;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -1651,6 +1657,386 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * ページラベルは、元の文書でそのページに付いていたものが付いていく（#257）。
+     *
+     * <p>{@code /PageLabels} は<b>ページの添字</b>で範囲の始まりを決める。
+     * 並べ替えや削除で添字が動いても範囲を組み直さないと、<b>ラベルは添字のまま残り</b>、
+     * 閲覧ソフトのページ番号欄が中身とずれた番号を出す。
+     *
+     * <p>フィクスチャは各ページに自分のラベルと同じ文字列を描くので、
+     * <b>本文とラベルが一致すること</b>を見ればよい。
+     */
+    @Nested
+    class PageLabelsFollowPages {
+
+        @Test
+        @DisplayName("表紙を消すと、残ったページは元のラベルのまま番号が詰まらない")
+        void deletingKeepsLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.deletePages(input, PageRange.of(1, 1), tempDir.resolve("deleted.pdf"));
+
+            assertLabelsFollowText(output, List.of("ii", "1", "2", "3", "A-1"));
+        }
+
+        @Test
+        @DisplayName("並べ替えると、ラベルもページと一緒に動く")
+        void reorderingMovesLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.reorder(input, List.of(3, 1, 2, 6, 4, 5), tempDir.resolve("reordered.pdf"));
+
+            assertLabelsFollowText(output, List.of("1", "i", "ii", "A-1", "2", "3"));
+        }
+
+        @Test
+        @DisplayName("途中の範囲を取り出しても、先頭のラベルに戻らない")
+        void extractingKeepsLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.extractPages(input, PageRange.of(4, 6), tempDir.resolve("extracted.pdf"));
+
+            assertLabelsFollowText(output, List.of("2", "3", "A-1"));
+        }
+
+        @Test
+        @DisplayName("分割したどのファイルも、元のラベルを持つ")
+        void splittingKeepsLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            List<Path> outputs = operations.split(input, SplitStrategy.everyNPages(4), tempDir.resolve("out"));
+
+            assertLabelsFollowText(outputs.get(0), List.of("i", "ii", "1", "2"));
+            assertLabelsFollowText(outputs.get(1), List.of("3", "A-1"));
+        }
+
+        @Test
+        @DisplayName("同じページを二度使っても、二度とも同じラベルが付く")
+        void repeatingAPageRepeatsItsLabel() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(3), PageSelection.of(4), PageSelection.of(3)),
+                    tempDir.resolve("twice.pdf"));
+
+            assertLabelsFollowText(output, List.of("1", "2", "1"));
+        }
+
+        @Test
+        @DisplayName("複数の入力を混ぜても、各ページに元のラベルが付く。ラベルの無い入力のページは元のページ番号になる")
+        void mixingInputsKeepsEachLabel() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path plain = TestPdfs.withText(tempDir.resolve("plain.pdf"), "1", "2", "3");
+
+            Path output = operations.assemble(
+                    List.of(labelled, plain),
+                    List.of(
+                            PageSelection.of(1, 3),
+                            PageSelection.of(0, 4),
+                            PageSelection.of(0, 1),
+                            PageSelection.of(1, 1)),
+                    tempDir.resolve("mixed.pdf"));
+
+            assertLabelsFollowText(output, List.of("3", "2", "i", "1"));
+        }
+
+        @Test
+        @DisplayName("結合しても、後ろの入力のページが前の入力の番号を引き継がない")
+        void mergingKeepsEachLabel() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path plain = TestPdfs.withText(tempDir.resolve("plain.pdf"), "1", "2");
+
+            Path output = operations.merge(
+                    List.of(labelled, plain, labelled), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2"));
+            expected.addAll(TestPdfs.LABELLED_PAGES);
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("ラベルを持たない文書を並べ替えても、ラベルを作らない")
+        void doesNotAddLabelsToUnlabelledDocument() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.reorder(input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
+
+            assertFalse(hasPageLabels(output), "ラベルを持たない文書に /PageLabels が作られた。");
+        }
+
+        @Test
+        @DisplayName("ラベルを持たない文書どうしを混ぜても、ラベルを作らない")
+        void doesNotAddLabelsWhenNoInputHasThem() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("second.pdf"), "B1");
+
+            Path assembled = operations.assemble(
+                    List.of(first, second),
+                    List.of(PageSelection.of(1, 1), PageSelection.of(0, 2)),
+                    tempDir.resolve("mixed.pdf"));
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertFalse(hasPageLabels(assembled), "ラベルを持たない入力から /PageLabels が作られた（assemble）。");
+            assertFalse(hasPageLabels(merged), "ラベルを持たない入力から /PageLabels が作られた（merge）。");
+        }
+
+        /**
+         * 読めないラベルは、修正の前と同じく素通しする（利用者が 2026-10-15 に決めた）。
+         *
+         * <p><b>★ 修正の最初の形は、ここで {@code IO_FAILURE} を投げて出力を残さなかった</b>
+         * （2026-10-15 実測）。修正の前は読まずに素通ししていたので保存できていた——
+         * 失敗にすると、保存できていた文書が保存できなくなる。
+         */
+        @Test
+        @DisplayName("読めない /PageLabels を持つ文書でも書き出せて、ラベルには触らない")
+        void leavesUnreadableLabelsAlone() throws Exception {
+            Path input = TestPdfs.withBrokenPageLabels(tempDir.resolve("doc.pdf"), "P1", "P2");
+
+            Path output = operations.reorder(input, List.of(2, 1), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of("P2", "P1"), textsOf(output));
+            assertEquals(List.of(0, 1), pageLabelNumsOf(output), "読めない /PageLabels が書き換えられた。");
+        }
+
+        @Test
+        @DisplayName("読めない /PageLabels を持つ入力を混ぜても書き出せる")
+        void mixingWithUnreadableLabelsStillWrites() throws Exception {
+            Path broken = TestPdfs.withBrokenPageLabels(tempDir.resolve("broken.pdf"), "B1", "B2");
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+
+            Path assembled = operations.assemble(
+                    List.of(labelled, broken),
+                    List.of(PageSelection.of(1, 2), PageSelection.of(0, 3)),
+                    tempDir.resolve("mixed.pdf"));
+            Path merged =
+                    operations.merge(List.of(broken, labelled), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertEquals(List.of("B2", "1"), textsOf(assembled));
+            assertEquals(8, textsOf(merged).size());
+            // 組み直していれば、範囲の値はすべて辞書になる。壊れた値（数）が残っていれば触っていない。
+            assertTrue(keepsNonDictionaryRange(assembled), "読めない入力を混ぜたのにラベルを組み直した（assemble）。");
+            assertTrue(keepsNonDictionaryRange(merged), "読めない入力を混ぜたのにラベルを組み直した（merge）。");
+        }
+
+        @Test
+        @DisplayName("範囲の値が null の /PageLabels には触らない")
+        void leavesNullRangeAlone() throws Exception {
+            Path input = TestPdfs.withPageLabelsEntry(
+                    tempDir.resolve("doc.pdf"),
+                    numsOf(COSInteger.ZERO, range("r", null), COSInteger.TWO, COSNull.NULL),
+                    "P1",
+                    "P2",
+                    "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("/Kids が自分自身を指す /PageLabels には触らない")
+        void leavesCyclicKidsAlone() throws Exception {
+            COSDictionary node = new COSDictionary();
+            COSArray kids = new COSArray();
+            kids.add(node);
+            node.setItem(COSName.KIDS, kids);
+            Path input = TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), node, "P1", "P2", "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("整数でないキーを持つ /PageLabels には触らない（PDFBox は葉ごと捨てる）")
+        void leavesNonIntegerKeyAlone() throws Exception {
+            Path input = TestPdfs.withPageLabelsEntry(
+                    tempDir.resolve("doc.pdf"),
+                    numsOf(COSInteger.ZERO, range("r", null), new COSFloat(2f), range("D", null)),
+                    "P1",
+                    "P2",
+                    "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("範囲を 1 つも持たない /PageLabels から、ラベルを作らない")
+        void leavesEmptyNumsAlone() throws Exception {
+            Path input = TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), numsOf(), "P1", "P2", "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("辞書でない /PageLabels を消さない")
+        void leavesNonDictionaryAlone() throws Exception {
+            COSArray entry = new COSArray();
+            entry.add(COSInteger.ZERO);
+            entry.add(range("r", null));
+            Path input = TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), entry, "P1", "P2", "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("並びを変えずに書き出すなら、PDFBox が解釈できない接頭辞（名前）も残る")
+        void unchangedOrderLeavesLabelsAlone() throws Exception {
+            COSDictionary appendix = range("D", null);
+            appendix.setItem(COSName.P, COSName.getPDFName("A-"));
+            Path input = TestPdfs.withPageLabelsEntry(
+                    tempDir.resolve("doc.pdf"), numsOf(COSInteger.ZERO, appendix), "P1", "P2");
+
+            // 画面の保存は回転だけでも assemble を通る。
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(1).rotatedBy(Rotation.CLOCKWISE_90), PageSelection.of(2)),
+                    tempDir.resolve("rotated.pdf"));
+
+            assertEquals(describePageLabels(input), describePageLabels(output));
+        }
+
+        @Test
+        @DisplayName("並べ替えても、接頭辞のバイト列は元のまま運ぶ（UTF-8 の「中」を含む）")
+        void carriesPrefixBytesUnchanged() throws Exception {
+            byte[] prefix = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF, (byte) 0xE4, (byte) 0xB8, (byte) 0xAD, '-'};
+            COSDictionary body = range("D", null);
+            body.setItem(COSName.P, new COSString(prefix));
+            Path input =
+                    TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), numsOf(COSInteger.ZERO, body), "P1", "P2");
+
+            Path output = operations.reorder(input, List.of(2, 1), tempDir.resolve("reordered.pdf"));
+
+            try (PDDocument document = Loader.loadPDF(output.toFile())) {
+                COSArray nums = document.getDocumentCatalog()
+                        .getCOSObject()
+                        .getCOSDictionary(COSName.PAGE_LABELS)
+                        .getCOSArray(COSName.NUMS);
+                for (int i = 1; i < nums.size(); i += 2) {
+                    COSDictionary written = (COSDictionary) nums.getObject(i);
+                    assertArrayEquals(prefix, ((COSString) written.getDictionaryObject(COSName.P)).getBytes());
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("/Count と実際のページ数が違う入力を結合しても、後ろの入力のラベルがずれない")
+        void mergingWithMisdeclaredCountDoesNotShiftLabels() throws Exception {
+            Path misdeclared = TestPdfs.withDeclaredPageCount(tempDir.resolve("count.pdf"), 4, "1", "2", "3");
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+
+            Path output = operations.merge(
+                    List.of(misdeclared, labelled), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(List.of("1", "2", "3"));
+            expected.addAll(TestPdfs.LABELLED_PAGES);
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("/Count が食い違う入力を後ろに結合しても、前の入力の範囲を引き継がない")
+        void mergingMisdeclaredCountAfterLabelledKeepsEachLabel() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path misdeclared = TestPdfs.withDeclaredPageCount(tempDir.resolve("count.pdf"), 4, "1", "2", "3");
+
+            Path output = operations.merge(
+                    List.of(labelled, misdeclared), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2", "3"));
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("入力 1 つの結合でも、/Kids に置かれたラベルが残る")
+        void mergingOneInputKeepsLabelsUnderKids() throws Exception {
+            COSDictionary leaf = numsOf(COSInteger.ZERO, range("r", null), COSInteger.TWO, range("D", null));
+            COSArray kids = new COSArray();
+            kids.add(leaf);
+            COSDictionary root = new COSDictionary();
+            root.setItem(COSName.KIDS, kids);
+            Path input = TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), root, "i", "ii", "1");
+
+            Path output = operations.merge(List.of(input), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertLabelsFollowText(output, List.of("i", "ii", "1"));
+        }
+
+        @Test
+        @DisplayName("範囲を持たない /PageLabels の入力を混ぜても、ほかの入力のラベルは組み直す")
+        void emptyLabelsDoNotStopOthersFromBeingCarried() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path empty = TestPdfs.withPageLabelsEntry(tempDir.resolve("empty.pdf"), numsOf(), "1", "2");
+
+            Path output =
+                    operations.merge(List.of(labelled, empty), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2"));
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("int に収まらない開始番号も、そのまま運ぶ")
+        void carriesLargeStartNumbers() throws Exception {
+            COSDictionary body = range("D", null);
+            body.setItem(COSName.ST, COSInteger.get(4_294_967_297L));
+            Path input =
+                    TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), numsOf(COSInteger.ZERO, body), "P1", "P2");
+
+            Path output = operations.reorder(input, List.of(2, 1), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of(0L, 4_294_967_298L, 1L, 4_294_967_297L), pageLabelStartsOf(output));
+        }
+
+        @Test
+        @DisplayName("long にも収まらない開始番号を持つ /PageLabels には触らない")
+        void leavesOverflowingStartAlone() throws Exception {
+            COSDictionary body = range("D", null);
+            body.setItem(COSName.ST, COSInteger.get(Long.MAX_VALUE));
+            Path input = TestPdfs.withPageLabelsEntry(
+                    tempDir.resolve("doc.pdf"), numsOf(COSInteger.ZERO, body), "P1", "P2", "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("宛先の無い参照の /PageLabels を持つ入力を混ぜても、ほかの入力のラベルは組み直す")
+        void danglingLabelsDoNotStopOthersFromBeingCarried() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path dangling = TestPdfs.withPageLabelsEntry(tempDir.resolve("dangling.pdf"), COSNull.NULL, "1", "2");
+
+            Path output = operations.merge(
+                    List.of(labelled, dangling), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2"));
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("ページの無い文書を並べ替えても落ちない")
+        void reorderingAnEmptyDocumentDoesNotFail() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("empty.pdf"), 0);
+
+            Path output = operations.reorder(input, List.of(), tempDir.resolve("reordered.pdf"));
+
+            assertTrue(Files.exists(output));
+        }
+
+        private void assertReorderLeavesLabelsAlone(Path input) throws IOException {
+            Path output = operations.reorder(input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of("P3", "P1", "P2"), textsOf(output));
+            assertEquals(describePageLabels(input), describePageLabels(output), "読めない /PageLabels が書き換えられた。");
+        }
+
+        private void assertLabelsFollowText(Path output, List<String> expected) throws IOException {
+            assertEquals(expected, textsOf(output), "ページの並びが想定と違う。");
+            assertEquals(expected, pageLabelsOf(output), "ラベルがページに付いていっていない。");
+        }
+    }
+
     /** 宛先を失った参照の扱い。 */
     @Nested
     class DanglingReferences {
@@ -1779,6 +2165,116 @@ class PdfBoxPageOperationsTest {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
             PDPageLabels labels = document.getDocumentCatalog().getPageLabels();
             return labels == null ? List.of() : List.of(labels.getLabelsByPageIndices());
+        }
+    }
+
+    private static boolean hasPageLabels(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            return document.getDocumentCatalog().getCOSObject().containsKey(COSName.PAGE_LABELS);
+        }
+    }
+
+    /** {@code /PageLabels} の {@code /Nums} を、PDFBox に解釈させずに整数の並びとして読む。 */
+    private static List<Integer> pageLabelNumsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            COSDictionary labels = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGE_LABELS);
+            return labels.getCOSArray(COSName.NUMS).toCOSNumberIntegerList();
+        }
+    }
+
+    /** {@code /Nums} を、キーと各範囲の {@code /St}（無ければ 1）を交互に並べた形で読む。 */
+    private static List<Long> pageLabelStartsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            COSArray nums = document.getDocumentCatalog()
+                    .getCOSObject()
+                    .getCOSDictionary(COSName.PAGE_LABELS)
+                    .getCOSArray(COSName.NUMS);
+            List<Long> starts = new ArrayList<>();
+            for (int i = 0; i < nums.size(); i += 2) {
+                starts.add(((COSInteger) nums.getObject(i)).longValue());
+                starts.add(((COSDictionary) nums.getObject(i + 1)).getLong(COSName.ST, 1));
+            }
+            return starts;
+        }
+    }
+
+    /** {@code /Nums} の値の位置に、辞書でないもの（壊れた範囲）が残っているか。 */
+    private static boolean keepsNonDictionaryRange(Path pdf) throws IOException {
+        List<Integer> nums = pageLabelNumsOf(pdf);
+        for (int i = 1; i < nums.size(); i += 2) {
+            if (nums.get(i) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static COSDictionary numsOf(COSBase... items) {
+        COSArray nums = new COSArray();
+        for (COSBase item : items) {
+            nums.add(item);
+        }
+        COSDictionary labels = new COSDictionary();
+        labels.setItem(COSName.NUMS, nums);
+        return labels;
+    }
+
+    private static COSDictionary range(String style, String prefix) {
+        COSDictionary range = new COSDictionary();
+        range.setItem(COSName.S, COSName.getPDFName(style));
+        if (prefix != null) {
+            range.setString(COSName.P, prefix);
+        }
+        return range;
+    }
+
+    /**
+     * {@code /PageLabels} の中身を、オブジェクト番号に依らない文字列にする。
+     *
+     * <p>保存し直すとオブジェクト番号は変わりうるので、参照を辿って中身だけを並べる。
+     * 文字列はバイト列で書くので、接頭辞の 1 バイトの違いも見える。循環は {@code @} で止める。
+     */
+    private static String describePageLabels(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            StringBuilder into = new StringBuilder();
+            describe(
+                    document.getDocumentCatalog().getCOSObject().getItem(COSName.PAGE_LABELS),
+                    Collections.newSetFromMap(new IdentityHashMap<>()),
+                    into);
+            return into.toString();
+        }
+    }
+
+    private static void describe(COSBase base, Set<COSBase> seen, StringBuilder into) {
+        COSBase value = base instanceof COSObject object ? object.getObject() : base;
+        if (value instanceof COSDictionary || value instanceof COSArray) {
+            if (!seen.add(value)) {
+                into.append('@');
+                return;
+            }
+        }
+        switch (value) {
+            case null -> into.append("null");
+            case COSDictionary dictionary -> {
+                into.append("<<");
+                dictionary.keySet().stream().sorted().forEach(key -> {
+                    into.append('/').append(key.getName()).append(' ');
+                    describe(dictionary.getItem(key), seen, into);
+                    into.append(' ');
+                });
+                into.append(">>");
+            }
+            case COSArray array -> {
+                into.append('[');
+                for (COSBase item : array) {
+                    describe(item, seen, into);
+                    into.append(' ');
+                }
+                into.append(']');
+            }
+            case COSString string ->
+                into.append('<').append(string.toHexString()).append('>');
+            default -> into.append(value);
         }
     }
 
