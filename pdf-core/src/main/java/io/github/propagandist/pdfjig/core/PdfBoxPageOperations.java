@@ -132,10 +132,18 @@ public final class PdfBoxPageOperations implements PageOperations {
                     information = detachedInformationOf(source);
                 }
                 labels.read(sourceIndex, source.delegate());
-                for (int pageNumber = 1; pageNumber <= source.pageCount(); pageNumber++) {
+                int before = merged.getNumberOfPages();
+                merger.appendDocument(merged, source.delegate());
+                // ★ 数えるのは実際に足されたページである。appendDocument は木を歩いて足すので、
+                //   /Count が実体と違えば数が合わない。合わなければ、どのページにどのラベルが
+                //   付くかを決められない（#257 の門）。
+                int appended = merged.getNumberOfPages() - before;
+                if (appended != source.pageCount()) {
+                    labels.leaveAlone();
+                }
+                for (int pageNumber = 1; pageNumber <= appended; pageNumber++) {
                     pages.add(PageSelection.of(sourceIndex, pageNumber));
                 }
-                merger.appendDocument(merged, source.delegate());
             }
             // PDFMergerUtility はラベルを持つ入力の範囲だけを足すので、ラベルの無い入力のページが
             // 前の入力の最後の範囲を引き継ぐ。各ページの元のラベルで上書きする（#257）。
@@ -509,9 +517,10 @@ public final class PdfBoxPageOperations implements PageOperations {
         List<PDPage> all = new ArrayList<>();
         document.getPages().forEach(all::add);
 
-        // ラベルは添字で決まる。並べ替える前に読む（#257）。
+        // 並べ替える前に読む。並びがそのままかを見るのに、元のページ数が要る（#257）。
+        // ★ ページの無い文書の reorder は空の並びで来る。
         CarriedPageLabels labels = new CarriedPageLabels();
-        labels.read(pages.get(0).sourceIndex(), document);
+        labels.read(pages.isEmpty() ? 0 : pages.get(0).sourceIndex(), document);
 
         List<PDPage> ordered = new ArrayList<>(pages.size());
         for (PageSelection selection : pages) {
@@ -575,7 +584,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                         information = detachedInformationOf(copy);
                     }
                     if (round == 0) {
-                        // 切り詰める前に読む。切り詰めた後は添字が動いている（#257）。
+                        // 切り詰める前に読む。並びがそのままかを見るのに、元のページ数が要る（#257）。
                         labels.read(sourceIndex, copy.delegate());
                     }
                     trimTo(copy, wanted, warnings);
