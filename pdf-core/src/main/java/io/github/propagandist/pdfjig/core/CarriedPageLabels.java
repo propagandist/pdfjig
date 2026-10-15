@@ -1,7 +1,6 @@
 package io.github.propagandist.pdfjig.core;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,10 +35,13 @@ import org.apache.pdfbox.pdmodel.common.PDPageLabels;
  */
 final class CarriedPageLabels {
 
-    private static final COSName START = COSName.getPDFName("St");
-
-    /** ラベルを持つ出どころだけの、出どころの添字から各ページのラベルへの写像。 */
-    private final Map<Integer, List<Label>> labelled = new HashMap<>();
+    /**
+     * ラベルを持つ出どころだけの、出どころの添字から範囲への写像。範囲は始まりの添字で引く。
+     *
+     * <p><b>ページごとのラベルではなく範囲を控える。</b>出力に残すのが 1 ページでも、
+     * ページごとに控えると出どころの全ページ分を作ることになる。
+     */
+    private final Map<Integer, TreeMap<Integer, Label>> labelled = new HashMap<>();
 
     private boolean unreadable;
 
@@ -86,20 +88,25 @@ final class CarriedPageLabels {
         }
 
         // PDPageLabels は添字 0 に既定の範囲（算用数字）を置いてから読むので、
-        // どのページにも必ず手前の範囲がある。
-        TreeMap<Integer, PDPageLabelRange> ranges = new TreeMap<>();
+        // どのページにも必ず手前の範囲がある。各範囲は、その始まりのページのラベルとして控える。
+        TreeMap<Integer, Label> ranges = new TreeMap<>();
         for (int index : labels.getPageIndices()) {
-            ranges.put(index, labels.getPageLabelRange(index));
+            PDPageLabelRange range = labels.getPageLabelRange(index);
+            ranges.put(index, new Label(range.getStyle(), range.getPrefix(), range.getStart()));
         }
+        labelled.put(sourceIndex, ranges);
+    }
 
-        int pageCount = document.getNumberOfPages();
-        List<Label> perPage = new ArrayList<>(pageCount);
-        for (int index = 0; index < pageCount; index++) {
-            Map.Entry<Integer, PDPageLabelRange> range = ranges.floorEntry(index);
-            PDPageLabelRange value = range.getValue();
-            perPage.add(new Label(value.getStyle(), value.getPrefix(), value.getStart() + (index - range.getKey())));
+    /** 出力のそのページが、元の文書で持っていたラベル。 */
+    private Label labelOf(PageSelection selection) {
+        TreeMap<Integer, Label> ranges = labelled.get(selection.sourceIndex());
+        if (ranges == null) {
+            return Label.plain(selection.pageNumber());
         }
-        labelled.put(sourceIndex, List.copyOf(perPage));
+        int index = selection.pageNumber() - 1;
+        Map.Entry<Integer, Label> range = ranges.floorEntry(index);
+        Label first = range.getValue();
+        return new Label(first.style(), first.prefix(), first.number() + (index - range.getKey()));
     }
 
     /**
@@ -120,9 +127,7 @@ final class CarriedPageLabels {
         PDPageLabels labels = new PDPageLabels(document);
         Label previous = null;
         for (int index = 0; index < pages.size(); index++) {
-            PageSelection selection = pages.get(index);
-            List<Label> source = labelled.get(selection.sourceIndex());
-            Label label = source == null ? Label.plain(selection.pageNumber()) : source.get(selection.pageNumber() - 1);
+            Label label = labelOf(pages.get(index));
             if (previous == null || !label.follows(previous)) {
                 labels.setLabelItem(index, rangeStartingAt(label));
             }
@@ -142,7 +147,7 @@ final class CarriedPageLabels {
         // setStart は 1 未満を拒む。元の文書が持っていた値は、仕様に反していてもそのまま運ぶ
         // ——ここで投げると、ラベルのせいで保存そのものが止まる。
         if (label.number() != 1) {
-            range.getCOSObject().setInt(START, label.number());
+            range.getCOSObject().setInt(COSName.ST, label.number());
         }
         return range;
     }
