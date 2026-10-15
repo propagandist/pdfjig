@@ -13,6 +13,7 @@ import java.util.Map;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
@@ -313,6 +314,27 @@ public final class TestPdfs {
             labels.setLabelItem(5, appendix);
 
             document.getDocumentCatalog().setPageLabels(labels);
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * 読めない {@code /PageLabels} を持つ PDF を作る。
+     *
+     * <p>{@code /Nums} の値が、範囲の辞書が在るべきところで数になっている（{@code [0 1]}）。
+     * PDFBox はこれを読もうとすると投げる。
+     */
+    public static Path withBrokenPageLabels(Path target, String... pageTexts) throws IOException {
+        withText(target, pageTexts);
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            COSArray nums = new COSArray();
+            nums.add(COSInteger.ZERO);
+            nums.add(COSInteger.ONE);
+            COSDictionary labels = new COSDictionary();
+            labels.setItem(COSName.NUMS, nums);
+            document.getDocumentCatalog().getCOSObject().setItem(COSName.PAGE_LABELS, labels);
             document.save(target.toFile());
         }
         return target;

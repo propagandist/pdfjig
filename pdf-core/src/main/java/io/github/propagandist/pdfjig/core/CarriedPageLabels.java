@@ -2,10 +2,10 @@ package io.github.propagandist.pdfjig.core;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.TreeMap;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -20,18 +20,28 @@ import org.apache.pdfbox.pdmodel.common.PDPageLabels;
  * <b>閲覧ソフトのページ番号欄が中身とずれた番号を出す</b>——表紙を消すと、目次に {@code i} が付く。
  * 複数の入力を結合すると、ラベルの無い入力のページが前の入力の最後の範囲を引き継ぐ。
  *
- * <p>そこで、<b>並べ替える前に各ページのラベルを読み</b>、出力の並びで範囲を組み直す。
+ * <p>そこで、<b>並べ替える前に各出どころのラベルを {@link #read} で控え</b>、
+ * 並べ終えてから {@link #write} で出力の並びに範囲を組み直す。
  * 隣り合うページが同じ範囲の続きなら 1 つにまとめる。
  *
- * <p><b>ラベルを持つ出どころが 1 つも無ければ {@code /PageLabels} を作らない。</b>
- * あれば、ラベルの無い出どころのページには<b>元のページ番号</b>を算用数字で付ける——
- * その文書を開いた閲覧ソフトが出していた番号である。
+ * <ul>
+ *   <li><b>ラベルを持つ出どころが 1 つも無ければ {@code /PageLabels} を作らない</b></li>
+ *   <li>あれば、ラベルの無い出どころのページには<b>元のページ番号</b>を算用数字で付ける——
+ *       その文書を開いた閲覧ソフトが出していた番号である</li>
+ *   <li><b>★ 読めない出どころが 1 つでもあれば、何もしない</b>（利用者が 2026-10-15 に決めた）。
+ *       この修正の前と同じく、{@code /PageLabels} は添字のまま残る。
+ *       失敗にすると、修正の前に保存できていた文書が保存できなくなる。
+ *       外すと、持っていたものを黙って失う（{@code CLAUDE.md} 優先順位 1）</li>
+ * </ul>
  */
 final class CarriedPageLabels {
 
     private static final COSName START = COSName.getPDFName("St");
 
-    private CarriedPageLabels() {}
+    /** ラベルを持つ出どころだけの、出どころの添字から各ページのラベルへの写像。 */
+    private final Map<Integer, List<Label>> labelled = new HashMap<>();
+
+    private boolean unreadable;
 
     /**
      * 1 ページのラベル。
@@ -56,22 +66,23 @@ final class CarriedPageLabels {
     }
 
     /**
-     * 文書の各ページが持つラベルを、ページの並びで返す。
+     * 出どころの各ページが持つラベルを控える。
      *
-     * <p><b>ページを並べ替える前に呼ぶこと。</b>範囲は添字で決まるので、
-     * 並べ替えた後に読むと、まさに直したいずれたラベルが返る。
-     *
-     * @return {@code /PageLabels} を持たなければ空
+     * <p><b>ページを並べ替える・切り詰める前に呼ぶこと。</b>範囲は添字で決まるので、
+     * 後で読むと、まさに直したいずれたラベルが返る。
      */
-    static Optional<List<Label>> read(PDDocument document) {
+    void read(int sourceIndex, PDDocument document) {
         PDPageLabels labels;
         try {
             labels = document.getDocumentCatalog().getPageLabels();
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        } catch (IOException | RuntimeException e) {
+            // 型の合わない数の木は、PDFBox の中で IOException にも ClassCastException にもなる。
+            // どちらでも「読めない」であり、扱いは同じである。
+            unreadable = true;
+            return;
         }
         if (labels == null) {
-            return Optional.empty();
+            return;
         }
 
         // PDPageLabels は添字 0 に既定の範囲（算用数字）を置いてから読むので、
@@ -88,17 +99,19 @@ final class CarriedPageLabels {
             PDPageLabelRange value = range.getValue();
             perPage.add(new Label(value.getStyle(), value.getPrefix(), value.getStart() + (index - range.getKey())));
         }
-        return Optional.of(List.copyOf(perPage));
+        labelled.put(sourceIndex, List.copyOf(perPage));
     }
 
     /**
-     * 出力の各ページに、元のラベルを付け直す。
+     * 出力の各ページに、控えたラベルを付け直す。
      *
      * @param document 出力の文書。ページは既に {@code pages} の順に並んでいること
-     * @param labelled ラベルを持つ出どころだけの、出どころの添字から {@link #read} の結果への写像
      * @param pages 出力の各ページがどの出どころの何ページ目か
      */
-    static void write(PDDocument document, Map<Integer, List<Label>> labelled, List<PageSelection> pages) {
+    void write(PDDocument document, List<PageSelection> pages) {
+        if (unreadable) {
+            return;
+        }
         if (labelled.isEmpty()) {
             document.getDocumentCatalog().getCOSObject().removeItem(COSName.PAGE_LABELS);
             return;

@@ -122,7 +122,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                 PDDocument merged = new PDDocument()) {
             PDFMergerUtility merger = newMerger();
             PDDocumentInformation information = null;
-            Map<Integer, List<CarriedPageLabels.Label>> labelled = new HashMap<>();
+            CarriedPageLabels labels = new CarriedPageLabels();
             List<PageSelection> pages = new ArrayList<>();
             for (int sourceIndex = 0; sourceIndex < inputs.size(); sourceIndex++) {
                 // appendDocument は入力のページを参照でつなぐ。保存が終わるまで
@@ -131,8 +131,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                 if (information == null) {
                     information = detachedInformationOf(source);
                 }
-                int index = sourceIndex;
-                CarriedPageLabels.read(source.delegate()).ifPresent(labels -> labelled.put(index, labels));
+                labels.read(sourceIndex, source.delegate());
                 for (int pageNumber = 1; pageNumber <= source.pageCount(); pageNumber++) {
                     pages.add(PageSelection.of(sourceIndex, pageNumber));
                 }
@@ -140,7 +139,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             }
             // PDFMergerUtility はラベルを持つ入力の範囲だけを足すので、ラベルの無い入力のページが
             // 前の入力の最後の範囲を引き継ぐ。各ページの元のラベルで上書きする（#257）。
-            CarriedPageLabels.write(merged, labelled, pages);
+            labels.write(merged, pages);
             applyInformation(merged, information, inputs.size() > 1, warnings);
             save(merged, output, warnings);
         }
@@ -511,9 +510,8 @@ public final class PdfBoxPageOperations implements PageOperations {
         document.getPages().forEach(all::add);
 
         // ラベルは添字で決まる。並べ替える前に読む（#257）。
-        Map<Integer, List<CarriedPageLabels.Label>> labelled = new HashMap<>(1);
-        CarriedPageLabels.read(document)
-                .ifPresent(labels -> labelled.put(pages.get(0).sourceIndex(), labels));
+        CarriedPageLabels labels = new CarriedPageLabels();
+        labels.read(pages.get(0).sourceIndex(), document);
 
         List<PDPage> ordered = new ArrayList<>(pages.size());
         for (PageSelection selection : pages) {
@@ -521,7 +519,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         }
         replacePages(document, ordered);
         applyRotations(ordered, pages);
-        CarriedPageLabels.write(document, labelled, pages);
+        labels.write(document, pages);
 
         if (PageReferences.removeDangling(document)) {
             warnings.add(Warning.DANGLING_REFERENCES_REMOVED);
@@ -564,7 +562,7 @@ public final class PdfBoxPageOperations implements PageOperations {
 
             // 「出どころ・ページ番号・何回目」が結合後の何ページ目になるか。
             Map<List<Integer>, Integer> positions = new HashMap<>();
-            Map<Integer, List<CarriedPageLabels.Label>> labelled = new HashMap<>();
+            CarriedPageLabels labels = new CarriedPageLabels();
             PDDocumentInformation information = null;
             int appended = 0;
 
@@ -578,8 +576,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                     }
                     if (round == 0) {
                         // 切り詰める前に読む。切り詰めた後は添字が動いている（#257）。
-                        int index = sourceIndex;
-                        CarriedPageLabels.read(copy.delegate()).ifPresent(labels -> labelled.put(index, labels));
+                        labels.read(sourceIndex, copy.delegate());
                     }
                     trimTo(copy, wanted, warnings);
                     merger.appendDocument(target, copy.delegate());
@@ -596,7 +593,7 @@ public final class PdfBoxPageOperations implements PageOperations {
             replacePages(target, ordered);
             applyRotations(ordered, pages);
             // PDFMergerUtility が継いだラベルは、切り詰めた複製の添字のままである。上書きする。
-            CarriedPageLabels.write(target, labelled, pages);
+            labels.write(target, pages);
 
             boolean mixed = pages.stream()
                             .mapToInt(PageSelection::sourceIndex)

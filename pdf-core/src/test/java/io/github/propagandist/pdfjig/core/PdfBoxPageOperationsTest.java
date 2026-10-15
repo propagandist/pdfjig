@@ -22,6 +22,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
@@ -1779,6 +1780,41 @@ class PdfBoxPageOperationsTest {
             assertFalse(hasPageLabels(merged), "ラベルを持たない入力から /PageLabels が作られた（merge）。");
         }
 
+        /**
+         * 読めないラベルは、修正の前と同じく素通しする（利用者が 2026-10-15 に決めた）。
+         *
+         * <p><b>★ 修正の最初の形は、ここで {@code IO_FAILURE} を投げて出力を残さなかった</b>
+         * （2026-10-15 実測）。修正の前は読まずに素通ししていたので保存できていた——
+         * 失敗にすると、保存できていた文書が保存できなくなる。
+         */
+        @Test
+        @DisplayName("読めない /PageLabels を持つ文書でも書き出せて、ラベルには触らない")
+        void leavesUnreadableLabelsAlone() throws Exception {
+            Path input = TestPdfs.withBrokenPageLabels(tempDir.resolve("doc.pdf"), "P1", "P2");
+
+            Path output = operations.reorder(input, List.of(2, 1), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of("P2", "P1"), textsOf(output));
+            assertEquals(List.of(0, 1), pageLabelNumsOf(output), "読めない /PageLabels が書き換えられた。");
+        }
+
+        @Test
+        @DisplayName("読めない /PageLabels を持つ入力を混ぜても書き出せる")
+        void mixingWithUnreadableLabelsStillWrites() throws Exception {
+            Path broken = TestPdfs.withBrokenPageLabels(tempDir.resolve("broken.pdf"), "B1", "B2");
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+
+            Path assembled = operations.assemble(
+                    List.of(labelled, broken),
+                    List.of(PageSelection.of(1, 2), PageSelection.of(0, 3)),
+                    tempDir.resolve("mixed.pdf"));
+            Path merged =
+                    operations.merge(List.of(broken, labelled), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertEquals(List.of("B2", "1"), textsOf(assembled));
+            assertEquals(8, textsOf(merged).size());
+        }
+
         private void assertLabelsFollowText(Path output, List<String> expected) throws IOException {
             assertEquals(expected, textsOf(output), "ページの並びが想定と違う。");
             assertEquals(expected, pageLabelsOf(output), "ラベルがページに付いていっていない。");
@@ -1919,6 +1955,18 @@ class PdfBoxPageOperationsTest {
     private static boolean hasPageLabels(Path pdf) throws IOException {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
             return document.getDocumentCatalog().getCOSObject().containsKey(COSName.PAGE_LABELS);
+        }
+    }
+
+    /** {@code /PageLabels} の {@code /Nums} を、PDFBox に解釈させずに整数の並びとして読む。 */
+    private static List<Integer> pageLabelNumsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            COSDictionary labels = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGE_LABELS);
+            List<Integer> nums = new ArrayList<>();
+            for (COSBase item : labels.getCOSArray(COSName.NUMS)) {
+                nums.add(((COSInteger) (item instanceof COSObject object ? object.getObject() : item)).intValue());
+            }
+            return nums;
         }
     }
 
