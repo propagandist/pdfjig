@@ -86,6 +86,9 @@ public final class TestPdfs {
     /** {@link #withNestedOutline} の子項目の表題。3 ページ目を指す。 */
     public static final String NESTED_CHILD_TITLE = "Child";
 
+    /** {@link #withPageLabels} の各ページのラベル。各ページの本文も同じ文字列である。 */
+    public static final List<String> LABELLED_PAGES = List.of("i", "ii", "1", "2", "3", "A-1");
+
     /** {@link #signed} が署名辞書に書く名前。 */
     public static final String SIGNER_NAME = "pdfjig test";
 
@@ -276,6 +279,40 @@ public final class TestPdfs {
             labels.setLabelItem(0, roman);
             catalog.setPageLabels(labels);
 
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * ページラベルの範囲を 3 つ持つ 6 ページの PDF を作る。
+     *
+     * <p>ラベルは {@code i, ii, 1, 2, 3, A-1}——表紙と目次にローマ数字、本文に算用数字、
+     * 付録に接頭辞付きの算用数字を振った形である。各ページには自分のラベルと同じ文字列を描く。
+     *
+     * <p><b>{@link #rich} とは別に置く。</b>あちらは範囲が 1 つしか無いので、
+     * ページを並べ替えても消しても、範囲の境目がずれたかどうかが見えない（#257）。
+     */
+    public static Path withPageLabels(Path target) throws IOException {
+        withText(target, LABELLED_PAGES.toArray(String[]::new));
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            PDPageLabels labels = new PDPageLabels(document);
+
+            PDPageLabelRange front = new PDPageLabelRange();
+            front.setStyle(PDPageLabelRange.STYLE_ROMAN_LOWER);
+            labels.setLabelItem(0, front);
+
+            PDPageLabelRange body = new PDPageLabelRange();
+            body.setStyle(PDPageLabelRange.STYLE_DECIMAL);
+            labels.setLabelItem(2, body);
+
+            PDPageLabelRange appendix = new PDPageLabelRange();
+            appendix.setStyle(PDPageLabelRange.STYLE_DECIMAL);
+            appendix.setPrefix("A-");
+            labels.setLabelItem(5, appendix);
+
+            document.getDocumentCatalog().setPageLabels(labels);
             document.save(target.toFile());
         }
         return target;

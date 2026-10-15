@@ -22,6 +22,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -1651,6 +1652,139 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * ページラベルは、元の文書でそのページに付いていたものが付いていく（#257）。
+     *
+     * <p>{@code /PageLabels} は<b>ページの添字</b>で範囲の始まりを決める。
+     * 並べ替えや削除で添字が動いても範囲を組み直さないと、<b>ラベルは添字のまま残り</b>、
+     * 閲覧ソフトのページ番号欄が中身とずれた番号を出す。
+     *
+     * <p>フィクスチャは各ページに自分のラベルと同じ文字列を描くので、
+     * <b>本文とラベルが一致すること</b>を見ればよい。
+     */
+    @Nested
+    class PageLabelsFollowPages {
+
+        @Test
+        @DisplayName("表紙を消すと、残ったページは元のラベルのまま番号が詰まらない")
+        void deletingKeepsLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.deletePages(input, PageRange.of(1, 1), tempDir.resolve("deleted.pdf"));
+
+            assertLabelsFollowText(output, List.of("ii", "1", "2", "3", "A-1"));
+        }
+
+        @Test
+        @DisplayName("並べ替えると、ラベルもページと一緒に動く")
+        void reorderingMovesLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.reorder(input, List.of(3, 1, 2, 6, 4, 5), tempDir.resolve("reordered.pdf"));
+
+            assertLabelsFollowText(output, List.of("1", "i", "ii", "A-1", "2", "3"));
+        }
+
+        @Test
+        @DisplayName("途中の範囲を取り出しても、先頭のラベルに戻らない")
+        void extractingKeepsLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.extractPages(input, PageRange.of(4, 6), tempDir.resolve("extracted.pdf"));
+
+            assertLabelsFollowText(output, List.of("2", "3", "A-1"));
+        }
+
+        @Test
+        @DisplayName("分割したどのファイルも、元のラベルを持つ")
+        void splittingKeepsLabels() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            List<Path> outputs = operations.split(input, SplitStrategy.everyNPages(4), tempDir.resolve("out"));
+
+            assertLabelsFollowText(outputs.get(0), List.of("i", "ii", "1", "2"));
+            assertLabelsFollowText(outputs.get(1), List.of("3", "A-1"));
+        }
+
+        @Test
+        @DisplayName("同じページを二度使っても、二度とも同じラベルが付く")
+        void repeatingAPageRepeatsItsLabel() throws Exception {
+            Path input = TestPdfs.withPageLabels(tempDir.resolve("doc.pdf"));
+
+            Path output = operations.assemble(
+                    input,
+                    List.of(PageSelection.of(3), PageSelection.of(4), PageSelection.of(3)),
+                    tempDir.resolve("twice.pdf"));
+
+            assertLabelsFollowText(output, List.of("1", "2", "1"));
+        }
+
+        @Test
+        @DisplayName("複数の入力を混ぜても、各ページに元のラベルが付く。ラベルの無い入力のページは元のページ番号になる")
+        void mixingInputsKeepsEachLabel() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path plain = TestPdfs.withText(tempDir.resolve("plain.pdf"), "1", "2", "3");
+
+            Path output = operations.assemble(
+                    List.of(labelled, plain),
+                    List.of(
+                            PageSelection.of(1, 3),
+                            PageSelection.of(0, 4),
+                            PageSelection.of(0, 1),
+                            PageSelection.of(1, 1)),
+                    tempDir.resolve("mixed.pdf"));
+
+            assertLabelsFollowText(output, List.of("3", "2", "i", "1"));
+        }
+
+        @Test
+        @DisplayName("結合しても、後ろの入力のページが前の入力の番号を引き継がない")
+        void mergingKeepsEachLabel() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path plain = TestPdfs.withText(tempDir.resolve("plain.pdf"), "1", "2");
+
+            Path output = operations.merge(
+                    List.of(labelled, plain, labelled), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2"));
+            expected.addAll(TestPdfs.LABELLED_PAGES);
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("ラベルを持たない文書を並べ替えても、ラベルを作らない")
+        void doesNotAddLabelsToUnlabelledDocument() throws Exception {
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+
+            Path output = operations.reorder(input, List.of(3, 1, 2), tempDir.resolve("reordered.pdf"));
+
+            assertFalse(hasPageLabels(output), "ラベルを持たない文書に /PageLabels が作られた。");
+        }
+
+        @Test
+        @DisplayName("ラベルを持たない文書どうしを混ぜても、ラベルを作らない")
+        void doesNotAddLabelsWhenNoInputHasThem() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("second.pdf"), "B1");
+
+            Path assembled = operations.assemble(
+                    List.of(first, second),
+                    List.of(PageSelection.of(1, 1), PageSelection.of(0, 2)),
+                    tempDir.resolve("mixed.pdf"));
+            Path merged =
+                    operations.merge(List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertFalse(hasPageLabels(assembled), "ラベルを持たない入力から /PageLabels が作られた（assemble）。");
+            assertFalse(hasPageLabels(merged), "ラベルを持たない入力から /PageLabels が作られた（merge）。");
+        }
+
+        private void assertLabelsFollowText(Path output, List<String> expected) throws IOException {
+            assertEquals(expected, textsOf(output), "ページの並びが想定と違う。");
+            assertEquals(expected, pageLabelsOf(output), "ラベルがページに付いていっていない。");
+        }
+    }
+
     /** 宛先を失った参照の扱い。 */
     @Nested
     class DanglingReferences {
@@ -1779,6 +1913,12 @@ class PdfBoxPageOperationsTest {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
             PDPageLabels labels = document.getDocumentCatalog().getPageLabels();
             return labels == null ? List.of() : List.of(labels.getLabelsByPageIndices());
+        }
+    }
+
+    private static boolean hasPageLabels(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            return document.getDocumentCatalog().getCOSObject().containsKey(COSName.PAGE_LABELS);
         }
     }
 
