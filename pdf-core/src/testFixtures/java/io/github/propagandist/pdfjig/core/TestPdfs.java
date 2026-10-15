@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
@@ -326,15 +327,42 @@ public final class TestPdfs {
      * PDFBox はこれを読もうとすると投げる。
      */
     public static Path withBrokenPageLabels(Path target, String... pageTexts) throws IOException {
+        COSArray nums = new COSArray();
+        nums.add(COSInteger.ZERO);
+        nums.add(COSInteger.ONE);
+        COSDictionary labels = new COSDictionary();
+        labels.setItem(COSName.NUMS, nums);
+        return withPageLabelsEntry(target, labels, pageTexts);
+    }
+
+    /**
+     * カタログの {@code /PageLabels} に、与えた値をそのまま置いた PDF を作る。
+     *
+     * <p>仕様に反する値も置ける。<b>読めない・型の合わない数の木</b>に対する書き出しの振る舞いを
+     * 確かめるために使う（#257 の門）。辞書は既定で間接オブジェクトとして書かれるので、
+     * 自分自身を {@code /Kids} に持つ循環も作れる。
+     */
+    public static Path withPageLabelsEntry(Path target, COSBase entry, String... pageTexts) throws IOException {
         withText(target, pageTexts);
 
         try (PDDocument document = Loader.loadPDF(target.toFile())) {
-            COSArray nums = new COSArray();
-            nums.add(COSInteger.ZERO);
-            nums.add(COSInteger.ONE);
-            COSDictionary labels = new COSDictionary();
-            labels.setItem(COSName.NUMS, nums);
-            document.getDocumentCatalog().getCOSObject().setItem(COSName.PAGE_LABELS, labels);
+            document.getDocumentCatalog().getCOSObject().setItem(COSName.PAGE_LABELS, entry);
+            document.save(target.toFile());
+        }
+        return target;
+    }
+
+    /**
+     * ページツリーの根の {@code /Count} が、実際のページ数と違う PDF を作る。
+     *
+     * <p>{@code PDFMergerUtility} はページを木の反復子で数えるので、{@code /Count} を信じた側と
+     * 足されたページの数が食い違う（#257 の門）。
+     */
+    public static Path withDeclaredPageCount(Path target, int declared, String... pageTexts) throws IOException {
+        withText(target, pageTexts);
+
+        try (PDDocument document = Loader.loadPDF(target.toFile())) {
+            document.getDocumentCatalog().getPages().getCOSObject().setInt(COSName.COUNT, declared);
             document.save(target.toFile());
         }
         return target;
