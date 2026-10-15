@@ -1934,6 +1934,62 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("/Count が食い違う入力を後ろに結合しても、前の入力の範囲を引き継がない")
+        void mergingMisdeclaredCountAfterLabelledKeepsEachLabel() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path misdeclared = TestPdfs.withDeclaredPageCount(tempDir.resolve("count.pdf"), 4, "1", "2", "3");
+
+            Path output = operations.merge(
+                    List.of(labelled, misdeclared), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2", "3"));
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("入力 1 つの結合でも、/Kids に置かれたラベルが残る")
+        void mergingOneInputKeepsLabelsUnderKids() throws Exception {
+            COSDictionary leaf = numsOf(COSInteger.ZERO, range("r", null), COSInteger.TWO, range("D", null));
+            COSArray kids = new COSArray();
+            kids.add(leaf);
+            COSDictionary root = new COSDictionary();
+            root.setItem(COSName.KIDS, kids);
+            Path input = TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), root, "i", "ii", "1");
+
+            Path output = operations.merge(List.of(input), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            assertLabelsFollowText(output, List.of("i", "ii", "1"));
+        }
+
+        @Test
+        @DisplayName("範囲を持たない /PageLabels の入力を混ぜても、ほかの入力のラベルは組み直す")
+        void emptyLabelsDoNotStopOthersFromBeingCarried() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path empty = TestPdfs.withPageLabelsEntry(tempDir.resolve("empty.pdf"), numsOf(), "1", "2");
+
+            Path output =
+                    operations.merge(List.of(labelled, empty), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2"));
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
+        @DisplayName("int に収まらない開始番号も、そのまま運ぶ")
+        void carriesLargeStartNumbers() throws Exception {
+            COSDictionary body = range("D", null);
+            body.setItem(COSName.ST, COSInteger.get(4_294_967_297L));
+            Path input =
+                    TestPdfs.withPageLabelsEntry(tempDir.resolve("doc.pdf"), numsOf(COSInteger.ZERO, body), "P1", "P2");
+
+            Path output = operations.reorder(input, List.of(2, 1), tempDir.resolve("reordered.pdf"));
+
+            assertEquals(List.of(0L, 4_294_967_298L, 1L, 4_294_967_297L), pageLabelStartsOf(output));
+        }
+
+        @Test
         @DisplayName("ページの無い文書を並べ替えても落ちない")
         void reorderingAnEmptyDocumentDoesNotFail() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("empty.pdf"), 0);
@@ -2098,6 +2154,22 @@ class PdfBoxPageOperationsTest {
         try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
             COSDictionary labels = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGE_LABELS);
             return labels.getCOSArray(COSName.NUMS).toCOSNumberIntegerList();
+        }
+    }
+
+    /** {@code /Nums} を、キーと各範囲の {@code /St}（無ければ 1）を交互に並べた形で読む。 */
+    private static List<Long> pageLabelStartsOf(Path pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
+            COSArray nums = document.getDocumentCatalog()
+                    .getCOSObject()
+                    .getCOSDictionary(COSName.PAGE_LABELS)
+                    .getCOSArray(COSName.NUMS);
+            List<Long> starts = new ArrayList<>();
+            for (int i = 0; i < nums.size(); i += 2) {
+                starts.add(((COSInteger) nums.getObject(i)).longValue());
+                starts.add(((COSDictionary) nums.getObject(i + 1)).getLong(COSName.ST, 1));
+            }
+            return starts;
         }
     }
 
