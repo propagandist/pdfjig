@@ -1990,6 +1990,31 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("long にも収まらない開始番号を持つ /PageLabels には触らない")
+        void leavesOverflowingStartAlone() throws Exception {
+            COSDictionary body = range("D", null);
+            body.setItem(COSName.ST, COSInteger.get(Long.MAX_VALUE));
+            Path input = TestPdfs.withPageLabelsEntry(
+                    tempDir.resolve("doc.pdf"), numsOf(COSInteger.ZERO, body), "P1", "P2", "P3");
+
+            assertReorderLeavesLabelsAlone(input);
+        }
+
+        @Test
+        @DisplayName("宛先の無い参照の /PageLabels を持つ入力を混ぜても、ほかの入力のラベルは組み直す")
+        void danglingLabelsDoNotStopOthersFromBeingCarried() throws Exception {
+            Path labelled = TestPdfs.withPageLabels(tempDir.resolve("labelled.pdf"));
+            Path dangling = TestPdfs.withPageLabelsEntry(tempDir.resolve("dangling.pdf"), COSNull.NULL, "1", "2");
+
+            Path output = operations.merge(
+                    List.of(labelled, dangling), tempDir.resolve("merged.pdf"), MergeOptions.defaults());
+
+            List<String> expected = new ArrayList<>(TestPdfs.LABELLED_PAGES);
+            expected.addAll(List.of("1", "2"));
+            assertLabelsFollowText(output, expected);
+        }
+
+        @Test
         @DisplayName("ページの無い文書を並べ替えても落ちない")
         void reorderingAnEmptyDocumentDoesNotFail() throws Exception {
             Path input = TestPdfs.plain(tempDir.resolve("empty.pdf"), 0);
