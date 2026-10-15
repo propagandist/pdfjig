@@ -189,7 +189,7 @@ final class CarriedPageLabels {
      *
      * <p><b>読めなければ {@code null}。</b>次のどれか 1 つでも当たれば読めないとする——
      * 節が辞書でない・{@code /Kids} や {@code /Nums} が配列でない・{@code /Nums} の長さが奇数・
-     * キーが 0 以上の整数でない・値が辞書でない・{@code /St} が整数でない・
+     * キーが 0 以上の整数でない・値が辞書でない・{@code /St} が運べる範囲の整数でない・
      * 同じキーが 2 度出る・同じ節に 2 度着く（循環を含む）。
      *
      * <p><b>再帰しない。</b>深い木で {@code StackOverflowError} を踏まないため、積んで歩く。
@@ -222,8 +222,7 @@ final class CarriedPageLabels {
                             || key.longValue() < 0
                             || key.longValue() > Integer.MAX_VALUE
                             || !(nums.getObject(i + 1) instanceof COSDictionary range)
-                            || (range.containsKey(COSName.ST)
-                                    && !(range.getDictionaryObject(COSName.ST) instanceof COSInteger))
+                            || !startIsCarriable(range)
                             || ranges.put(key.intValue(), range) != null) {
                         return null;
                     }
@@ -231,5 +230,19 @@ final class CarriedPageLabels {
             }
         }
         return ranges;
+    }
+
+    /**
+     * 範囲の {@code /St} を、番号を足しても {@code long} があふれない形で運べるか。
+     *
+     * <p>添字の差は {@code int} に収まるので、その分の余白を両端に取る。
+     */
+    private static boolean startIsCarriable(COSDictionary range) {
+        if (!range.containsKey(COSName.ST)) {
+            return true;
+        }
+        return range.getDictionaryObject(COSName.ST) instanceof COSInteger start
+                && start.longValue() <= Long.MAX_VALUE - Integer.MAX_VALUE
+                && start.longValue() >= Long.MIN_VALUE + Integer.MAX_VALUE;
     }
 }
