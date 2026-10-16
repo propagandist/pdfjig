@@ -8,6 +8,7 @@ import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
@@ -67,6 +68,9 @@ abstract class DesktopUiTest {
 
     Stage stage;
 
+    /** {@link #tasks()} が返したもの。上書き保存の後始末が済んだかを見るのに使う（{@link #saveOver}）。 */
+    BackgroundTasks background;
+
     /**
      * 使う AI プロバイダ。
      *
@@ -91,7 +95,8 @@ abstract class DesktopUiTest {
     void setUp(Stage stage) {
         this.stage = stage;
         dialogs = new StubFileDialogs();
-        window = new MainWindow(stage, aiProvider(), null, dialogs, tasks());
+        background = tasks();
+        window = new MainWindow(stage, aiProvider(), null, dialogs, background);
 
         Scene scene = new Scene(window.build(), 960, 720);
         scene.getStylesheets()
@@ -254,10 +259,17 @@ abstract class DesktopUiTest {
      * <p><b>更新時刻が進むのを待つ。</b>中身で比べる形は採れない——<b>2 回目の上書きは
      * 同じ内容を書くので、中身は変わらないのが正しい</b>（それがまさに #118 で直したことである）。
      *
-     * <p><b>★ 寄せ直しの終わりは待たない。</b>上書き保存は書いた後にセッションを寄せ直すが
-     * （#118）、<b>その間ボタンは押せないので、次の {@link #clickUntilAccepted} が
-     * 押し直しながら待つ。</b>ここで busy を覗くと、書き終わりと寄せ直しの開始の間で
-     * 取り違える。
+     * <p><b>★★ 寄せ直しの終わりまで待つ</b>（#235）。上書き保存は書いた後にセッションを寄せ直す
+     * （#118）。<b>ファイルができた時点で戻ると、画面はまだ保存の前の状態を出している</b>——
+     * 状態行には「未保存」が残り、ボタンは押せない。<b>次の操作が「押せた」かを状態行で見ると、
+     * 押せないボタンを押したのに届いたと読む。</b>CI の windows で、2 回目の回転が効かないまま
+     * 保存した（{@code OverwriteSaveUiTest}。2026-09-26）。
+     * ★ 以前は「押し直しながら待つので、ここでは待たない」としていた。押し直しが見る条件が
+     * 寄せ直しの前と後で同じ答えを返すと、その待ちは効かない。
+     *
+     * <p><b>★ 終わりは JavaFX スレッドの上で見る</b>（{@link #idle}）。書き出しの受け手は
+     * {@code busy} を下ろしてから寄せ直しを始めて立て直す。<b>その間は 1 つのイベントの中なので、
+     * JavaFX スレッドからは下りた瞬間が見えない。</b>テストのスレッドから覗くと、そこを取り違える。
      *
      * @return 書き出されたファイル
      */
@@ -265,13 +277,32 @@ abstract class DesktopUiTest {
         FileTime before = Files.getLastModifiedTime(output);
         dialogs.willSaveTo(output);
         pressSave(robot);
-        // ★ 存在を先に見る。置き換えは「元をどけてから入れる」2 本の改名なので（DocumentWriter#move。
-        //   #119 より前は DeleteFile → MoveFileEx の 2 段だった）、どちらの形でも出力先が一瞬消える。
-        //   TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく失敗として投げ直すため、
-        //   見ずに触ると NoSuchFileException で落ちる。
-        waitFor(() -> Files.exists(output) && Files.getLastModifiedTime(output).compareTo(before) > 0);
+        waitFor(() -> modifiedAfter(output, before));
+        waitFor(this::idle);
         WaitForAsyncUtils.waitForFxEvents();
         return output;
+    }
+
+    /**
+     * そのファイルの更新時刻が {@code before} より後か。<b>無いあいだは「まだ」と答える。</b>
+     *
+     * <p><b>★★ 置き換えの最中は、出力先が一瞬消える。</b>置き換えは「元をどけてから入れる」
+     * 2 本の改名である（{@code DocumentWriter#move}。#119）。TestFX の {@code waitFor} は、
+     * 条件が投げた例外を「まだ偽」ではなく失敗として投げ直す。<b>在ることを先に見ても足りない</b>
+     * ——見てから時刻を読むまでの間に消えると {@code NoSuchFileException} で落ちる
+     * （CI の windows で踏んだ。2026-09-26、{@code ReopenFailureUiTest}。#235）。
+     */
+    private static boolean modifiedAfter(Path file, FileTime before) throws IOException {
+        try {
+            return Files.getLastModifiedTime(file).compareTo(before) > 0;
+        } catch (NoSuchFileException replacing) {
+            return false;
+        }
+    }
+
+    /** 走っている仕事が無いか。<b>JavaFX スレッドの上で見る</b>（{@link #saveOver}）。 */
+    private boolean idle() throws Exception {
+        return WaitForAsyncUtils.asyncFx(() -> !background.busy().get()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     /**

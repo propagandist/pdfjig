@@ -1,11 +1,11 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.TimeoutException;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -131,10 +131,11 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         saveOver(robot, document);
         assertEquals(List.of(0, 0, 90, 0), TestPdfs.rotationsOf(document), "1 回目が既に違う");
 
-        // 区切りが残っていることは状態行で見る。寄せ直しが終わるまでの待ちも兼ねる。
-        waitFor(() -> statusText(robot).contains("区切り 1 か所"));
+        // 区切りが残っていることは状態行で見る。寄せ直しの終わりは saveOver が待っている（#235）。
+        // ★ ここを待ちに使わない。区切りは寄せ直しの前から出ているので、前と後で同じ答えになる。
+        assertTrue(statusText(robot).contains("区切り 1 か所"), "寄せ直しで区切りが消えている");
 
-        // 選び直さずにもう一度回す。押せるようになるまで押し直す（寄せ直しの間は押せない）。
+        // 選び直さずにもう一度回す。届くまで押し直す（窓が前面に出ていないと取りこぼす）。
         clickUntilAccepted(robot, "#tool-rotate-right", () -> !statusText(robot).contains("未保存"));
         saveOver(robot, document);
 
@@ -210,8 +211,9 @@ class OverwriteSaveUiTest extends DesktopUiTest {
      * <b>そこを通すには実物の PDF が要る</b>——{@code DocumentWriterTest} は
      * {@code move} までしか呼べない（あちらは PDF を持たない側である）。
      *
-     * <p><b>待つのは、後始末が書き出しの後ろで続くからである。</b>{@code saveOver} が
-     * 見ているのは出力先の更新時刻までで、作業場所を片づけるのはその先にある。
+     * <p><b>待たずに見る。</b>作業場所を片づけるのは書き出しの仕事の中であり
+     * （{@code DocumentWriter#assemble} の try-with-resources）、{@code saveOver} は
+     * その仕事と寄せ直しが終わるまで待つ（#235）。
      */
     @Test
     void 上書き保存のあとフォルダに隠しものが残らない(@TempDir Path dir, FxRobot robot) throws Exception {
@@ -225,13 +227,6 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         // ★ 中身も見る。片づいたことだけを見ると、何も書けていない保存でも緑になる。
         assertEquals(List.of(90, 0), TestPdfs.rotationsOf(document), "書き出せていない");
 
-        // ★ 待つのは後始末が書き出しの後ろで続くからである。saveOver が見ているのは
-        //   出力先の更新時刻までで、作業場所を片づけるのはその先にある。
-        //   ★★ 上限で落ちるのは TimeoutException であり、理由は出ない。捕まえて書く。
-        try {
-            waitFor(() -> namesIn(dir).equals(List.of("doc.pdf")));
-        } catch (TimeoutException e) {
-            throw new AssertionError("置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）。残っているもの: " + namesIn(dir), e);
-        }
+        assertEquals(List.of("doc.pdf"), namesIn(dir), "置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）");
     }
 }
