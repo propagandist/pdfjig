@@ -88,6 +88,14 @@ public final class MainWindow {
     /** 画面を止めずに走らせる手段。進行中かどうかもここが持つ。 */
     private final BackgroundTasks tasks;
 
+    /**
+     * 「更新を確認」が問い合わせる相手。既定は {@link UpdateCheck#check()} で、GitHub へ出る。
+     *
+     * <p><b>テストではここを差し替える</b>（#176）。本物へ出ると、答えが返るかどうかが
+     * CI ランナーの外向きの通信で決まり、差分と関係なく赤くなる。
+     */
+    private final Supplier<UpdateStatus> updateCheck;
+
     /** 利用者に伝える手段。 */
     private final Messages messages;
 
@@ -234,7 +242,7 @@ public final class MainWindow {
     private DocumentSession session;
 
     public MainWindow(Stage stage, AiProvider aiProvider, HostServices hostServices) {
-        this(stage, aiProvider, hostServices, new NativeFileDialogs(stage), new BackgroundTasks());
+        this(stage, aiProvider, hostServices, new NativeFileDialogs(stage), new BackgroundTasks(), UpdateCheck::check);
     }
 
     /**
@@ -245,16 +253,23 @@ public final class MainWindow {
      * （{@link BackgroundTasks#BackgroundTasks(java.util.concurrent.Executor)}）——
      * 待ち合わせに行くと、落ちるかどうかが機械の速さで決まるテストになる。
      *
-     * @param dialogs ファイルとフォルダを選ばせる手段
-     * @param tasks   画面を止めずに走らせる手段
+     * @param dialogs     ファイルとフォルダを選ばせる手段
+     * @param tasks       画面を止めずに走らせる手段
+     * @param updateCheck 「更新を確認」が問い合わせる相手。バックグラウンドスレッドから呼ばれる
      */
     MainWindow(
-            Stage stage, AiProvider aiProvider, HostServices hostServices, FileDialogs dialogs, BackgroundTasks tasks) {
+            Stage stage,
+            AiProvider aiProvider,
+            HostServices hostServices,
+            FileDialogs dialogs,
+            BackgroundTasks tasks,
+            Supplier<UpdateStatus> updateCheck) {
         this.stage = stage;
         this.aiProvider = aiProvider;
         this.hostServices = hostServices;
         this.dialogs = dialogs;
         this.tasks = tasks;
+        this.updateCheck = updateCheck;
         this.messages = new Messages(stage);
         this.needsDocument = documentOpen.not().or(tasks.busy());
         this.editingBlocked = needsDocument.or(stale);
@@ -1714,7 +1729,7 @@ public final class MainWindow {
 
     /** 版数と実行環境を出す。文書を開いていなくても呼べる。 */
     private void showAbout() {
-        AboutDialog.show(stage, hostServices, aiProvider.isAvailable());
+        AboutDialog.show(stage, hostServices, aiProvider.isAvailable(), updateCheck);
     }
 
     private void updateTitle() {

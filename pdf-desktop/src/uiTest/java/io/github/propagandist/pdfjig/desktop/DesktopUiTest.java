@@ -97,7 +97,7 @@ abstract class DesktopUiTest {
         this.stage = stage;
         dialogs = new StubFileDialogs();
         background = tasks();
-        window = new MainWindow(stage, aiProvider(), null, dialogs, background);
+        window = new MainWindow(stage, aiProvider(), null, dialogs, background, UpdateCheck::check);
 
         Scene scene = new Scene(window.build(), 960, 720);
         scene.getStylesheets()
