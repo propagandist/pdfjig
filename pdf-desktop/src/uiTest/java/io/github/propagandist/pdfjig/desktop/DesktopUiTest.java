@@ -8,6 +8,7 @@ import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
@@ -265,13 +266,26 @@ abstract class DesktopUiTest {
         FileTime before = Files.getLastModifiedTime(output);
         dialogs.willSaveTo(output);
         pressSave(robot);
-        // ★ 存在を先に見る。置き換えは「元をどけてから入れる」2 本の改名なので（DocumentWriter#move。
-        //   #119 より前は DeleteFile → MoveFileEx の 2 段だった）、どちらの形でも出力先が一瞬消える。
-        //   TestFX の waitFor は条件が投げた例外を「まだ偽」ではなく失敗として投げ直すため、
-        //   見ずに触ると NoSuchFileException で落ちる。
-        waitFor(() -> Files.exists(output) && Files.getLastModifiedTime(output).compareTo(before) > 0);
+        waitFor(() -> modifiedAfter(output, before));
         WaitForAsyncUtils.waitForFxEvents();
         return output;
+    }
+
+    /**
+     * そのファイルの更新時刻が {@code before} より後か。<b>無いあいだは「まだ」と答える。</b>
+     *
+     * <p><b>★★ 置き換えの最中は、出力先が一瞬消える。</b>置き換えは「元をどけてから入れる」
+     * 2 本の改名である（{@code DocumentWriter#move}。#119）。TestFX の {@code waitFor} は、
+     * 条件が投げた例外を「まだ偽」ではなく失敗として投げ直す。<b>在ることを先に見ても足りない</b>
+     * ——見てから時刻を読むまでの間に消えると {@code NoSuchFileException} で落ちる
+     * （CI の windows で踏んだ。2026-09-26、{@code ReopenFailureUiTest}。#235）。
+     */
+    private static boolean modifiedAfter(Path file, FileTime before) throws IOException {
+        try {
+            return Files.getLastModifiedTime(file).compareTo(before) > 0;
+        } catch (NoSuchFileException replacing) {
+            return false;
+        }
     }
 
     /**
