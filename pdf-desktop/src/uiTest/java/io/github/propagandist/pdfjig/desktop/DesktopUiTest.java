@@ -14,6 +14,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
@@ -68,6 +69,9 @@ abstract class DesktopUiTest {
 
     Stage stage;
 
+    /** {@link #tasks()} が返したもの。上書き保存の後始末が済んだかを見るのに使う（{@link #saveOver}）。 */
+    BackgroundTasks background;
+
     /**
      * 使う AI プロバイダ。
      *
@@ -92,7 +96,8 @@ abstract class DesktopUiTest {
     void setUp(Stage stage) {
         this.stage = stage;
         dialogs = new StubFileDialogs();
-        window = new MainWindow(stage, aiProvider(), null, dialogs, tasks());
+        background = tasks();
+        window = new MainWindow(stage, aiProvider(), null, dialogs, background);
 
         Scene scene = new Scene(window.build(), 960, 720);
         scene.getStylesheets()
@@ -255,10 +260,24 @@ abstract class DesktopUiTest {
      * <p><b>更新時刻が進むのを待つ。</b>中身で比べる形は採れない——<b>2 回目の上書きは
      * 同じ内容を書くので、中身は変わらないのが正しい</b>（それがまさに #118 で直したことである）。
      *
-     * <p><b>★ 寄せ直しの終わりは待たない。</b>上書き保存は書いた後にセッションを寄せ直すが
-     * （#118）、<b>その間ボタンは押せないので、次の {@link #clickUntilAccepted} が
-     * 押し直しながら待つ。</b>ここで busy を覗くと、書き終わりと寄せ直しの開始の間で
-     * 取り違える。
+     * <p><b>★★ 寄せ直しの終わりまで待つ</b>（#235）。上書き保存は書いた後にセッションを寄せ直す
+     * （#118）。<b>ファイルができた時点で戻ると、画面はまだ保存の前の状態を出している</b>——
+     * 状態行には「未保存」が残り、ボタンは押せない。<b>次の操作が「押せた」かを状態行で見ると、
+     * 押せないボタンを押したのに届いたと読む。</b>CI の windows で、2 回目の回転が効かないまま
+     * 保存した（{@code OverwriteSaveUiTest}。2026-09-26）。
+     * ★ 以前は「押し直しながら待つので、ここでは待たない」としていた。押し直しが見る条件が
+     * 寄せ直しの前と後で同じ答えを返すと、その待ちは効かない。
+     *
+     * <p><b>★ 終わりは JavaFX スレッドの上で見る</b>（{@link #idle}）。書き出しの受け手は
+     * {@code busy} を下ろしてから寄せ直しを始めて立て直す。<b>その間は 1 つのイベントの中なので、
+     * JavaFX スレッドからは下りた瞬間が見えない。</b>テストのスレッドから覗くと、そこを取り違える。
+     *
+     * <p><b>★ 警告の窓が出ていても戻る。</b>窓を閉じるのは、ここから戻った呼ぶ側である
+     * （{@code OverwriteSaveUiTest} の「複数ファイルでも」）。{@code BackgroundTasks#whenIdle} で
+     * 待つ形は採らない——あちらは<b>最後に終わった仕事の受け手が戻るまで</b>呼ばない。
+     * 寄せ直しが走った回は、寄せ直しが警告の窓の入れ子のループの中で終わるので間に合うが、
+     * <b>寄せ直しが走らなかった回</b>（{@code ReopenFailureUiTest}）は、書き出しの受け手が窓を出していれば
+     * それが閉じるまで呼ばれない。
      *
      * @return 書き出されたファイル
      */
@@ -266,7 +285,18 @@ abstract class DesktopUiTest {
         FileTime before = Files.getLastModifiedTime(output);
         dialogs.willSaveTo(output);
         pressSave(robot);
-        waitFor(() -> modifiedAfter(output, before));
+        // ★ 上限で落ちるのは理由の無い TimeoutException である。2 段のどちらで止まったかを書く。
+        try {
+            waitFor(() -> modifiedAfter(output, before));
+        } catch (TimeoutException e) {
+            throw new AssertionError("上書き保存の出力が書かれない: " + output, e);
+        }
+        try {
+            waitFor(this::idle);
+        } catch (TimeoutException e) {
+            throw new AssertionError("書けたが、書き出しか寄せ直しが終わらない", e);
+        }
+        // 寄せ直しの受け手が積んだもの（選択位置へ戻す・状態行）を流してから読ませる。
         WaitForAsyncUtils.waitForFxEvents();
         return output;
     }
@@ -284,6 +314,27 @@ abstract class DesktopUiTest {
         try {
             return Files.getLastModifiedTime(file).compareTo(before) > 0;
         } catch (NoSuchFileException replacing) {
+            return false;
+        }
+    }
+
+    /**
+     * 走っている仕事が無いか。<b>JavaFX スレッドの上で見る</b>（{@link #saveOver}）。
+     *
+     * <p><b>★★ {@code WaitForAsyncUtils#asyncFx} を使わない。</b>あちらは頼む前に、
+     * TestFX が JavaFX スレッドで拾った例外を投げ直す（{@code autoCheckException} の既定は真。
+     * TestFX 4.0.18 を逆アセンブルして確かめた）。{@code ReopenFailureUiTest} は寄せ直しの始め方に
+     * わざと投げさせるので、その例外がここで出て、<b>押せないことを見る前に落ちる</b>（#235 の門の 2 段目）。
+     *
+     * <p>1 回の問いは {@link #GRACE_SECONDS} で諦め、「まだ」と答える。外側の {@link #waitFor} が
+     * 上限を持つ——ここで投げると、その上限より前に落ちる。
+     */
+    private boolean idle() throws Exception {
+        CompletableFuture<Boolean> answer = new CompletableFuture<>();
+        Platform.runLater(() -> answer.complete(!background.busy().get()));
+        try {
+            return answer.get(GRACE_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException stillBusy) {
             return false;
         }
     }

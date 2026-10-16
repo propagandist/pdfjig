@@ -77,11 +77,10 @@ class ReopenFailureUiTest extends DesktopUiTest {
             // 書き出し自体は成功している。失われたものは無い。
             assertEquals(List.of(90, 0, 0), TestPdfs.rotationsOf(document), "書き出しが当たっていない");
 
-            // ★ 寄せ直しが投げられるまで待つ。saveOver が待つのは「ファイルができたこと」までで、
-            //   後始末は書き上がってから JavaFX スレッドへ乗る——待たずに数えると 2 本で見てしまう。
-            //   投げる／投げないに依らずここまでは同じなので、赤い側でも待たされない。
-            waitFor(() -> submissions.get() == REOPEN);
-            WaitForAsyncUtils.waitForFxEvents();
+            // ★ 寄せ直しを頼んだところまで来ていることを確かめる。saveOver は仕事が無くなるまで
+            //   待つ（#235）。寄せ直しは始まらずに戻るので、そこで既に 3 本目まで数えている。
+            //   ★ 待たずに見る。2 本で止まっていれば、寄せ直しを頼んでいない——数え方が古い。
+            assertEquals(REOPEN, submissions.get(), "寄せ直しを頼んでいない。仕事の数え方が古い");
 
             // ★★ ここが本体である。印が立たなければ保存は押せたままで、次の保存で二重に当たる。
             assertTrue(button(robot, "#tool-save").isDisabled(), "保存が押せる。次に押すと同じ変換が二重に当たる（#118）");
