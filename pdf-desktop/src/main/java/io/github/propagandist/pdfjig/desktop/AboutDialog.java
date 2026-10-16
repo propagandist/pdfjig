@@ -169,7 +169,7 @@ final class AboutDialog {
         Task<UpdateStatus> task = new Task<>() {
             @Override
             protected UpdateStatus call() {
-                return updateCheck.get();
+                return UpdateCheck.check();
             }
         };
         task.setOnSucceeded(event -> settle(button, result, link, task.getValue()));
