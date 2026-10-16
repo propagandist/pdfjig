@@ -14,8 +14,9 @@ import org.junit.jupiter.api.Test;
  * 通信しない部分だけを見る。
  *
  * <p><b>{@code check()} は呼ばない。</b>実際に GitHub へ出るテストを {@code build} に載せると、
- * 手元でもネットワークの都合で赤くなる。<b>経路そのものは画面のテストが通す</b>
- * （{@code UpdateCheckUiTest}。あちらは遮断されていても緑になる形で書いてある）。
+ * 手元でもネットワークの都合で赤くなる。<b>画面のテストも本物へは出ない</b>
+ * （{@code UpdateCheckUiTest} は問い合わせる相手を偽物に差し替える。#176）。
+ * <b>本物の通信は人が見る</b>（{@code docs/HANDOVER.md} 4-4 の 6 番と 14 番）。
  */
 class UpdateCheckTest {
 

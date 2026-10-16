@@ -18,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.geometry.Bounds;
@@ -92,12 +93,23 @@ abstract class DesktopUiTest {
         return new BackgroundTasks();
     }
 
+    /**
+     * 「更新を確認」が問い合わせる相手。
+     *
+     * <p><b>既定でも本物の {@link UpdateCheck#check()} を渡さない</b>（#176）。本物は GitHub へ出るので、
+     * 答えが返るかどうかが CI ランナーの外向きの通信で決まる——<b>差分と関係なく赤くなる。</b>
+     * 既定は「確認できなかった」をすぐに返す。押す筋は {@code UpdateCheckUiTest} が自分の相手を差す。
+     */
+    Supplier<UpdateStatus> updateCheck() {
+        return UpdateStatus.Unavailable::new;
+    }
+
     /** 各テストクラスの {@code @Start} から呼ぶ。 */
     void setUp(Stage stage) {
         this.stage = stage;
         dialogs = new StubFileDialogs();
         background = tasks();
-        window = new MainWindow(stage, aiProvider(), null, dialogs, background);
+        window = new MainWindow(stage, aiProvider(), null, dialogs, background, updateCheck());
 
         Scene scene = new Scene(window.build(), 960, 720);
         scene.getStylesheets()

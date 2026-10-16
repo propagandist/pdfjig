@@ -1,5 +1,6 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import java.util.function.Supplier;
 import javafx.application.HostServices;
 import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
@@ -49,8 +50,10 @@ final class AboutDialog {
      * @param hostServices リンクを既定のブラウザに渡すために使う
      * @param aiAvailable  AI プロバイダが使える状態か。{@code AiProvider} をそのまま受けないのは、
      *                     この画面が要るのは可否だけであり、提案の仕組みまで知る必要がないため
+     * @param updateCheck  「更新を確認」が問い合わせる相手。配布物では {@link UpdateCheck#check()} である
+     *                     （{@code MainWindow}）。バックグラウンドスレッドから呼ぶ
      */
-    static void show(Stage owner, HostServices hostServices, boolean aiAvailable) {
+    static void show(Stage owner, HostServices hostServices, boolean aiAvailable, Supplier<UpdateStatus> updateCheck) {
         Label name = new Label(AppInfo.NAME);
         name.getStyleClass().add("about-title");
 
@@ -131,7 +134,7 @@ final class AboutDialog {
         checkButton.addEventFilter(ActionEvent.ACTION, event -> {
             // 押した結果としてダイアログが閉じては、答えを読めない（「情報をコピー」と同じ）。
             event.consume();
-            checkForUpdate(checkButton, update, releases);
+            checkForUpdate(updateCheck, checkButton, update, releases);
         });
 
         Button copyButton = (Button) dialog.getDialogPane().lookupButton(copy);
@@ -157,7 +160,8 @@ final class AboutDialog {
      * <p><b>答えが出るまでボタンを押せなくする。</b>連打すると要求だけが増える。
      * 答えが出たら、失敗していても押せる状態へ戻す——遮断は一時的なこともある。
      */
-    private static void checkForUpdate(Button button, Label result, Hyperlink link) {
+    private static void checkForUpdate(
+            Supplier<UpdateStatus> updateCheck, Button button, Label result, Hyperlink link) {
         button.setDisable(true);
         hide(link);
         report(result, "確認しています…");
@@ -165,11 +169,11 @@ final class AboutDialog {
         Task<UpdateStatus> task = new Task<>() {
             @Override
             protected UpdateStatus call() {
-                return UpdateCheck.check();
+                return updateCheck.get();
             }
         };
         task.setOnSucceeded(event -> settle(button, result, link, task.getValue()));
-        // UpdateCheck は投げない。それでも受けておく——ここで落とすと、押した人には
+        // 配布物が渡す UpdateCheck#check は投げない。それでも受けておく——ここで落とすと、押した人には
         // 「確認しています…」のまま何も起きない窓が残る（CLAUDE.md 優先順位 2）。
         task.setOnFailed(event -> settle(button, result, link, new UpdateStatus.Unavailable()));
 
