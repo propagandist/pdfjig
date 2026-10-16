@@ -518,9 +518,10 @@ gh api "repos/propagandist/pdfjig/code-scanning/alerts?ref=refs/heads/develop&st
     出た版数が [Releases](https://github.com/propagandist/pdfjig/releases/latest) の
     最新と一致すること。**新しい版があるときは「Releases を開く」が出て、
     押すと既定のブラウザがその版のページを開く**こと
-    ── **★ ここは CI で守られていない。** `UpdateCheckUiTest` は windows ランナーで走り、
-    **答えが 1 行出てボタンが戻るところまで**は見ているが、**その答えが正しいかは見ていない。**
-    ネットワークの有無で結果が変わるため、文言に依存しない形にしてある。
+    ── **★ ここは CI で守られていない。** `UpdateCheckUiTest` は**問い合わせる相手を偽物に
+    差し替えており、本物の GitHub へは出ない**（#176。本物へ出ていた間は、ランナーの通信の都合で
+    差分と関係なく落ちた）。**偽物の答えが文言どおり 1 行出て、ボタンが戻るところまで**は見ているが、
+    **本物が正しい版を返すかは誰も見ていない。** 遮断した側の本物の振る舞いも同じである（6 番）。
     **リンクの先も見られない。** `hostServices.showDocument` は OS へ渡す境界であり、
     `FileDialogs` と同じく自動テストの対象にできない（`.claude/rules/desktop-ui.md`）
     ── ★ **古い版で見るのがいちばん確か。** 手元のビルドは開発版なので
@@ -2127,6 +2128,9 @@ INSPECTION LOG 5 枚 / WORK ORDER 4 枚の計 12 ページである。**枚数�
     **文言そのものは `UpdateCheckTest` が縛る。**
     ★★ **そのぶん「答えが正しいか」は誰も見ていない。`docs/HANDOVER.md` 4-4 の 14 番に置いた**
     ——リンクの先も同じで、`hostServices.showDocument` は `FileDialogs` と同じ境界である
+    ★ **この箇条の「文言は見ない」は #176 で改めた。** 画面のテストは本物へ出なくなり、
+    問い合わせる相手を偽物に差し替えて、本物が返しようのない版を答えさせて文言まで見る。
+    **本物の通信を通るテストは無い**
   - ★ **プロキシの内側では確認できない。** Java は `java.net.useSystemProxies` を立てない限り
     Windows のプロキシ設定を読まず、**立てるのは既定の `ProxySelector` が作られる前でなければ
     効かない**——**書いた側から効いているかが見えない形**である（org `work-conventions.md`
