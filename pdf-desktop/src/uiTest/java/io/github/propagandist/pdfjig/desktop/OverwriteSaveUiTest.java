@@ -31,6 +31,37 @@ import org.testfx.framework.junit5.Stop;
  */
 class OverwriteSaveUiTest extends DesktopUiTest {
 
+    /**
+     * 仕事を始める前に置く間（ミリ秒）。
+     *
+     * <p><b>★★ 遅いランナーをここで作る</b>（#235）。CI の windows では、ファイルができてから
+     * 寄せ直しが終わるまでの間に、テストが次の操作を押すことがあった。手元の速さでは、
+     * その間がほとんど開かないので揺れとしてしか出ない。<b>寄せ直しを遅らせて、
+     * その間を毎回開ける。</b>待ち方が寄せ直しの終わりを見ていなければ、毎回落ちる。
+     *
+     * <p><b>待ち時間を延ばす吸収ではない</b>（{@code .claude/rules/ui-tests.md}）。
+     * 延ばすのは画面の側で、テストの待ちの上限は変えていない。
+     */
+    private static final long START_DELAY_MILLIS = 500;
+
+    @Override
+    BackgroundTasks tasks() {
+        return new BackgroundTasks(work -> {
+            Thread worker = new Thread(
+                    () -> {
+                        try {
+                            Thread.sleep(START_DELAY_MILLIS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        work.run();
+                    },
+                    "delayed-operation");
+            worker.setDaemon(true);
+            worker.start();
+        });
+    }
+
     @Start
     void start(Stage stage) {
         setUp(stage);
