@@ -1,11 +1,11 @@
 package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.TimeoutException;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,6 +30,41 @@ import org.testfx.framework.junit5.Stop;
  * 同じ指定をもう一度当てると<b>同じ変換が二重に掛かる。</b>
  */
 class OverwriteSaveUiTest extends DesktopUiTest {
+
+    /**
+     * 仕事を始める前に置く間（ミリ秒）。
+     *
+     * <p><b>★★ 遅いランナーをここで作る</b>（#235）。CI の windows では、ファイルができてから
+     * 寄せ直しが終わるまでの間に、テストが次の操作を押すことがあった。手元の速さでは、
+     * その間がほとんど開かないので揺れとしてしか出ない。<b>寄せ直しを遅らせて、
+     * その間を毎回開ける。</b>
+     * ★ <b>開けても、どのテストも落ちるわけではない。</b>直す前の待ち方で CI の windows に流すと、
+     * 6 本中 2 本が落ちた。落ちた場所は 2 回目の回転ではなく<b>次のテストの最初の「開く」</b>で、
+     * テストが終わった後も遅れた寄せ直しが走り、窓のクリックを奪ったと読んでいる
+     * （2026-10-16、run 38840368311。窓が出たことは記録で確かめていない）。
+     *
+     * <p><b>待ち時間を延ばす吸収ではない</b>（{@code .claude/rules/ui-tests.md}）。
+     * 延ばすのは画面の側で、テストの待ちの上限は変えていない。
+     */
+    private static final long START_DELAY_MILLIS = 500;
+
+    @Override
+    BackgroundTasks tasks() {
+        return new BackgroundTasks(work -> {
+            Thread worker = new Thread(
+                    () -> {
+                        try {
+                            Thread.sleep(START_DELAY_MILLIS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        work.run();
+                    },
+                    "delayed-operation");
+            worker.setDaemon(true);
+            worker.start();
+        });
+    }
 
     @Start
     void start(Stage stage) {
@@ -100,10 +135,11 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         saveOver(robot, document);
         assertEquals(List.of(0, 0, 90, 0), TestPdfs.rotationsOf(document), "1 回目が既に違う");
 
-        // 区切りが残っていることは状態行で見る。寄せ直しが終わるまでの待ちも兼ねる。
-        waitFor(() -> statusText(robot).contains("区切り 1 か所"));
+        // 区切りが残っていることは状態行で見る。寄せ直しの終わりは saveOver が待っている（#235）。
+        // ★ ここを待ちに使わない。区切りは寄せ直しの前から出ているので、前と後で同じ答えになる。
+        assertTrue(statusText(robot).contains("区切り 1 か所"), "寄せ直しで区切りが消えている");
 
-        // 選び直さずにもう一度回す。押せるようになるまで押し直す（寄せ直しの間は押せない）。
+        // 選び直さずにもう一度回す。届くまで押し直す（窓が前面に出ていないと取りこぼす）。
         clickUntilAccepted(robot, "#tool-rotate-right", () -> !statusText(robot).contains("未保存"));
         saveOver(robot, document);
 
@@ -137,8 +173,8 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         //   モーダルなので、閉じるまで画面は何も進まない——閉じないとテストごとハングする。
         clickWhenReady(robot, "#message-ok");
 
-        // 寄せ直しが終わると出どころは 1 つになる。この変化が、待ちの条件でもある。
-        waitFor(() -> statusText(robot).equals("3 / 3 ページ"));
+        // 寄せ直しが終わると出どころは 1 つになる。寄せ直しの終わりは saveOver が待っている（#235）。
+        assertEquals("3 / 3 ページ", statusText(robot), "寄せ直しで出どころが 1 つに寄っていない");
         assertEquals(List.of("A1", "A2", "B1"), pageTexts(document));
 
         // もう一度保存しても増えも減りもしない。出どころは 1 つになったので警告も出ない。
@@ -179,8 +215,9 @@ class OverwriteSaveUiTest extends DesktopUiTest {
      * <b>そこを通すには実物の PDF が要る</b>——{@code DocumentWriterTest} は
      * {@code move} までしか呼べない（あちらは PDF を持たない側である）。
      *
-     * <p><b>待つのは、後始末が書き出しの後ろで続くからである。</b>{@code saveOver} が
-     * 見ているのは出力先の更新時刻までで、作業場所を片づけるのはその先にある。
+     * <p><b>待たずに見る。</b>作業場所を片づけるのは書き出しの仕事の中であり
+     * （{@code DocumentWriter#assemble} の try-with-resources）、{@code saveOver} は
+     * その仕事と寄せ直しが終わるまで待つ（#235）。
      */
     @Test
     void 上書き保存のあとフォルダに隠しものが残らない(@TempDir Path dir, FxRobot robot) throws Exception {
@@ -194,13 +231,6 @@ class OverwriteSaveUiTest extends DesktopUiTest {
         // ★ 中身も見る。片づいたことだけを見ると、何も書けていない保存でも緑になる。
         assertEquals(List.of(90, 0), TestPdfs.rotationsOf(document), "書き出せていない");
 
-        // ★ 待つのは後始末が書き出しの後ろで続くからである。saveOver が見ているのは
-        //   出力先の更新時刻までで、作業場所を片づけるのはその先にある。
-        //   ★★ 上限で落ちるのは TimeoutException であり、理由は出ない。捕まえて書く。
-        try {
-            waitFor(() -> namesIn(dir).equals(List.of("doc.pdf")));
-        } catch (TimeoutException e) {
-            throw new AssertionError("置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）。残っているもの: " + namesIn(dir), e);
-        }
+        assertEquals(List.of("doc.pdf"), namesIn(dir), "置き換えの控えが残ると、作業場所ごと二度と片づかない（#119）");
     }
 }
