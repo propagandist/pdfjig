@@ -69,7 +69,7 @@ gh api repos/propagandist/.github/contents/docs/ci-strategy.md --jq .content | b
 **作業の型**・**文章の基準**の org 正本は、下の「作業の型」「文章の値」が指す（**軸が違う。CI と関係なく効く**）。
 **表側**（README の型・description・topics・既定ブランチ・Releases）は同 `docs/repo-surface-baseline.md`
 （**これらを触る前・版を切る前・public にする前に読む**）。**値はこのリポジトリが持つ。表側の値だけは逆で、正本が持つ**（揃っていること自体が目的）。
-ただし上の値と、Release 名の前半（版の表記）はこのリポジトリが持つ。
+ただし既定ブランチ（下の「作業の型」）と、Release 名の前半（版の表記。下の「マイルストーン」）はこのリポジトリが持つ。
 **正本が実態と合わないと気づいたら**、ここへ例外を書き足さない。リポジトリが変わっても同じなら
 `tinyrules/.github`（配り元から受け取ったものなら、その配り元）へ起票し、変わるなら値としてここに書く
 （分かれ目は同 `docs/work-conventions.md` §6）。★ **`propagandist/.github` は生成物なので起票しない**（読むのはそこでよい）。**規約の中身をここへ写さない。**
