@@ -5,17 +5,17 @@ import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.SecureRandom;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -155,7 +155,7 @@ final class OutputWorkspace implements AutoCloseable {
      * フォルダも改名できない</b>——差し替えるには、まずどけなければならない。
      * 保存に要る改名（作業場所への退避・出力先への移動）と、作業場所の中のほかのファイルの削除は通る。
      * <b>閉じたら消える形で開く</b>（{@code DELETE_ON_CLOSE}）——片づけでパスを引いて消さずに済み、
-     * プロセスが落ちても OS が閉じて消す。
+     * プロセスが落ちても、OS が手を閉じれば消える（電源断では残る。残ったものは次の書き出しが消す。{@link #inUse}）。
      * （2026-10-19 実測。Windows 10 の NTFS の C: と D: で、{@code pin} の削除・移動と、作業場所・
      * 出力先フォルダの改名は断られ、退避・移動・削除は通り、閉じた後に {@code pin} は無かった）
      *
@@ -182,10 +182,12 @@ final class OutputWorkspace implements AutoCloseable {
      *   <li>ほかの理由で開けないなら、差し替えられて開けない先を指していたのかもしれない。
      *       その場で確かめても、差し替えて戻されていれば見分けられない
      *   <li>開けても、差し替えて開かせてから元に戻されうる——そのとき {@code pin} は指す先にあり、
-     *       作業場所は押さえられていない。<b>だから乱数を書き、パスで読み直して同じかを見る</b>。
-     *       同じなら、いまパスが指すファイルは自分が開いているものであり、作業場所はもう動かせない
+     *       作業場所は押さえられていない。<b>だから、パスが指すファイルが自分の開いたものと同じかを見る</b>
+     *       （{@link #sameFile}）。中身で比べる形は採らない——押さえは読み取りを共有するので、
+     *       中身を写した偽物を置かれると見分けられない（#222 の門の 2 段目）
      * </ul>
-     * <b>止めても、開けたものは消さない</b>——消す時点で、また別の場所を指しているかもしれない。
+     * 止めるときは開いた手を閉じる。{@code pin} は手から消えるので（{@code DELETE_ON_CLOSE}）、
+     * パスを引いて別の場所のものを消すことはない。空の {@code .pdfjig-*} が残りうる。
      * 作りたての自分のディレクトリにファイルを 1 つ作れない場所では、保存そのものもできない。
      *
      * <p><b>Windows 以外では押さえない。</b>削除を共有しない開き方が無い。配布は Windows だけである。
@@ -209,18 +211,48 @@ final class OutputWorkspace implements AutoCloseable {
         } catch (IOException | UnsupportedOperationException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
-        byte[] mark = new byte[16];
-        new SecureRandom().nextBytes(mark);
+        boolean pinned;
         try {
-            channel.write(ByteBuffer.wrap(mark));
-            if (isOwnDirectory(workspace) && Arrays.equals(Files.readAllBytes(pin), mark)) {
-                return channel;
-            }
+            pinned = isOwnDirectory(workspace) && sameFile(channel, pin);
         } catch (IOException e) {
-            // 確かめられない。押さえたと言えないので、下で止める。
+            closeQuietly(channel);
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        } catch (RuntimeException | Error e) {
+            closeQuietly(channel);
+            throw e;
         }
+        if (pinned) {
+            return channel;
+        }
+        // 開けたのに作業場所の中に無い。差し替えられている。投げる例外には理由を載せられないので、ここに残す。
+        Logs.warn(LogEvent.WORKSPACE_NOT_PINNED);
         closeQuietly(channel);
         throw new PdfjigException(ErrorCode.IO_FAILURE);
+    }
+
+    /**
+     * {@code path} が指すファイルが、{@code held} で開いているものと同じか。
+     *
+     * <p><b>ロックの重なりで見る。</b>JDK は同じプロセスの中のロックを、ファイルの識別子
+     * （ボリュームとファイル番号）で突き合わせ、重なれば {@link OverlappingFileLockException} を投げる。
+     * {@code held} に排他のロックを掛けてから、パスで開いた別の手でロックを試す——
+     * <b>同じファイルならその場で投げ、別のファイルなら投げない</b>（ほかのプロセスが掛けたロックは
+     * 投げずに {@code null} で返る）。2026-10-19 実測。Windows 10 の C: と D: で、作業場所の {@code pin} は
+     * 同じ、中身を写したファイルは別のプロセスが開いていても別、と出た。
+     */
+    private static boolean sameFile(FileChannel held, Path path) throws IOException {
+        FileLock mine = held.lock(0, 1, false);
+        try (FileChannel check = FileChannel.open(path, StandardOpenOption.READ)) {
+            FileLock other = check.tryLock(0, 1, true);
+            if (other != null) {
+                other.release();
+            }
+            return false;
+        } catch (OverlappingFileLockException same) {
+            return true;
+        } finally {
+            mine.release();
+        }
     }
 
     private static void closeQuietly(FileChannel channel) {
@@ -415,7 +447,7 @@ final class OutputWorkspace implements AutoCloseable {
      * ふつうのファイルには触らない——こちらはディレクトリしか作らないので、それは他人のものである。
      *
      * <p><b>2 つ目の窓が同じフォルダへ同時に書いている場合、Windows ではその作業場所に触らない</b>
-     * （#222。{@link #inUse}）。<b>Windows 以外では消しうる。</b>
+     * （#222。{@link #inUse}）。<b>ただし作ってから押さえるまでの一瞬と、Windows 以外では消しうる。</b>
      * 書きかけのファイルは開かれているため実際には消せないことが多いが、消せたとしても
      * 起きるのは<b>あちらの保存が失敗すること</b>だけである。置き換えはまだ済んでいないので、
      * あちらの元のファイルは失われない（{@code CLAUDE.md} 優先順位 1）。
@@ -541,21 +573,29 @@ final class OutputWorkspace implements AutoCloseable {
      * あちらの仕事である。以前はここを見分けられず、あちらの書きかけを消しにいって
      * 「片づけられなかった」と記録し、退避の最中なら「控えが残っている」と伝えていた。
      *
-     * <p><b>消せたなら使われていない。</b>落ちた書き出しの {@code pin} は OS が閉じて消しているので、
-     * ここに在るのは第三者が置いたものである——消してよい。
+     * <p><b>消せたなら使われていない。</b>落ちた書き出しの {@code pin} は、閉じられていれば消えている
+     * （{@code DELETE_ON_CLOSE}）。<b>電源断では閉じられずに残る</b>——それも消してよい。
      *
-     * <p><b>★ 権限で断られたのは「使われている」ではない。</b>使っている窓が開いていれば、断りは
-     * 共有違反で来る（2026-10-19 実測。{@code AccessDeniedException} ではない {@code FileSystemException}）。
-     * 権限で断られるのは、消せない {@code pin} を第三者が置いたときである。<b>それを「使われている」と読むと、
-     * 落ちた書き出しの控えを知らせなくなる</b>——置くだけで黙らせられる。
+     * <p><b>★ 「使われている」と読むのは、ふつうのファイルを消そうとして共有違反で断られたときだけである。</b>
+     * 使っている窓が開いていれば、断りは {@code AccessDeniedException} ではない {@code FileSystemException} で来る
+     * （2026-10-19 実測）。<b>ほかの断りを「使われている」と読むと、置くだけで落ちた書き出しの控えを
+     * 知らせなくさせられる</b>——消せない {@code pin} を置かれる（権限で断られる）、
+     * 中身のあるディレクトリを {@code pin} の名前で置かれる（{@code DirectoryNotEmptyException}。ふつうのファイルでないものは見ずに通す。
+     * #222 の門の 2 段目で再現）。そのどちらでも、作業場所は消せずに残るが、控えは知らせる。
+     * ★ <b>第三者が置いた {@code pin} を開いたまま持ち続ければ、知らせを止められる</b>——
+     * 出力先でそのプロセスを動かし続けなければならない。
      */
     private static boolean inUse(Path directory) {
+        Path pin = directory.resolve(PIN);
+        if (!Files.isRegularFile(pin, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
         try {
-            Files.deleteIfExists(directory.resolve(PIN));
+            Files.delete(pin);
             return false;
-        } catch (AccessDeniedException notOurs) {
+        } catch (AccessDeniedException | NoSuchFileException notInUse) {
             return false;
-        } catch (IOException e) {
+        } catch (IOException sharingViolation) {
             return true;
         }
     }
