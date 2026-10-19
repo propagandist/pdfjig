@@ -343,6 +343,28 @@ class OutputWorkspaceTest {
     }
 
     /**
+     * 押さえの名前でものを置かれても、落ちた書き出しの控えは知らせる（#222 の門の 2 段目）。
+     *
+     * <p><b>「使われている」と読むのは、ふつうのファイルを消そうとして共有違反で断られたときだけである。</b>
+     * 中身のあるディレクトリを {@code pin} の名前で置かれると、消そうとして断られる。それを
+     * 「使われている」と読むと、置くだけで唯一の控えを知らせなくさせられる。
+     */
+    @Test
+    @DisplayName("押さえの名前でものを置かれても、落ちた書き出しの控えは知らせる")
+    void reportsTheCopyEvenWhenSomethingIsPlantedAsThePin(@TempDir Path directory) throws IOException {
+        Path kept = abandonedCopyIn(directory);
+        Files.writeString(
+                Files.createDirectories(kept.resolveSibling(OutputWorkspace.PIN))
+                        .resolve("x"),
+                "置かれたもの");
+
+        List<List<Path>> reported = new ArrayList<>();
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), reported::add).close();
+
+        assertEquals(List.of(List.of(kept)), reported, "置かれたものに黙らされて、唯一の控えを知らせていない");
+    }
+
+    /**
      * 押さえていても、保存に要る改名と削除は通る（#222）。
      *
      * <p>上書き保存は、出力先の元のファイルを作業場所へ退避し、書けたものを出力先へ移す。
