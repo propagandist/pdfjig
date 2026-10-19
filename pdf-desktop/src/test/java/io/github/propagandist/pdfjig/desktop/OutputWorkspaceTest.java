@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.nio.file.ExtendedOpenOption;
@@ -14,9 +15,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
@@ -278,6 +281,55 @@ class OutputWorkspaceTest {
             // ★ 残したまま終えない。@TempDir の後始末は walkFileTree で、ジャンクションを降りる。
             Files.deleteIfExists(planted);
         }
+    }
+
+    /**
+     * 保存の間、作業場所も出力先フォルダも改名できない（#222）。
+     *
+     * <p><b>作業場所は出力先フォルダの権限を引き継ぐ。</b>そこに書ける者は、保存の最中に作業場所を
+     * どけてジャンクションへ差し替えられる——新しい文書も、上書き保存で退避する利用者の元のファイルも、
+     * 指す先へ行く。<b>どけられなければ差し替えられない。</b>出力先フォルダも同じで、
+     * どけて同じ名前のジャンクションを置けば、作業場所ごと指す先へ移る。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("保存の間、作業場所も出力先フォルダも改名できない")
+    void pinsTheWorkspaceAndItsFolderWhileSaving(@TempDir Path directory) throws IOException {
+        Path out = Files.createDirectory(directory.resolve("out"));
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})) {
+            Path place = workspace.file().getParent();
+
+            assertThrows(
+                    FileSystemException.class,
+                    () -> Files.move(place, out.resolve("moved-away")),
+                    "保存の最中に作業場所をどけられる。どけた跡にジャンクションを置かれる");
+            assertThrows(
+                    FileSystemException.class,
+                    () -> Files.move(out, directory.resolve("moved-away")),
+                    "保存の最中に出力先フォルダをどけられる");
+        }
+    }
+
+    /**
+     * 押さえていても、保存に要る改名と削除は通る（#222）。
+     *
+     * <p>上書き保存は、出力先の元のファイルを作業場所へ退避し、書けたものを出力先へ移す。
+     * 押さえ方が改名をまとめて断る形だと、保存そのものができなくなる。
+     */
+    @Test
+    @DisplayName("押さえていても、保存に要る改名と削除は通る")
+    void stillLetsTheSaveMoveFilesInAndOut(@TempDir Path directory) throws IOException {
+        Path out = directory.resolve("out.pdf");
+        Files.writeString(out, "元");
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(out, found -> {})) {
+            Files.writeString(workspace.file(), "新");
+            Files.move(out, workspace.replaced(), StandardCopyOption.ATOMIC_MOVE);
+            Files.move(workspace.file(), out, StandardCopyOption.ATOMIC_MOVE);
+            Files.delete(workspace.replaced());
+        }
+
+        assertEquals("新", Files.readString(out));
+        assertEquals(List.of("out.pdf"), namesIn(directory), "作業場所が片づいていない");
     }
 
     /**
