@@ -29,6 +29,21 @@
 #   （reject-powershell-syntax.sh が全体を grep できるのは、探すのが `@'` + 改行という
 #   入力側には現れない並びだから。**同じ形を持ち込まない。**）
 #
+# ★ 見るのは書き込む側だけ（#85）。Edit の `old_string`（消す側）は落としてから見る——
+#   見ると、**入ってしまったパスを同じ経路で取り除けない。**
+#
+# ★ 整形された JSON でも同じ答えを出す（#85）。キーの後の空白と、構造の改行を許す。
+#   **整形された入力で file_path を落とし損ねると、絶対パスの file_path が本文に残り、
+#   settings.json への書き込みが例外なく止まる**——関門を外す変更すら通らない。
+#   実際に届く入力が整形されているかは確かめていない。**どちらでも同じ答えになる形にしてある。**
+#   文字列の中の改行は JSON 上で `\n` にエスケープされているので、空白へ寄せて落ちるのは
+#   構造の改行だけ。
+#
+# ★ Bash からの書き込み（`sed -i` など）は見ない（#85）。**取り違えを止める関門で、
+#   迂回を止めるものではない。** matcher に Bash を足すとコマンド全体が判定に掛かり、
+#   **パスを grep する作業まで止まる**。しかも Bash の matcher は `if` で絞れない
+#   （どちらも `.claude/rules/agent-settings.md` §3）。
+#
 # ★ jq に依存しない — Git Bash に jq は無い。sed と grep だけで書く。
 #
 # ★ 何を「手元固有」と見るか — 3 つだけ。**推測で増やさない。**
@@ -36,6 +51,8 @@
 #   2. 引用符か開き括弧の直後のドライブ表記（`"Read(//d/…` `"Bash(/d/…`）
 #   3. `/home/` と `/Users/`
 #   相対パス（`.claude/hooks/…`）と `${CLAUDE_PROJECT_DIR}` には当たらない。
+#   **WSL（`/mnt/d/…`）と UNC（`\\server\…`）にも当たらない。** 入った例を踏んでいないので
+#   足していない（判断の記録は #85）。**入ったら足す。**
 #
 # ★★ 1 の前に「英数字が来ないこと」を要求している。要求しないと **`https://` の `s:/` に当たる**
 #   ——`$schema` の URL を書いた瞬間に、正当な設定が拒否される（実際に踏みかけた）。
@@ -47,7 +64,12 @@
 
 input=$(cat)
 
-body=$(printf '%s' "$input" | sed 's/.*"tool_input"://; s/"file_path":"[^"]*"//')
+# JSON の文字列 1 つ（エスケープされた引用符を含んでよい）。
+str='"([^"\\]|\\.)*"'
+
+body=$(printf '%s' "$input" | tr '\r\n' '  ' | sed -E \
+  -e 's/.*"tool_input"[[:space:]]*://' \
+  -e "s/\"(file_path|old_string)\"[[:space:]]*:[[:space:]]*${str}//g")
 
 if printf '%s' "$body" | grep -qE '(^|[^A-Za-z0-9])[A-Za-z]:[\\/]|[("]/{1,2}[A-Za-z0-9]/|/(home|Users)/'; then
   cat >&2 <<'MSG'
@@ -59,7 +81,8 @@ if printf '%s' "$body" | grep -qE '(^|[^A-Za-z0-9])[A-Za-z]:[\\/]|[("]/{1,2}[A-Z
 - 手元だけで要るものは .claude/settings.local.json へ（あちらは commit しない）
 - リポジトリ内を指すなら相対パスか ${CLAUDE_PROJECT_DIR} を使う
 
-判断規約は docs/work-conventions.md の「エージェントの設定をどこへ書くか」。
+判断規約は org 正本（propagandist/.github）の docs/work-conventions.md
+「エージェントの設定をどこへ書くか」。
 MSG
   exit 2
 fi
