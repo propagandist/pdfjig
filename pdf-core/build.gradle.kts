@@ -16,7 +16,7 @@ plugins {
 //   PDFBox の 3.5 倍）、Dependabot の警告 2 件（log4j-api / commons-lang3）の出所も
 //   すべてここだった。使っていないものの CVE を見続ける理由がない。
 //   戻すときは gradle/libs.versions.toml の poi.ooxml をそのまま使い、
-//   pdf-desktop の runtimeModules に jdk.unsupported と jdk.xml.dom を足し直すこと。
+//   pdf-desktop の runtimeModules に jdk.xml.dom を足し直すこと（jdk.unsupported は #222 から載っている）。
 //   SPEC.md §85（Excel 出力 = SXSSF）は変えていない。仕様としての POI は残っている。
 dependencies {
     implementation(libs.pdfbox)

@@ -1,12 +1,19 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import com.sun.nio.file.ExtendedOpenOption;
 import io.github.propagandist.pdfjig.core.ErrorCode;
 import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,10 +83,20 @@ final class OutputWorkspace implements AutoCloseable {
      */
     private static final String HELD = "held";
 
+    /**
+     * 保存の間、作業場所を押さえておくために開いたままにするファイルの名前（#222。{@link #pin}）。
+     * 中身は空でよい。
+     */
+    static final String PIN = "pin";
+
     private final Path workspace;
 
-    private OutputWorkspace(Path workspace) {
+    /** {@link #PIN} を開いた手。押さえていなければ {@code null}（{@link #pin}）。 */
+    private final FileChannel pin;
+
+    private OutputWorkspace(Path workspace, FileChannel pin) {
         this.workspace = workspace;
+        this.pin = pin;
     }
 
     /**
@@ -97,9 +114,10 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>★ 作業場所を作る前に知らせる。</b>作れずに投げる回こそ、利用者がやり直している回である
      * ——後に置くと、そこで見つけたものが黙って落ちる。
      *
-     * <p><b>★ 別の窓がいま使っている作業場所も拾いうる。</b>元をどけてから入れ替えるまでの間
-     * （{@code DocumentWriter#move}）は、落ちた後と同じ形をしている。<b>その間は 2 本の改名だけで
-     * 極めて短い</b>ので、見分ける仕掛けは置いていない。伝える文言が「開いて確かめる」よう促すのは
+     * <p><b>★ 別の窓がいま使っている作業場所は、Windows では拾わない</b>（#222。{@link #inUse}）。
+     * それより前は拾いえた——元をどけてから入れ替えるまでの間（{@code DocumentWriter#move}）は、
+     * 落ちた後と同じ形をしている。<b>Windows 以外では今も拾いうる</b>（押さえないため）。
+     * 伝える文言が「開いて確かめる」よう促すのは
      * そのためでもある（{@code Messages#describeAbandoned}）。
      *
      * <p><b>★★ 知らせない版を置かない。</b>置くと、作業場所を開く口が 2 つ目に足された日に
@@ -115,10 +133,133 @@ final class OutputWorkspace implements AutoCloseable {
         if (!found.isEmpty()) {
             abandoned.accept(found);
         }
+        Path created;
         try {
-            return new OutputWorkspace(Files.createTempDirectory(directory, PREFIX));
+            created = Files.createTempDirectory(directory, PREFIX);
         } catch (IOException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        }
+        return new OutputWorkspace(created, pin(created));
+    }
+
+    /**
+     * 保存の間、作業場所とその上のフォルダを改名できなくする（#222）。
+     *
+     * <p><b>★★ なぜ要るのか。</b>Windows では、作業場所は出力先フォルダの権限を引き継ぐ。
+     * 出力先に書ける者は、保存の最中に作業場所をジャンクションへ差し替えられる。
+     * {@link #file} も {@link #replaced} もパスで引き直すので、<b>新しい文書は指す先へ書かれ、
+     * 上書き保存なら利用者の元のファイルが指す先へ退避される</b>——利用者の選んでいない場所に残る。
+     *
+     * <p><b>作業場所の中のファイル（{@link #PIN}）を、削除を共有しない形で開いたままにする。</b>
+     * 開いている間は、<b>その {@code pin} を消すことも動かすこともできず、作業場所も、その実体の上の
+     * フォルダも改名できない</b>——差し替えるには、まずどけなければならない。
+     * 保存に要る改名（作業場所への退避・出力先への移動）と、作業場所の中のほかのファイルの削除は通る。
+     * <b>閉じたら消える形で開く</b>（{@code DELETE_ON_CLOSE}）——片づけでパスを引いて消さずに済み、
+     * プロセスが落ちても、OS が手を閉じれば消える（電源断では残る。残ったものは次の書き出しが消す。{@link #inUse}）。
+     * （2026-10-19 実測。Windows 10 の NTFS の C: と D: で、{@code pin} の削除・移動と、作業場所・
+     * 出力先フォルダの改名は断られ、退避・移動・削除は通り、閉じた後に {@code pin} は無かった）
+     *
+     * <p><b>★ 効く範囲。</b>確かめたのは NTFS（上の実測）と、Windows の共有（{@code \\localhost\C$}。#222 の門のレビューが実測）である。
+     * <b>Samba の NAS では効かない見込みがある</b>（既定の {@code strict rename = no} では、
+     * ほかのクライアントからの改名を断らない。確かめていない）。そのときも開けはするので、
+     * 押さえられていないことは分からない。
+     * <b>保存先のパスの途中にあるジャンクションは押さえられない</b>——押さえが掛かるのは実体の側で、
+     * リンクそのものは向け直せる。それには、そのリンクを置いたフォルダに書けなければならない。
+     *
+     * <p><b>権限で絞る形は採らなかった。</b>作業場所を持ち主だけの DACL で作る形を作ったが、
+     * JDK の ACL の口は汎用の権限（{@code GENERIC_*}）を読めず、親の ACE を写すと中身が空になる——
+     * 2 台目のドライブの既定の ACL を受け継ぐフォルダ（{@code D:\work} など）では、
+     * 保存が毎回 {@code AccessDenied} で失敗した（#222 の門の 2 段目で再現）。
+     *
+     * <p><b>★ 中に置かれることは止めない。</b>出力先に書ける者は、作業場所の中にも書ける。
+     * 組み立てている間に {@code output.pdf} を先に置かれると、pdf-core はそれを切り詰めて書き、
+     * <b>置いた者の権限を持ったまま出力先へ移る</b>。退避先を先に置かれても、退避が黙って置き換える。
+     * <b>どちらも、出力先に書ける者が保存した後のファイルに対して元から持っている権限を越えない</b>。
+     *
+     * <p><b>★★ 開けなかったら、また開いた {@code pin} が作業場所の中に無かったら、保存を止める。</b>
+     * <ul>
+     *   <li>作りたての空のディレクトリで「既にある」と言われたなら、割り込まれている
+     *   <li>ほかの理由で開けないなら、差し替えられて開けない先を指していたのかもしれない。
+     *       その場で確かめても、差し替えて戻されていれば見分けられない
+     *   <li>開けても、差し替えて開かせてから元に戻されうる——そのとき {@code pin} は指す先にあり、
+     *       作業場所は押さえられていない。<b>だから、パスが指すファイルが自分の開いたものと同じかを見る</b>
+     *       （{@link #sameFile}）。中身で比べる形は採らない——押さえは読み取りを共有するので、
+     *       中身を写した偽物を置かれると見分けられない（#222 の門の 2 段目）
+     * </ul>
+     * 止めるときは開いた手を閉じる。{@code pin} は手から消えるので（{@code DELETE_ON_CLOSE}）、
+     * パスを引いて別の場所のものを消すことはない。空の {@code .pdfjig-*} が残りうる。
+     * 作りたての自分のディレクトリにファイルを 1 つ作れない場所では、保存そのものもできない。
+     *
+     * <p><b>Windows 以外では押さえない。</b>削除を共有しない開き方が無い。配布は Windows だけである。
+     *
+     * @return 開いた手。押さえなかったなら {@code null}
+     * @throws PdfjigException {@link ErrorCode#IO_FAILURE}。押さえられなかった
+     */
+    private static FileChannel pin(Path workspace) {
+        if (!System.getProperty("os.name", "").startsWith("Windows")) {
+            return null;
+        }
+        Path pin = workspace.resolve(PIN);
+        FileChannel channel;
+        try {
+            channel = FileChannel.open(
+                    pin,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.DELETE_ON_CLOSE,
+                    ExtendedOpenOption.NOSHARE_DELETE);
+        } catch (IOException | UnsupportedOperationException e) {
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        }
+        boolean pinned;
+        try {
+            pinned = isOwnDirectory(workspace) && sameFile(channel, pin);
+        } catch (IOException e) {
+            closeQuietly(channel);
+            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        } catch (RuntimeException | Error e) {
+            closeQuietly(channel);
+            throw e;
+        }
+        if (pinned) {
+            return channel;
+        }
+        // 開けたのに作業場所の中に無い。差し替えられている。投げる例外には理由を載せられないので、ここに残す。
+        Logs.warn(LogEvent.WORKSPACE_NOT_PINNED);
+        closeQuietly(channel);
+        throw new PdfjigException(ErrorCode.IO_FAILURE);
+    }
+
+    /**
+     * {@code path} が指すファイルが、{@code held} で開いているものと同じか。
+     *
+     * <p><b>ロックの重なりで見る。</b>JDK は同じプロセスの中のロックを、ファイルの識別子
+     * （ボリュームとファイル番号）で突き合わせ、重なれば {@link OverlappingFileLockException} を投げる。
+     * {@code held} に排他のロックを掛けてから、パスで開いた別の手でロックを試す——
+     * <b>同じファイルならその場で投げ、別のファイルなら投げない</b>（ほかのプロセスが掛けたロックは
+     * 投げずに {@code null} で返る）。2026-10-19 実測。Windows 10 の C: と D: で、作業場所の {@code pin} は
+     * 同じ、中身を写したファイルは別のプロセスが開いていても別、と出た。
+     */
+    private static boolean sameFile(FileChannel held, Path path) throws IOException {
+        FileLock mine = held.lock(0, 1, false);
+        try (FileChannel check = FileChannel.open(path, StandardOpenOption.READ)) {
+            FileLock other = check.tryLock(0, 1, true);
+            if (other != null) {
+                other.release();
+            }
+            return false;
+        } catch (OverlappingFileLockException same) {
+            return true;
+        } finally {
+            mine.release();
+        }
+    }
+
+    private static void closeQuietly(FileChannel channel) {
+        try {
+            channel.close();
+        } catch (IOException e) {
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
         }
     }
 
@@ -254,10 +395,42 @@ final class OutputWorkspace implements AutoCloseable {
         }
     }
 
-    /** 作業場所を片づける。消せなくても保存は失敗させない。 */
+    /**
+     * 押さえを放すだけで、片づけない。<b>落ちた書き出しを作るテストだけが呼ぶ。</b>
+     *
+     * <p>プロセスが落ちれば、開いていた手は OS が閉じる。同じプロセスの中のテストは、
+     * 放さないと次の書き出しがそれを片づけられない（{@link #pin}）。
+     */
+    void leaveBehind() {
+        release();
+    }
+
+    /** 押さえを放す。押さえていなければ何もしない。 */
+    private void release() {
+        if (pin != null) {
+            closeQuietly(pin);
+        }
+    }
+
+    /**
+     * 作業場所を片づける。消せなくても保存は失敗させない。
+     *
+     * <p><b>★ 押さえたまま中を消し、放してから作業場所を消す</b>（#222）。先に放すと、片づけの間に
+     * 作業場所をジャンクションへ差し替えられ、中の名前が指す先で消えうる（#125 の形）。
+     * 放せば {@code pin} は閉じたときに消える（{@link #pin}）。その後に消すのは作業場所そのものだけで、
+     * 差し替えられていれば消えるのはリンクである。
+     */
     @Override
     public void close() {
-        discard(workspace);
+        try {
+            if (isOwnDirectory(workspace) && !holdsTheOnlyCopy(workspace)) {
+                deleteContents(workspace);
+                release();
+                deleteQuietly(workspace);
+            }
+        } finally {
+            release();
+        }
     }
 
     /**
@@ -273,7 +446,8 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>消すのは、こちらが作る名前のディレクトリだけである。</b> 同じ名前の頭を持つ
      * ふつうのファイルには触らない——こちらはディレクトリしか作らないので、それは他人のものである。
      *
-     * <p><b>2 つ目の窓が同じフォルダへ同時に書いている場合、その作業場所を消しうる。</b>
+     * <p><b>2 つ目の窓が同じフォルダへ同時に書いている場合、Windows ではその作業場所に触らない</b>
+     * （#222。{@link #inUse}）。<b>ただし作ってから押さえるまでの一瞬と、Windows 以外では消しうる。</b>
      * 書きかけのファイルは開かれているため実際には消せないことが多いが、消せたとしても
      * 起きるのは<b>あちらの保存が失敗すること</b>だけである。置き換えはまだ済んでいないので、
      * あちらの元のファイルは失われない（{@code CLAUDE.md} 優先順位 1）。
@@ -290,8 +464,8 @@ final class OutputWorkspace implements AutoCloseable {
         try (Stream<Path> entries = Files.list(directory)) {
             // 名前で絞ってから discard に渡す。discard は 1 件ごとに属性を読むので、
             // 逆にすると出力先フォルダの全エントリぶん走る。
-            // ★ リンクかどうかはここで見ない。discard の関門が見る（#125）——呼ぶ側に置くと、
-            //   close() のように discard を直に呼ぶ口が、その関門を通らない。
+            // ★ リンクかどうかはここで見ない。discard の関門が見る（#125）。
+            //   close() は押さえたまま中を消すので discard を通らないが、同じ関門を自分で通る。
             entries.filter(entry -> entry.getFileName().toString().startsWith(PREFIX))
                     .forEach(entry -> {
                         // ★ 残したものは拾う（#138）。関門は discard の側に置いたままにする。
@@ -347,8 +521,8 @@ final class OutputWorkspace implements AutoCloseable {
      *   <li><b>控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）
      * </ul>
      *
-     * <p><b>★★ 中は pdfjig が作る 3 つの名前だけを消す</b>（#125）——{@link #NAME} / {@link #REPLACED} /
-     * {@link #HELD}。<b>一覧を取らない。</b>
+     * <p><b>★★ 中は pdfjig が作る 4 つの名前だけを消す</b>（#125）——{@link #NAME} / {@link #REPLACED} /
+     * {@link #HELD} / {@link #PIN}。<b>一覧を取らない。</b>
      * <ul>
      *   <li><b>{@link Files#walk} は使わない。</b>既定で {@code FOLLOW_LINKS} を付けていなくても、
      *       Windows のディレクトリジャンクションを降りる——出力先に書ける第三者が作業場所の中に
@@ -359,7 +533,7 @@ final class OutputWorkspace implements AutoCloseable {
      *       指す先で消える</b>。Windows の NIO にはハンドルを起点に消す手（{@code SecureDirectoryStream}）が無い。
      *       辿る形は、再帰の深さを第三者に決めさせて {@code StackOverflowError} で保存ごと落ちた
      *       （7,000 階層前後。#125 の {@code /code-review max} で再現）
-     *   <li><b>決まった名前だけなら、すり替えに勝たれても消えうるのはその 3 つの名前だけで、
+     *   <li><b>決まった名前だけなら、すり替えに勝たれても消えうるのはその 4 つの名前だけで、
      *       第三者は名前を選べない。</b>
      *   <li><b>ほかのものがあれば、作業場所は消せずに残り、記録される</b>——pdfjig が作らないもので
      *       あり、正体の分からないものを消さない側へ倒す（{@code CLAUDE.md} 優先順位 1）
@@ -373,17 +547,57 @@ final class OutputWorkspace implements AutoCloseable {
      * @return 控えを抱えていて、残したなら {@code true}
      */
     private static boolean discard(Path directory) {
-        if (!isOwnDirectory(directory)) {
+        if (!isOwnDirectory(directory) || inUse(directory)) {
             return false;
         }
         if (holdsTheOnlyCopy(directory)) {
             return true;
         }
+        deleteContents(directory);
+        deleteQuietly(directory);
+        return false;
+    }
+
+    /** pdfjig が作業場所の中に作る名前を消す。{@link #PIN} は閉じたときに消えるので、ここでは触らない。 */
+    private static void deleteContents(Path directory) {
         deleteQuietly(directory.resolve(NAME));
         deleteQuietly(directory.resolve(REPLACED));
         deleteQuietly(directory.resolve(HELD));
-        deleteQuietly(directory);
-        return false;
+    }
+
+    /**
+     * 別の窓がいま使っている作業場所か（#222）。
+     *
+     * <p><b>使っている窓は {@link #PIN} を、削除を共有せずに開いている</b>（{@link #pin}）。
+     * 消せなければ使われている——<b>触らず、知らせもしない</b>。片づけるのも、控えを伝えるのも、
+     * あちらの仕事である。以前はここを見分けられず、あちらの書きかけを消しにいって
+     * 「片づけられなかった」と記録し、退避の最中なら「控えが残っている」と伝えていた。
+     *
+     * <p><b>消せたなら使われていない。</b>落ちた書き出しの {@code pin} は、閉じられていれば消えている
+     * （{@code DELETE_ON_CLOSE}）。<b>電源断では閉じられずに残る</b>——それも消してよい。
+     *
+     * <p><b>★ 「使われている」と読むのは、ふつうのファイルを消そうとして共有違反で断られたときだけである。</b>
+     * 使っている窓が開いていれば、断りは {@code AccessDeniedException} ではない {@code FileSystemException} で来る
+     * （2026-10-19 実測）。<b>ほかの断りを「使われている」と読むと、置くだけで落ちた書き出しの控えを
+     * 知らせなくさせられる</b>——消せない {@code pin} を置かれる（権限で断られる）、
+     * 中身のあるディレクトリを {@code pin} の名前で置かれる（{@code DirectoryNotEmptyException}。ふつうのファイルでないものは見ずに通す。
+     * #222 の門の 2 段目で再現）。そのどちらでも、作業場所は消せずに残るが、控えは知らせる。
+     * ★ <b>第三者が置いた {@code pin} を開いたまま持ち続ければ、知らせを止められる</b>——
+     * 出力先でそのプロセスを動かし続けなければならない。
+     */
+    private static boolean inUse(Path directory) {
+        Path pin = directory.resolve(PIN);
+        if (!Files.isRegularFile(pin, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        try {
+            Files.delete(pin);
+            return false;
+        } catch (AccessDeniedException | NoSuchFileException notInUse) {
+            return false;
+        } catch (IOException sharingViolation) {
+            return true;
+        }
     }
 
     /**
