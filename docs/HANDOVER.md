@@ -1041,8 +1041,8 @@ CVE を見る責任があるという意味**である。使っていないも�
 
 1. `pdf-core/build.gradle.kts` に `implementation(libs.poi.ooxml)` を足す
    （`gradle/libs.versions.toml` の `poi-ooxml` は座標として残してある）
-2. `pdf-desktop/build.gradle.kts` の `runtimeModules` に `jdk.unsupported` と
-   `jdk.xml.dom` を足す。**これを忘れると jlink 後のアプリが実行時に落ちる**
+2. `pdf-desktop/build.gradle.kts` の `runtimeModules` に `jdk.xml.dom` を足す。**これを忘れると jlink 後のアプリが実行時に落ちる**
+   （`jdk.unsupported` は #222 から載っている）
 3. **`ArchitectureTest` の入れ子クラス `Poi` から `@Disabled` を外す。**
    POI がクラスパスに無い間、あのルールは常に真になる（下の「ルールの空振り」）
 4. `XSSFWorkbook` ではなく **SXSSF を使う**（`.claude/rules/modules-and-invariants.md`「リソース管理」）

@@ -179,9 +179,14 @@ val upgradeUuid = "3210BCE4-3635-4EFC-8EC1-DC77881091BB"
  *   無しは SSLHandshakeException（handshake_failure）、有りは 302 が返る。
  *   ランタイムイメージは 60,683,709 → 60,792,795 バイト（+109,086）
  *
- * ★ jdk.unsupported（POI の sun.misc.Unsafe）と jdk.xml.dom（xmlbeans）は
- *   2026-08-22 に外した。POI の宣言そのものを M1 まで外したため
- *   （理由は pdf-core/build.gradle.kts）。**POI を戻すときは、この 2 つも戻すこと。**
+ * - jdk.unsupported — com.sun.nio.file.ExtendedOpenOption（保存の間、作業場所を押さえる。#222）。
+ *   ★ いまは javafx.graphics が requires しているので、ここから外しても jlink は入れる
+ *   （#222 の門で、外す前と後のイメージが同じであることを確かめた）。
+ *   **それでも直に使うので明示する**——java.desktop を javafx.swing の推移に頼らないのと同じ理由である
+ *
+ * ★ jdk.xml.dom（xmlbeans）は 2026-08-22 に外した。POI の宣言そのものを M1 まで外したため
+ *   （理由は pdf-core/build.gradle.kts）。**POI を戻すときは、これも戻すこと。**
+ *   同じ日に外した jdk.unsupported（POI の sun.misc.Unsafe）は、#222 で上のとおり戻した。
  */
 val runtimeModules =
     listOf(
@@ -193,6 +198,7 @@ val runtimeModules =
         "java.xml.crypto",
         "jdk.crypto.ec",
         "jdk.localedata",
+        "jdk.unsupported",
         "javafx.base",
         "javafx.graphics",
         "javafx.controls",

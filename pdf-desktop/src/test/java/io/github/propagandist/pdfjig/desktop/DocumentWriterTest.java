@@ -17,8 +17,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.DosFileAttributeView;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -302,9 +304,22 @@ class DocumentWriterTest {
      * <p><b>閉じない。</b>{@code @TempDir} が片づける。ここで見たいのは
      * {@link DocumentWriter#move} だけで、作業場所の後始末は別のテストが持つ
      * （{@code OutputWorkspaceTest}）。
+     *
+     * <p><b>★ 押さえたまま移させる</b>（#222）——保存の間はそうなっている。押さえはテストの後で放す
+     * （{@link #releasePins}）。放さないと、{@code @TempDir} が作業場所を消せない。
      */
-    private static OutputWorkspace workspaceFor(Path target) {
-        return OutputWorkspace.nextTo(target, found -> {});
+    private OutputWorkspace workspaceFor(Path target) {
+        OutputWorkspace workspace = OutputWorkspace.nextTo(target, found -> {});
+        pinned.add(workspace);
+        return workspace;
+    }
+
+    /** {@link #workspaceFor} が作った作業場所。 */
+    private final List<OutputWorkspace> pinned = new ArrayList<>();
+
+    @AfterEach
+    void releasePins() {
+        pinned.forEach(OutputWorkspace::leaveBehind);
     }
 
     /**

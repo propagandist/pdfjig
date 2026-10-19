@@ -52,8 +52,11 @@ class OutputWorkspaceTest {
         Files.createFile(directory.resolve("someone-else.txt"));
 
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
-            assertEquals(
-                    List.of(), namesIn(workspace.file().getParent()), "書き込み先の隣に他人のものがあるなら、その名前は他人にも用意できる（CWE-377）");
+            // 保存の間の押さえ（#222。Windows でだけ置く）は pdfjig が置いたものである。
+            List<String> others = namesIn(workspace.file().getParent()).stream()
+                    .filter(name -> !name.equals(OutputWorkspace.PIN))
+                    .toList();
+            assertEquals(List.of(), others, "書き込み先の隣に他人のものがあるなら、その名前は他人にも用意できる（CWE-377）");
         }
     }
 
@@ -226,7 +229,7 @@ class OutputWorkspaceTest {
      * 付けていなくても、Windows のジャンクションを降りる。<b>競合を要らない</b>——置いておけば、
      * 次の保存で必ず走る（#125 の本文）。
      *
-     * <p><b>ジャンクションも作業場所も残る</b>——片づけるのは pdfjig が作る 3 つの名前だけである。
+     * <p><b>ジャンクションも作業場所も残る</b>——片づけるのは pdfjig が作る 4 つの名前だけである。
      * 一覧を取って消す形は、作業場所ごとすり替えられると、第三者が選んだ名前を指す先で消す（#125 の門）。
      */
     @Test
@@ -236,9 +239,7 @@ class OutputWorkspaceTest {
         Path precious = preciousOutside(directory);
         Path out = Files.createDirectory(directory.resolve("out"));
         // ★ 名前を手で組まない。pdfjig が作ったものと同じ名前でなければ、この筋を通ったことにならない。
-        Path leftover = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})
-                .file()
-                .getParent();
+        Path leftover = leftBehind(out.resolve("out.pdf")).file().getParent();
         junction(leftover.resolve("link"), precious.getParent());
 
         OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {}).close();
@@ -267,9 +268,7 @@ class OutputWorkspaceTest {
         Path precious = preciousOutside(directory);
         Path out = Files.createDirectory(directory.resolve("out"));
         // ★ 名前を手で組まない。作った作業場所を空けて、同じ名前でジャンクションに差し替える。
-        Path planted = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})
-                .file()
-                .getParent();
+        Path planted = leftBehind(out.resolve("out.pdf")).file().getParent();
         Files.delete(planted);
         junction(planted, precious.getParent());
         try {
@@ -307,6 +306,39 @@ class OutputWorkspaceTest {
                     FileSystemException.class,
                     () -> Files.move(out, directory.resolve("moved-away")),
                     "保存の最中に出力先フォルダをどけられる");
+
+            // ★ 押さえそのものを消させない。改名を断るだけなら削除を共有する開き方でも足りるが、
+            //   それだと pin を消してから作業場所をどけられる（#222 の門で再現）。
+            Path pin = place.resolve(OutputWorkspace.PIN);
+            assertTrue(Files.exists(pin), "押さえのファイルが無い");
+            assertThrows(FileSystemException.class, () -> Files.delete(pin), "保存の最中に押さえのファイルを消せる");
+        }
+        assertEquals(List.of(), namesIn(out), "放した後に作業場所が片づいていない");
+    }
+
+    /**
+     * 別の窓がいま使っている作業場所には触らず、控えとしても知らせない（#222）。
+     *
+     * <p><b>退避と入れ替えの間にいる窓は、落ちた後と同じ形をしている。</b>見分けられないと、
+     * あちらの退避した元を「前の保存が残した控え」と伝え、書きかけを消しにいって
+     * 「片づけられなかった」と記録する。<b>使っている窓は押さえを開いているので、それで見分ける。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("別の窓がいま使っている作業場所には触らず、控えとしても知らせない")
+    void leavesAWorkspaceAnotherWindowIsUsing(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace busy = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            busy.holdOriginal();
+            Files.writeString(busy.replaced(), "あちらの元のファイル");
+            Files.writeString(busy.file(), "あちらの書きかけ");
+
+            List<List<Path>> reported = new ArrayList<>();
+            OutputWorkspace.nextTo(directory.resolve("other.pdf"), reported::add)
+                    .close();
+
+            assertEquals(List.of(), reported, "使っている窓の退避を、落ちた後の控えとして伝えている");
+            assertEquals("あちらの書きかけ", Files.readString(busy.file()), "使っている窓の書きかけに触っている");
+            busy.releaseOriginal();
         }
     }
 
@@ -335,7 +367,7 @@ class OutputWorkspaceTest {
     /**
      * 作業場所の中の、pdfjig が作らないものには触らない（#125）。
      *
-     * <p><b>pdfjig が作業場所に作るのは 3 つのファイルだけである。</b>ほかのものがあるなら第三者が置いたもので、
+     * <p><b>pdfjig が作業場所に作るのは 4 つのファイルだけである。</b>ほかのものがあるなら第三者が置いたもので、
      * 中を辿ると深さを決められ（再帰が溢れて保存ごと落ちた）、一覧を取って消すと、作業場所ごと
      * すり替えられたときに、置いた名前が指す先で消える。<b>触らない。</b>作業場所も残る。
      */
@@ -343,9 +375,7 @@ class OutputWorkspaceTest {
     @DisplayName("作業場所の中の、pdfjig が作らないものには触らない")
     void doesNotDescendIntoADirectoryInsideTheWorkspace(@TempDir Path directory) throws IOException {
         Path out = Files.createDirectory(directory.resolve("out"));
-        Path leftover = OutputWorkspace.nextTo(out.resolve("out.pdf"), found -> {})
-                .file()
-                .getParent();
+        Path leftover = leftBehind(out.resolve("out.pdf")).file().getParent();
         Path planted = Files.writeString(
                 Files.createDirectories(leftover.resolve("planted").resolve("deeper"))
                         .resolve("x.txt"),
@@ -572,7 +602,7 @@ class OutputWorkspaceTest {
         // 保存中に JVM ごと落ち、後始末が走らないまま残った形を作る——開いて書き、閉じない。
         // ★ 名前も中身も手で組まない。片づけるのは pdfjig が作る名前だけなので（#125）、
         //   手で組んだ中身だと、残った理由が「片づけていない」のか「知らない名前だから」なのか読めない。
-        OutputWorkspace left = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
+        OutputWorkspace left = leftBehind(directory.resolve("out.pdf"));
         Path abandoned = left.file().getParent();
         Files.writeString(left.file(), "書きかけ");
 
@@ -607,9 +637,21 @@ class OutputWorkspaceTest {
      * @return 抱えられている控え
      */
     private static Path abandonedCopyIn(Path directory) throws IOException {
-        OutputWorkspace abandoned = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
+        OutputWorkspace abandoned = leftBehind(directory.resolve("out.pdf"));
         abandoned.holdOriginal();
         return Files.writeString(abandoned.replaced(), "元のファイル");
+    }
+
+    /**
+     * 落ちた書き出しが残した作業場所を作る。<b>名前も中身も pdfjig が作るとおりにする。</b>
+     *
+     * <p><b>★ 押さえを放す</b>（#222）。プロセスが落ちれば開いていた手は OS が閉じるが、
+     * テストは同じプロセスの中なので、放さないと次の書き出しがそれを片づけられない。
+     */
+    private static OutputWorkspace leftBehind(Path output) {
+        OutputWorkspace workspace = OutputWorkspace.nextTo(output, found -> {});
+        workspace.leaveBehind();
+        return workspace;
     }
 
     /** フォルダの直下にある名前を並べる。 */
