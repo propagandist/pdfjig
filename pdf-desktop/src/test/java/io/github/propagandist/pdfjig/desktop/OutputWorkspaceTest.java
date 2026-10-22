@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.desktop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -613,9 +614,11 @@ class OutputWorkspaceTest {
         OutputWorkspace other = leftBehind(directory.resolve("out.pdf"));
         Path place = other.file().getParent();
         FileChannel[] pinned = {null};
+        boolean[] ran = {false};
 
         try {
             OutputWorkspace.discard(place, () -> {
+                ran[0] = true;
                 try {
                     pinned[0] = FileChannel.open(
                             place.resolve(OutputWorkspace.PIN),
@@ -637,9 +640,10 @@ class OutputWorkspaceTest {
                 }
             });
 
-            if (pinned[0] != null) {
-                assertTrue(Files.exists(other.replaced()), "別の窓が退避した元を、片づけが消している");
-            }
+            assertTrue(ran[0], "消すと決めた後の口が走っていない。割り込みを組めていない");
+            assertTrue(pinned[0] == null || Files.exists(other.replaced()), "別の窓が退避した元を、片づけが消している");
+            assertNull(pinned[0], "片づける側が押さえないまま消し始めている。別の窓が押さえて退避できる");
+            assertFalse(Files.exists(place), "押さえて片づけた作業場所が残っている");
         } finally {
             if (pinned[0] != null) {
                 pinned[0].close();
