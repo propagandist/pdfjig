@@ -442,13 +442,25 @@ final class OutputWorkspace implements AutoCloseable {
     public void close() {
         try {
             if (isOwnDirectory(workspace) && !holdsTheOnlyCopy(workspace)) {
-                deleteContents(workspace);
-                release();
-                deleteQuietly(workspace);
+                deletePinned(workspace, pin);
             }
         } finally {
             release();
         }
+    }
+
+    /**
+     * 押さえたまま中を消し、放してから作業場所を消す。順の理由は {@link #close} にある。
+     * {@link #discard} も同じ順で消す（#139）。
+     *
+     * @param pin 押さえている手。押さえていなければ {@code null}
+     */
+    private static void deletePinned(Path directory, FileChannel pin) {
+        deleteContents(directory);
+        if (pin != null) {
+            closeQuietly(pin);
+        }
+        deleteQuietly(directory);
     }
 
     /**
@@ -601,20 +613,18 @@ final class OutputWorkspace implements AutoCloseable {
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
             return holdsTheOnlyCopy(directory);
         }
-        // ★ 押さえたまま中を消し、放してから作業場所を消す（close と同じ順）。
         try {
             if (holdsTheOnlyCopy(directory)) {
                 return true;
             }
             decided.run();
-            deleteContents(directory);
+            deletePinned(directory, claim);
+            return false;
         } finally {
             if (claim != null) {
                 closeQuietly(claim);
             }
         }
-        deleteQuietly(directory);
-        return false;
     }
 
     /** pdfjig が作業場所の中に作る名前を消す。{@link #PIN} は閉じたときに消えるので、ここでは触らない。 */
