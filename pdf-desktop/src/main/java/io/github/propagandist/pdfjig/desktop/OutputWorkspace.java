@@ -547,12 +547,25 @@ final class OutputWorkspace implements AutoCloseable {
      * @return 控えを抱えていて、残したなら {@code true}
      */
     private static boolean discard(Path directory) {
+        return discard(directory, () -> {});
+    }
+
+    /**
+     * {@link #discard(Path)} の本体。
+     *
+     * <p><b>package-private なのはテストのためである</b>（{@code OutputWorkspaceTest}）。
+     * 別の窓が割り込む順序を、手で組む（#139）。
+     *
+     * @param decided 消すと決めてから、消し始めるまでの間に走る。本番では何もしない
+     */
+    static boolean discard(Path directory, Runnable decided) {
         if (!isOwnDirectory(directory) || inUse(directory)) {
             return false;
         }
         if (holdsTheOnlyCopy(directory)) {
             return true;
         }
+        decided.run();
         deleteContents(directory);
         deleteQuietly(directory);
         return false;
