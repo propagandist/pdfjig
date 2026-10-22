@@ -142,18 +142,40 @@ final class OutputWorkspace implements AutoCloseable {
             abandoned.accept(found);
         }
         for (int attempt = 1; ; attempt++) {
+            Path created;
             try {
-                Path created = Files.createTempDirectory(directory, PREFIX);
+                created = Files.createTempDirectory(directory, PREFIX);
+            } catch (IOException e) {
+                throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+            }
+            try {
                 return new OutputWorkspace(created, pin(created));
-            } catch (FileAlreadyExistsException claimed) {
-                // 作りたての作業場所を、別の窓の片づけが先に押さえた（#139。discard）。
-                // 元にはまだ触っていないので、作り直せばよい。あちらがこの作業場所を消す。
+            } catch (FileAlreadyExistsException | NoSuchFileException claimed) {
+                // 作りたての作業場所を、別の窓の片づけが先に押さえたか、もう消した（#139。discard）。
+                // 元にはまだ触っていないので、作り直せばよい。
+                abandonFresh(created);
                 if (attempt == ATTEMPTS) {
                     throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, claimed);
                 }
             } catch (IOException e) {
                 throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
             }
+        }
+    }
+
+    /**
+     * 押さえられずに作り直す作業場所を、残っていれば消す（#139。{@link #nextTo}）。
+     *
+     * <p><b>こちらは何も置いていないので、消えるのは空のディレクトリだけである。</b>
+     * 別の窓の片づけが押さえていれば空ではないので消えず、あちらが片づける。
+     * 押さえの名前でものを置かれていても同じで、残ったものは次の片づけが拾う。
+     * どちらも失敗ではないので記録しない。
+     */
+    private static void abandonFresh(Path created) {
+        try {
+            Files.deleteIfExists(created);
+        } catch (IOException e) {
+            // 空でない。上のとおり。
         }
     }
 
@@ -607,11 +629,13 @@ final class OutputWorkspace implements AutoCloseable {
         } catch (FileAlreadyExistsException e) {
             // 見てから押さえるまでの間に、持ち主が押さえた。片づけるのはあちらである。
             // ★ 押さえの名前でものを置かれただけなら、使われてはいない。控えは知らせる（#222）。
-            return !inUse(directory) && holdsTheOnlyCopy(directory);
+            return !inUse(directory) && isOwnDirectory(directory) && holdsTheOnlyCopy(directory);
         } catch (IOException | PdfjigException e) {
             // 押さえられないまま消すと、#139 の隙が戻る。消さずに残し、控えは知らせる。
+            // ★ 知らせる前に、まだ自分の場所かを見直す。押さえは、作業場所がリンクに差し替えられていると断る
+            //   ——そのまま印を読むと、指す先のものを利用者の元として伝える。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-            return holdsTheOnlyCopy(directory);
+            return isOwnDirectory(directory) && holdsTheOnlyCopy(directory);
         }
         try {
             if (holdsTheOnlyCopy(directory)) {
