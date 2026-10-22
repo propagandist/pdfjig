@@ -9,6 +9,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -89,6 +90,13 @@ final class OutputWorkspace implements AutoCloseable {
      */
     static final String PIN = "pin";
 
+    /**
+     * 作りたての作業場所を別の窓の片づけに先に押さえられたとき、作り直す回数の上限（#139。{@link #nextTo}）。
+     * 先を越されるのは、あちらの片づけが作ってから押さえるまでの一瞬に重なったときだけなので、続けては起きない。
+     * 続くなら誰かが押さえを置き続けている。
+     */
+    private static final int ATTEMPTS = 3;
+
     private final Path workspace;
 
     /** {@link #PIN} を開いた手。押さえていなければ {@code null}（{@link #pin}）。 */
@@ -133,13 +141,20 @@ final class OutputWorkspace implements AutoCloseable {
         if (!found.isEmpty()) {
             abandoned.accept(found);
         }
-        Path created;
-        try {
-            created = Files.createTempDirectory(directory, PREFIX);
-        } catch (IOException e) {
-            throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+        for (int attempt = 1; ; attempt++) {
+            try {
+                Path created = Files.createTempDirectory(directory, PREFIX);
+                return new OutputWorkspace(created, pin(created));
+            } catch (FileAlreadyExistsException claimed) {
+                // 作りたての作業場所を、別の窓の片づけが先に押さえた（#139。discard）。
+                // 元にはまだ触っていないので、作り直せばよい。あちらがこの作業場所を消す。
+                if (attempt == ATTEMPTS) {
+                    throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, claimed);
+                }
+            } catch (IOException e) {
+                throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
+            }
         }
-        return new OutputWorkspace(created, pin(created));
     }
 
     /**
@@ -178,7 +193,9 @@ final class OutputWorkspace implements AutoCloseable {
      *
      * <p><b>★★ 開けなかったら、また開いた {@code pin} が作業場所の中に無かったら、保存を止める。</b>
      * <ul>
-     *   <li>作りたての空のディレクトリで「既にある」と言われたなら、割り込まれている
+     *   <li>作りたての空のディレクトリで「既にある」と言われたなら、割り込まれている。
+     *       <b>別の窓の片づけが先に押さえたのなら、それは正しい振る舞いである</b>（#139。{@link #discard}）。
+     *       {@link FileAlreadyExistsException} のまま投げ、{@link #nextTo} が作り直す
      *   <li>ほかの理由で開けないなら、差し替えられて開けない先を指していたのかもしれない。
      *       その場で確かめても、差し替えて戻されていれば見分けられない
      *   <li>開けても、差し替えて開かせてから元に戻されうる——そのとき {@code pin} は指す先にあり、
@@ -193,9 +210,10 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>Windows 以外では押さえない。</b>削除を共有しない開き方が無い。配布は Windows だけである。
      *
      * @return 開いた手。押さえなかったなら {@code null}
-     * @throws PdfjigException {@link ErrorCode#IO_FAILURE}。押さえられなかった
+     * @throws IOException 開けなかった。呼ぶ側が扱いを決める（{@link #nextTo} と {@link #discard} で違う）
+     * @throws PdfjigException {@link ErrorCode#IO_FAILURE}。開けたが押さえられなかった
      */
-    private static FileChannel pin(Path workspace) {
+    private static FileChannel pin(Path workspace) throws IOException {
         if (!System.getProperty("os.name", "").startsWith("Windows")) {
             return null;
         }
@@ -208,7 +226,7 @@ final class OutputWorkspace implements AutoCloseable {
                     StandardOpenOption.WRITE,
                     StandardOpenOption.DELETE_ON_CLOSE,
                     ExtendedOpenOption.NOSHARE_DELETE);
-        } catch (IOException | UnsupportedOperationException e) {
+        } catch (UnsupportedOperationException e) {
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         }
         boolean pinned;
@@ -447,7 +465,8 @@ final class OutputWorkspace implements AutoCloseable {
      * ふつうのファイルには触らない——こちらはディレクトリしか作らないので、それは他人のものである。
      *
      * <p><b>2 つ目の窓が同じフォルダへ同時に書いている場合、Windows ではその作業場所に触らない</b>
-     * （#222。{@link #inUse}）。<b>ただし作ってから押さえるまでの一瞬と、Windows 以外では消しうる。</b>
+     * （#222。{@link #inUse}）。作ってから押さえるまでの一瞬に重なれば、こちらが先に押さえて消し、
+     * あちらは作り直す（#139。{@link #discard}）。<b>Windows 以外では消しうる。</b>
      * 書きかけのファイルは開かれているため実際には消せないことが多いが、消せたとしても
      * 起きるのは<b>あちらの保存が失敗すること</b>だけである。置き換えはまだ済んでいないので、
      * あちらの元のファイルは失われない（{@code CLAUDE.md} 優先順位 1）。
@@ -521,6 +540,14 @@ final class OutputWorkspace implements AutoCloseable {
      *   <li><b>控えを抱えているなら何もしない</b>（{@link #holdsTheOnlyCopy}）
      * </ul>
      *
+     * <p><b>★★ 消す前に、こちらが押さえる</b>（#139。{@link #pin}）。使われていないと見ても、
+     * 別の窓は作業場所を作ってから押さえるまでの一瞬、落ちた後と同じ形をしている——見てから消すまでに
+     * あちらが押さえ・印を立て・元を退避すれば、<b>消えるのはあちらの元のファイルそのものである。</b>
+     * こちらが押さえている間は、あちらは押さえを作れず、印を立てるところまで進めない
+     * （{@link #nextTo} は作業場所を作り直す）。<b>だから印を見るのは押さえてからにする。</b>
+     * 押さえられなければ消さない（控えは知らせる）。押さえられない場所では、保存そのものもできない。
+     * Windows 以外では押さえないので、この隙は残る。
+     *
      * <p><b>★★ 中は pdfjig が作る 4 つの名前だけを消す</b>（#125）——{@link #NAME} / {@link #REPLACED} /
      * {@link #HELD} / {@link #PIN}。<b>一覧を取らない。</b>
      * <ul>
@@ -562,11 +589,30 @@ final class OutputWorkspace implements AutoCloseable {
         if (!isOwnDirectory(directory) || inUse(directory)) {
             return false;
         }
-        if (holdsTheOnlyCopy(directory)) {
-            return true;
+        FileChannel claim;
+        try {
+            claim = pin(directory);
+        } catch (FileAlreadyExistsException e) {
+            // 見てから押さえるまでの間に、持ち主が押さえた。片づけるのはあちらである。
+            // ★ 押さえの名前でものを置かれただけなら、使われてはいない。控えは知らせる（#222）。
+            return !inUse(directory) && holdsTheOnlyCopy(directory);
+        } catch (IOException | PdfjigException e) {
+            // 押さえられないまま消すと、#139 の隙が戻る。消さずに残し、控えは知らせる。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return holdsTheOnlyCopy(directory);
         }
-        decided.run();
-        deleteContents(directory);
+        // ★ 押さえたまま中を消し、放してから作業場所を消す（close と同じ順）。
+        try {
+            if (holdsTheOnlyCopy(directory)) {
+                return true;
+            }
+            decided.run();
+            deleteContents(directory);
+        } finally {
+            if (claim != null) {
+                closeQuietly(claim);
+            }
+        }
         deleteQuietly(directory);
         return false;
     }
