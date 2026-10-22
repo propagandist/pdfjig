@@ -13,8 +13,10 @@ import io.github.propagandist.pdfjig.core.PdfjigException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -592,6 +594,56 @@ class OutputWorkspaceTest {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertEquals("元のファイル", Files.readString(kept), "唯一残っていた元を、次の保存が消している（#119）");
             assertTrue(Files.exists(workspace.file().getParent()));
+        }
+    }
+
+    /**
+     * 片づけると決めてから消すまでの間に別の窓が退避しても、その控えを消さない（#139）。
+     *
+     * <p><b>別の窓は、作業場所を作ってから押さえるまでの一瞬だけ、落ちた後と同じ形をしている。</b>
+     * 片づける側がその一瞬に「使われていない」「抱えていない」と見て、消し始める前にあちらが
+     * 押さえ・印を立て・元を退避すると、<b>消えるのはあちらの元のファイルそのものである。</b>
+     * 本物の割り込みは作れないので、順序を手で組む。あちらは {@code pin} と同じ開き方で押さえる。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("片づけると決めてから消すまでに別の窓が退避しても、控えを消さない")
+    void keepsACopyHeldAfterTheCleanupLooked(@TempDir Path directory) throws IOException {
+        // 作ったが、まだ押さえていない別の窓の作業場所。
+        OutputWorkspace other = leftBehind(directory.resolve("out.pdf"));
+        Path place = other.file().getParent();
+        FileChannel[] pinned = {null};
+
+        try {
+            OutputWorkspace.discard(place, () -> {
+                try {
+                    pinned[0] = FileChannel.open(
+                            place.resolve(OutputWorkspace.PIN),
+                            StandardOpenOption.CREATE_NEW,
+                            StandardOpenOption.WRITE,
+                            StandardOpenOption.DELETE_ON_CLOSE,
+                            ExtendedOpenOption.NOSHARE_DELETE);
+                } catch (FileAlreadyExistsException refused) {
+                    // 片づける側が押さえている。あちらは作業場所を作り直すので、元には触らない。
+                    return;
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                other.holdOriginal();
+                try {
+                    Files.writeString(other.replaced(), "あちらの元のファイル");
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+
+            if (pinned[0] != null) {
+                assertTrue(Files.exists(other.replaced()), "別の窓が退避した元を、片づけが消している");
+            }
+        } finally {
+            if (pinned[0] != null) {
+                pinned[0].close();
+            }
         }
     }
 
