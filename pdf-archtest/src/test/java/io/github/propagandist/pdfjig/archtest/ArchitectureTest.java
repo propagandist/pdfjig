@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.AccessTarget;
+import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
@@ -419,21 +421,29 @@ class ArchitectureTest {
     /**
      * 作業場所の片づけと押さえを頼めるのは {@code OutputWorkspace} の中だけである。
      *
-     * <p>{@code discard} と {@code pin} は #139 で {@code private} から package-private になった——
+     * <p>{@code discard} と {@code pin} は #139 で {@code private} から package-private になり、
+     * {@code openNextTo} は {@code nextTo} の本体として外に出た——
      * <b>テストから割り込む別の窓を組むためであり、他から呼んでよくなったわけではない。</b>
+     * {@code openNextTo} を呼べると、{@code nextTo} を縛る規則（{@link #nobodyElseOpensAWorkspaceOrBuildsTheReport}）を素通りする。
      * {@code discard} は渡されたフォルダの中の固定の名前を消し、空になればフォルダごと消す。
      * {@code .pdfjig-} の名前で絞っているのは {@code discardAbandoned} だけなので、
      * ふつうのフォルダを渡せば関門を全部通る（優先順位 1）。
      * <b>テストは対象外である</b>——{@code DO_NOT_INCLUDE_TESTS} で取り込んでいない。
+     *
+     * <p><b>★ 呼び出しではなく参照で見る。</b>{@code callMethodWhere} はメソッド参照
+     * （{@code dirs.forEach(OutputWorkspace::discard)}）を拾わない（#139 の門の 2 段目）。
      */
     @Test
     @DisplayName("作業場所の片づけと押さえを頼めるのは OutputWorkspace の中だけである")
     void discardAndPinAreCalledOnlyByOutputWorkspace() {
+        Set<String> internals = Set.of("discard", "pin", "openNextTo");
         noClasses()
                 .that(not(named(OUTPUT_WORKSPACE)))
                 .should()
-                .callMethodWhere(target(owner(name(OUTPUT_WORKSPACE)))
-                        .and(target(name("discard")).or(target(name("pin")))))
+                .accessTargetWhere(JavaAccess.Predicates.target(DescribedPredicate.describe(
+                        "OutputWorkspace の " + internals,
+                        (AccessTarget accessed) -> accessed.getOwner().getName().equals(OUTPUT_WORKSPACE)
+                                && internals.contains(accessed.getName()))))
                 .because("discard は名前で絞らずに渡されたフォルダの中を消す。#139 で private を外したのは"
                         + "テストから呼ぶためであり、他から呼んでよくなったわけではない（CLAUDE.md 優先順位 1）")
                 .check(classes);
