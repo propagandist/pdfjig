@@ -665,8 +665,10 @@ final class OutputWorkspace implements AutoCloseable {
         FileChannel claim;
         try {
             claim = pin(directory, false);
-        } catch (IOException | PdfjigException e) {
+        } catch (IOException | RuntimeException e) {
             // 押さえられないまま消すと、#139 の隙が戻る。消さない。
+            // ★ RuntimeException まで受ける。片づけの失敗で保存を失敗させない——ここから漏れると
+            //   nextTo ごと投げ、それまでに見つけた控えも伝えられない。
             return false;
         }
         try {
