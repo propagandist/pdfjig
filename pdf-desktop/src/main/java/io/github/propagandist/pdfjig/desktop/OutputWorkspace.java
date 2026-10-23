@@ -137,24 +137,37 @@ final class OutputWorkspace implements AutoCloseable {
      * @param abandoned 同じフォルダで見つけた控えを受け取る。見つからなければ呼ばれない
      */
     static OutputWorkspace nextTo(Path output, Consumer<List<Path>> abandoned) {
+        return openNextTo(output, abandoned, created -> {});
+    }
+
+    /**
+     * {@link #nextTo} の本体。
+     *
+     * <p><b>package-private なのはテストのためである</b>（{@code OutputWorkspaceTest}）。
+     * 作りたての作業場所に別の窓の片づけが割り込む順序を、手で組む（#139）。
+     *
+     * @param created 作業場所を作ってから、押さえるまでの間に走る。本番では何もしない
+     */
+    static OutputWorkspace openNextTo(Path output, Consumer<List<Path>> abandoned, Consumer<Path> created) {
         Path directory = output.toAbsolutePath().getParent();
         List<Path> found = discardAbandoned(directory);
         if (!found.isEmpty()) {
             abandoned.accept(found);
         }
         for (int attempt = 1; ; attempt++) {
-            Path created;
+            Path fresh;
             try {
-                created = Files.createTempDirectory(directory, PREFIX);
+                fresh = Files.createTempDirectory(directory, PREFIX);
             } catch (IOException e) {
                 throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
             }
+            created.accept(fresh);
             try {
-                return new OutputWorkspace(created, pin(created, true));
+                return new OutputWorkspace(fresh, pin(fresh, true));
             } catch (FileAlreadyExistsException | NoSuchFileException | AccessDeniedException claimed) {
                 // 作りたての作業場所を、別の窓の片づけが先に押さえたか、消している最中か、もう消した
                 // （#139。discard）。元にはまだ触っていないので、作り直せばよい。
-                abandonFresh(created);
+                abandonFresh(fresh);
                 if (attempt == ATTEMPTS) {
                     throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, claimed);
                 }
