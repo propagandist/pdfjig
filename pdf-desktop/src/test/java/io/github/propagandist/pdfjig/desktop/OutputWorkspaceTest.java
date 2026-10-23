@@ -646,6 +646,95 @@ class OutputWorkspaceTest {
         }
     }
 
+    /**
+     * 作りたての作業場所を、別の窓の片づけに先に押さえられたら、作り直して保存へ進む（#139 の門の 2 段目）。
+     *
+     * <p>片づけが押さえている間、持ち主は押さえを作れない。元にはまだ触っていないので、
+     * 別の作業場所を作り直せばよい。止めると、別の窓が片づけた瞬間に重なっただけで保存が失敗する。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("作りたての作業場所を別の窓の片づけに押さえられたら、作り直す")
+    void makesAnotherWorkspaceWhenTheFreshOneIsClaimed(@TempDir Path directory) throws IOException {
+        List<Path> made = new ArrayList<>();
+        List<FileChannel> claims = new ArrayList<>();
+        try {
+            try (OutputWorkspace workspace =
+                    OutputWorkspace.openNextTo(directory.resolve("out.pdf"), found -> {}, fresh -> {
+                        made.add(fresh);
+                        if (made.size() == 1) {
+                            claims.add(claim(fresh));
+                        }
+                    })) {
+                assertEquals(2, made.size(), "押さえられた作業場所で止まっている。作り直していない");
+                assertEquals(made.get(1), workspace.file().getParent(), "押さえられた作業場所を使っている");
+            }
+        } finally {
+            for (FileChannel claim : claims) {
+                claim.close();
+            }
+        }
+    }
+
+    /** 作りたての作業場所を、別の窓の片づけに消し終えられたら、作り直して保存へ進む（#139 の門の 2 段目）。 */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("作りたての作業場所を別の窓の片づけに消されたら、作り直す")
+    void makesAnotherWorkspaceWhenTheFreshOneIsDiscarded(@TempDir Path directory) {
+        List<Path> made = new ArrayList<>();
+        try (OutputWorkspace workspace =
+                OutputWorkspace.openNextTo(directory.resolve("out.pdf"), found -> {}, fresh -> {
+                    made.add(fresh);
+                    if (made.size() == 1) {
+                        try {
+                            Files.delete(fresh);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    }
+                })) {
+            assertEquals(2, made.size(), "消された作業場所で止まっている。作り直していない");
+            assertEquals(made.get(1), workspace.file().getParent());
+        }
+    }
+
+    /**
+     * 作り直しても押さえられ続けたら、保存を止める（#139 の門の 2 段目）。
+     *
+     * <p>押さえないまま保存へ進むと、#222 で塞いだ差し替えが戻る。上限が無いと、押さえを置き続ける者が
+     * 保存を回し続けさせられる。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("作り直しても押さえられ続けたら、保存を止める")
+    void stopsWhenEveryFreshWorkspaceIsClaimed(@TempDir Path directory) throws IOException {
+        List<Path> made = new ArrayList<>();
+        List<FileChannel> claims = new ArrayList<>();
+        try {
+            PdfjigException refused = assertThrows(
+                    PdfjigException.class,
+                    () -> OutputWorkspace.openNextTo(directory.resolve("out.pdf"), found -> {}, fresh -> {
+                        made.add(fresh);
+                        claims.add(claim(fresh));
+                    }));
+            assertEquals(ErrorCode.IO_FAILURE, refused.errorCode());
+            assertEquals(3, made.size(), "作業場所を作る回数が変わっている");
+        } finally {
+            for (FileChannel claim : claims) {
+                claim.close();
+            }
+        }
+    }
+
+    /** 別の窓の片づけと同じ形で、作業場所を押さえる。 */
+    private static FileChannel claim(Path workspace) {
+        try {
+            return OutputWorkspace.pin(workspace, false);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     @Test
     @DisplayName("書き込み先は、まだ存在しない")
     void offersAPathThatDoesNotExistYet(@TempDir Path directory) {
