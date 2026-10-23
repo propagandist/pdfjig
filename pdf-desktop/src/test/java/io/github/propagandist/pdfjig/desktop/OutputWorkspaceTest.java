@@ -604,7 +604,7 @@ class OutputWorkspaceTest {
      * <p><b>別の窓は、作業場所を作ってから押さえるまでの一瞬だけ、落ちた後と同じ形をしている。</b>
      * 片づける側がその一瞬に「使われていない」「抱えていない」と見て、消し始める前にあちらが
      * 押さえ・印を立て・元を退避すると、<b>消えるのはあちらの元のファイルそのものである。</b>
-     * 本物の割り込みは作れないので、順序を手で組む。あちらは {@code pin} と同じ開き方で押さえる。
+     * 本物の割り込みは作れないので、順序を手で組む。あちらは本物の押さえ方（{@code pin}）で押さえる。
      */
     @Test
     @EnabledOnOs(OS.WINDOWS)
@@ -620,12 +620,7 @@ class OutputWorkspaceTest {
             OutputWorkspace.discard(place, () -> {
                 ran[0] = true;
                 try {
-                    pinned[0] = FileChannel.open(
-                            place.resolve(OutputWorkspace.PIN),
-                            StandardOpenOption.CREATE_NEW,
-                            StandardOpenOption.WRITE,
-                            StandardOpenOption.DELETE_ON_CLOSE,
-                            ExtendedOpenOption.NOSHARE_DELETE);
+                    pinned[0] = OutputWorkspace.pin(place, true);
                 } catch (FileAlreadyExistsException refused) {
                     // 片づける側が押さえている。あちらは作業場所を作り直すので、元には触らない。
                     return;

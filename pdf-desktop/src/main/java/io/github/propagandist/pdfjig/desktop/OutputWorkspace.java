@@ -91,9 +91,10 @@ final class OutputWorkspace implements AutoCloseable {
     static final String PIN = "pin";
 
     /**
-     * 作りたての作業場所を別の窓の片づけに先に押さえられたとき、作り直す回数の上限（#139。{@link #nextTo}）。
-     * 先を越されるのは、あちらの片づけが作ってから押さえるまでの一瞬に重なったときだけなので、続けては起きない。
-     * 続くなら誰かが押さえを置き続けている。
+     * 作業場所を作る回数の上限（#139。{@link #nextTo}）。作り直すのは、この 1 つ手前までである。
+     * 作りたての作業場所を、別の窓の片づけに先に押さえられるか消されると作り直す。
+     * 重なるのはあちらの片づけの一瞬だけだが、続けて起きない根拠は測っていない。
+     * 権限で中にファイルを作れないフォルダでも同じ断りが来るので、上限で止める。
      */
     private static final int ATTEMPTS = 3;
 
@@ -149,10 +150,10 @@ final class OutputWorkspace implements AutoCloseable {
                 throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
             }
             try {
-                return new OutputWorkspace(created, pin(created));
-            } catch (FileAlreadyExistsException | NoSuchFileException claimed) {
-                // 作りたての作業場所を、別の窓の片づけが先に押さえたか、もう消した（#139。discard）。
-                // 元にはまだ触っていないので、作り直せばよい。
+                return new OutputWorkspace(created, pin(created, true));
+            } catch (FileAlreadyExistsException | NoSuchFileException | AccessDeniedException claimed) {
+                // 作りたての作業場所を、別の窓の片づけが先に押さえたか、消している最中か、もう消した
+                // （#139。discard）。元にはまだ触っていないので、作り直せばよい。
                 abandonFresh(created);
                 if (attempt == ATTEMPTS) {
                     throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, claimed);
@@ -168,8 +169,9 @@ final class OutputWorkspace implements AutoCloseable {
      *
      * <p><b>こちらは何も置いていないので、消えるのは空のディレクトリだけである。</b>
      * 別の窓の片づけが押さえていれば空ではないので消えず、あちらが片づける。
-     * 押さえの名前でものを置かれていても同じで、残ったものは次の片づけが拾う。
-     * どちらも失敗ではないので記録しない。
+     * 押さえの名前でものを置かれていても消えず、次の片づけが拾う（消せないものを置かれていれば残る。#280）。
+     * 作業場所をリンクに差し替えられていれば、消えるのはリンクである。
+     * どれも失敗ではないので記録しない。
      */
     private static void abandonFresh(Path created) {
         try {
@@ -213,29 +215,37 @@ final class OutputWorkspace implements AutoCloseable {
      * <b>置いた者の権限を持ったまま出力先へ移る</b>。退避先を先に置かれても、退避が黙って置き換える。
      * <b>どちらも、出力先に書ける者が保存した後のファイルに対して元から持っている権限を越えない</b>。
      *
-     * <p><b>★★ 開けなかったら、また開いた {@code pin} が作業場所の中に無かったら、保存を止める。</b>
+     * <p><b>★★ 押さえられなかったら、押さえないまま保存へ進まない。</b>
      * <ul>
-     *   <li>作りたての空のディレクトリで「既にある」と言われたなら、割り込まれている。
-     *       <b>別の窓の片づけが先に押さえたのなら、それは正しい振る舞いである</b>（#139。{@link #discard}）。
-     *       {@link FileAlreadyExistsException} のまま投げ、{@link #nextTo} が作り直す
-     *   <li>ほかの理由で開けないなら、差し替えられて開けない先を指していたのかもしれない。
-     *       その場で確かめても、差し替えて戻されていれば見分けられない
+     *   <li>作りたての空のディレクトリで「既にある」「無い」「断られた」と言われたなら、割り込まれている。
+     *       <b>別の窓の片づけが先に押さえたか、消している最中か、もう消した</b>のなら、それは正しい振る舞いである
+     *       （#139。{@link #discard}）。差し替えられて開けない先を指していても、同じ断りが来る。
+     *       どれも例外のまま投げ、{@link #nextTo} が<b>別の作業場所を作り直す</b>——作り直した先は
+     *       作った時点で空なので、差し替えられた作業場所を使わずに済む。続けば保存を止める（{@link #ATTEMPTS}）
+     *   <li>ほかの理由で開けないなら、保存を止める
      *   <li>開けても、差し替えて開かせてから元に戻されうる——そのとき {@code pin} は指す先にあり、
      *       作業場所は押さえられていない。<b>だから、パスが指すファイルが自分の開いたものと同じかを見る</b>
      *       （{@link #sameFile}）。中身で比べる形は採らない——押さえは読み取りを共有するので、
      *       中身を写した偽物を置かれると見分けられない（#222 の門の 2 段目）
      * </ul>
-     * 止めるときは開いた手を閉じる。{@code pin} は手から消えるので（{@code DELETE_ON_CLOSE}）、
-     * パスを引いて別の場所のものを消すことはない。空の {@code .pdfjig-*} が残りうる。
+     * 開けたのに作業場所の中に無かったら、開いた手を閉じて止める。{@code pin} は手から消えるので
+     * （{@code DELETE_ON_CLOSE}）、パスを引いて別の場所のものを消すことはない。空の {@code .pdfjig-*} が残りうる。
      * 作りたての自分のディレクトリにファイルを 1 つ作れない場所では、保存そのものもできない。
+     *
+     * <p><b>★ 片づけも押さえる</b>（#139。{@link #discard}）。止めたことを記録するのは保存の側だけである——
+     * 片づけが押さえられなくても、保存は止まらない。
      *
      * <p><b>Windows 以外では押さえない。</b>削除を共有しない開き方が無い。配布は Windows だけである。
      *
+     * <p><b>package-private なのはテストのためである</b>（{@code OutputWorkspaceTest}）。
+     * 片づけに割り込む別の窓を、本物の押さえ方で組む。
+     *
+     * @param saving 保存のために押さえるなら {@code true}。押さえられずに止めたことを記録する
      * @return 開いた手。押さえなかったなら {@code null}
      * @throws IOException 開けなかった。呼ぶ側が扱いを決める（{@link #nextTo} と {@link #discard} で違う）
      * @throws PdfjigException {@link ErrorCode#IO_FAILURE}。開けたが押さえられなかった
      */
-    private static FileChannel pin(Path workspace) throws IOException {
+    static FileChannel pin(Path workspace, boolean saving) throws IOException {
         if (!System.getProperty("os.name", "").startsWith("Windows")) {
             return null;
         }
@@ -265,7 +275,9 @@ final class OutputWorkspace implements AutoCloseable {
             return channel;
         }
         // 開けたのに作業場所の中に無い。差し替えられている。投げる例外には理由を載せられないので、ここに残す。
-        Logs.warn(LogEvent.WORKSPACE_NOT_PINNED);
+        if (saving) {
+            Logs.warn(LogEvent.WORKSPACE_NOT_PINNED);
+        }
         closeQuietly(channel);
         throw new PdfjigException(ErrorCode.IO_FAILURE);
     }
@@ -279,9 +291,18 @@ final class OutputWorkspace implements AutoCloseable {
      * <b>同じファイルならその場で投げ、別のファイルなら投げない</b>（ほかのプロセスが掛けたロックは
      * 投げずに {@code null} で返る）。2026-10-19 実測。Windows 10 の C: と D: で、作業場所の {@code pin} は
      * 同じ、中身を写したファイルは別のプロセスが開いていても別、と出た。
+     *
+     * <p><b>★★ 自分のロックは待たずに取る。取れなければ同じとは言わない</b>（#139 の門の 2 段目）。
+     * 押さえは読み書きを共有するので、ほかのプロセスも {@code pin} を開いてロックを先に取れる。
+     * 待つ形だと、取った相手が放すまで保存のスレッドが止まり、終了も窓の × も保存を待つので
+     * 窓を閉じられなくなる（#134）。片づけが第三者の置いた {@code .pdfjig-*} も押さえるので、
+     * 名前を決めて置かれれば踏まれる（レビューの実測で、1 回目の保存で止まった）。
      */
     private static boolean sameFile(FileChannel held, Path path) throws IOException {
-        FileLock mine = held.lock(0, 1, false);
+        FileLock mine = held.tryLock(0, 1, false);
+        if (mine == null) {
+            return false;
+        }
         try (FileChannel check = FileChannel.open(path, StandardOpenOption.READ)) {
             FileLock other = check.tryLock(0, 1, true);
             if (other != null) {
@@ -500,12 +521,11 @@ final class OutputWorkspace implements AutoCloseable {
      *
      * <p><b>2 つ目の窓が同じフォルダへ同時に書いている場合、Windows ではその作業場所に触らない</b>
      * （#222。{@link #inUse}）。作ってから押さえるまでの一瞬に重なれば、こちらが先に押さえて消し、
-     * あちらは作り直す（#139。{@link #discard}）。<b>Windows 以外では消しうる。</b>
-     * 書きかけのファイルは開かれているため実際には消せないことが多いが、消せたとしても
-     * 起きるのは<b>あちらの保存が失敗すること</b>だけである。置き換えはまだ済んでいないので、
-     * あちらの元のファイルは失われない（{@code CLAUDE.md} 優先順位 1）。
-     * <b>★ ただし控えを抱えているものには触らない</b>（{@link #discard}）——
+     * あちらは作り直す（#139。{@link #discard}）。
+     * <b>★ 控えを抱えているものには触らない</b>（{@link #discard}）——
      * あちらが既に退避まで進んでいたなら、消すのは<b>あちらの元のファイルそのもの</b>である。
+     * <b>★ Windows 以外では押さえないので、どちらも守れない。</b>使われている作業場所を消しうるし、
+     * 印を見てから消すまでの間にあちらが退避すれば、あちらの元が消える。配布は Windows だけである。
      *
      * <p><b>★★ 落ちた後に残った控えを、次の書き出しが消さない</b>（#119 の受け入れ基準）。
      * ここは<b>次に同じフォルダへ書き出すときに走る</b>ので、素通しにすると
@@ -578,9 +598,17 @@ final class OutputWorkspace implements AutoCloseable {
      * 別の窓は作業場所を作ってから押さえるまでの一瞬、落ちた後と同じ形をしている——見てから消すまでに
      * あちらが押さえ・印を立て・元を退避すれば、<b>消えるのはあちらの元のファイルそのものである。</b>
      * こちらが押さえている間は、あちらは押さえを作れず、印を立てるところまで進めない
-     * （{@link #nextTo} は作業場所を作り直す）。<b>だから印を見るのは押さえてからにする。</b>
-     * 押さえられなければ消さない（控えは知らせる）。押さえられない場所では、保存そのものもできない。
+     * （{@link #nextTo} は作業場所を作り直す）。<b>だから消すと決めるのは押さえてからにする。</b>
+     * 押さえられなければ消さず、記録もしない——持ち主が先に押さえた、別の窓が消している最中、
+     * はどれもふつうの競合である。消せない古い {@code pin} があると残り続ける（#280）。
      * Windows 以外では押さえないので、この隙は残る。
+     *
+     * <p><b>★★ 控えを抱えたものは押さえない。知らせるだけにする</b>（#139 の門の 2 段目）。
+     * 消さないので押さえは要らない。押さえると、同時に片づけている別の窓からは「使っている」に見え、
+     * <b>あちらはその回の控えを知らせない</b>（レビューの実測で、待ちなしの 2 プロセスで 2000 回中 824 回）。
+     * <b>印を読んでから、使われているかを見る</b>——持ち主は押さえてから印を立てるので、印があって
+     * 押さえが無ければ、持ち主はもういない。逆の順だと、見てから印を読むまでに持ち主が押さえて印を立て、
+     * 生きている窓の退避を「落ちた後の控え」として知らせうる。
      *
      * <p><b>★★ 中は pdfjig が作る 4 つの名前だけを消す</b>（#125）——{@link #NAME} / {@link #REPLACED} /
      * {@link #HELD} / {@link #PIN}。<b>一覧を取らない。</b>
@@ -620,24 +648,25 @@ final class OutputWorkspace implements AutoCloseable {
      * @param decided 消すと決めてから、消し始めるまでの間に走る。本番では何もしない
      */
     static boolean discard(Path directory, Runnable decided) {
-        if (!isOwnDirectory(directory) || inUse(directory)) {
+        if (!isOwnDirectory(directory)) {
+            return false;
+        }
+        if (holdsTheOnlyCopy(directory)) {
+            return !inUse(directory);
+        }
+        if (inUse(directory)) {
             return false;
         }
         FileChannel claim;
         try {
-            claim = pin(directory);
-        } catch (FileAlreadyExistsException e) {
-            // 見てから押さえるまでの間に、持ち主が押さえた。片づけるのはあちらである。
-            // ★ 押さえの名前でものを置かれただけなら、使われてはいない。控えは知らせる（#222）。
-            return !inUse(directory) && isOwnDirectory(directory) && holdsTheOnlyCopy(directory);
+            claim = pin(directory, false);
         } catch (IOException | PdfjigException e) {
-            // 押さえられないまま消すと、#139 の隙が戻る。消さずに残し、控えは知らせる。
-            // ★ 知らせる前に、まだ自分の場所かを見直す。押さえは、作業場所がリンクに差し替えられていると断る
-            //   ——そのまま印を読むと、指す先のものを利用者の元として伝える。
-            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-            return isOwnDirectory(directory) && holdsTheOnlyCopy(directory);
+            // 押さえられないまま消すと、#139 の隙が戻る。消さない。
+            return false;
         }
         try {
+            // ★ 押さえてから印を読み直す。押さえている間に持ち主が印を立てることはないが、
+            //   押さえない版の pdfjig は立てうる。関門は消さない側へ倒す。
             if (holdsTheOnlyCopy(directory)) {
                 return true;
             }
