@@ -417,6 +417,29 @@ class ArchitectureTest {
     }
 
     /**
+     * 作業場所の片づけと押さえを頼めるのは {@code OutputWorkspace} の中だけである。
+     *
+     * <p>{@code discard} と {@code pin} は #139 で {@code private} から package-private になった——
+     * <b>テストから割り込む別の窓を組むためであり、他から呼んでよくなったわけではない。</b>
+     * {@code discard} は渡されたフォルダの中の固定の名前を消し、空になればフォルダごと消す。
+     * {@code .pdfjig-} の名前で絞っているのは {@code discardAbandoned} だけなので、
+     * ふつうのフォルダを渡せば関門を全部通る（優先順位 1）。
+     * <b>テストは対象外である</b>——{@code DO_NOT_INCLUDE_TESTS} で取り込んでいない。
+     */
+    @Test
+    @DisplayName("作業場所の片づけと押さえを頼めるのは OutputWorkspace の中だけである")
+    void discardAndPinAreCalledOnlyByOutputWorkspace() {
+        noClasses()
+                .that(not(named(OUTPUT_WORKSPACE)))
+                .should()
+                .callMethodWhere(target(owner(name(OUTPUT_WORKSPACE)))
+                        .and(target(name("discard")).or(target(name("pin")))))
+                .because("discard は名前で絞らずに渡されたフォルダの中を消す。#139 で private を外したのは"
+                        + "テストから呼ぶためであり、他から呼んでよくなったわけではない（CLAUDE.md 優先順位 1）")
+                .check(classes);
+    }
+
+    /**
      * 作業場所を開ける場所と、控えの在り処を伝える場所は、同じ 1 か所である。
      *
      * <p><b>★★ 控えを抱えたまま失敗したことを利用者へ伝える関門は、作業場所の側にある</b>
