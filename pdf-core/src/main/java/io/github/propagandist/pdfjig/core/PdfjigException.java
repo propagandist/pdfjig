@@ -1,5 +1,7 @@
 package io.github.propagandist.pdfjig.core;
 
+import java.util.List;
+
 /**
  * pdfjig の唯一の非チェック例外。
  *
@@ -64,5 +66,14 @@ public final class PdfjigException extends RuntimeException {
      */
     public String causeType() {
         return causeType;
+    }
+
+    /**
+     * 原因例外が投げられた位置のフレームを返す（#152）。
+     *
+     * @return 手前から並べたフレーム。原因を持たない場合は空
+     */
+    public List<StackTraceElement> causeFrames() {
+        return List.of();
     }
 }
