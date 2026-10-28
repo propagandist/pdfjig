@@ -9,6 +9,11 @@ import java.util.function.Consumer;
  * <p>書きかけの出力を消す・書いた分を巻き戻す・開いた文書を閉じる、の置き場である。
  * <b>失敗の分類（何を {@link PdfjigException} に包むか）は {@link PdfBoxGuard} が持ち、ここは持たない。</b>
  *
+ * <p><b>★★ どの失敗でも後始末をする</b>（{@link Throwable} で受ける）。{@code PdfBoxGuard} が溢れた失敗
+ * （{@link StackOverflowError}）を包むようになったので、受ける範囲が {@code RuntimeException} までだと、
+ * <b>書きかけの平文を残したまま、包みが「きれいに失敗した」と言う。</b>包まない失敗（メモリ切れ）でも
+ * 書きかけは消す。投げ直すのは受けたものそのものなので、何を包むかは変わらない。
+ *
  * <p><b>★ {@link PdfBoxGuard} に置かない。</b>{@code pdf-archtest} は公開の入口が {@code PdfBoxGuard} を
  * 呼んだかを型で数えるので、そこに置くと、包まずに後始末だけをした入口まで「包みを通った」と数えられる。
  */
@@ -25,7 +30,7 @@ final class UndoOnFailure {
     static void runThrowing(Consumer<Throwable> undo, PdfBoxGuard.PdfBoxAction work) throws IOException {
         try {
             work.run();
-        } catch (IOException | RuntimeException e) {
+        } catch (Throwable e) {
             undo.accept(e);
             throw e;
         }
@@ -40,7 +45,7 @@ final class UndoOnFailure {
     static void run(Consumer<Throwable> undo, Runnable work) {
         try {
             work.run();
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             undo.accept(e);
             throw e;
         }

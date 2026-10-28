@@ -17,7 +17,8 @@ import java.util.List;
  */
 public final class PdfjigException extends RuntimeException {
 
-    private static final long serialVersionUID = 1L;
+    /** 原因のフレームを持たせたときに上げた（#152）。古い形を読むと、フレームが {@code null} になる。 */
+    private static final long serialVersionUID = 2L;
 
     private static final StackTraceElement[] NO_FRAMES = new StackTraceElement[0];
 
