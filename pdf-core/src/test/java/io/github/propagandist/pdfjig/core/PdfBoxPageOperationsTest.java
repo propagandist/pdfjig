@@ -181,8 +181,8 @@ class PdfBoxPageOperationsTest {
         @DisplayName("★★ 複数の入力を組み立てる経路でも、包みが飲まない")
         void callerFailureIsNotWrappedWhenMerging() throws Exception {
             // ★★ 平文の入力を 2 つ使う。暗号化されていると warnAboutContributing（包みの外）が
-            //   先に投げてしまい、writeByMerging の中まで届かない——それでは merge 側と同じ
-            //   ものしか縛れず、writeByMerging の report を包みの中へ戻しても緑になる。
+            //   先に投げてしまい、mergeCopiesInto の中まで届かない——それでは merge 側と同じ
+            //   ものしか縛れず、mergeCopiesInto の report を包みの中へ戻しても緑になる。
             //   平文なら METADATA_FROM_FIRST_INPUT が applyInformation（包みの中）から出る。
             Path first = TestPdfs.plain(tempDir.resolve("a.pdf"), 1);
             Path second = TestPdfs.plain(tempDir.resolve("b.pdf"), 1);

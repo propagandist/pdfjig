@@ -412,7 +412,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         if (single >= 0) {
             writeFromSingleSource(sources.get(single), pages, output, warnings, protection);
         } else {
-            writeByMerging(inputs, pages, output, warnings, protection);
+            mergeCopiesInto(inputs, pages, output, warnings, protection);
         }
     }
 
@@ -544,12 +544,6 @@ public final class PdfBoxPageOperations implements PageOperations {
      * ——<b>呼ぶ側はその分岐を見られない</b>（{@code CLAUDE.md} 優先順位 2）。絞れなかった失敗は入口の符号へ行く。
      * 本物の書き出しの失敗は {@link #saveDocument} が {@code IO_FAILURE} を付けているので、符号を失わない。
      */
-    private void writeByMerging(
-            Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection)
-            throws IOException {
-        mergeCopiesInto(inputs, pages, output, warnings, protection);
-    }
-
     private void mergeCopiesInto(
             Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection)
             throws IOException {
