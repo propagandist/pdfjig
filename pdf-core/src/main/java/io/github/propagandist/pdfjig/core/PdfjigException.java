@@ -19,6 +19,8 @@ public final class PdfjigException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;
 
+    private static final StackTraceElement[] NO_FRAMES = new StackTraceElement[0];
+
     private final ErrorCode errorCode;
 
     /** 原因例外の型名。原因を持たない場合は {@code null}。 */
@@ -35,7 +37,7 @@ public final class PdfjigException extends RuntimeException {
         super(errorCode.defaultMessage());
         this.errorCode = errorCode;
         this.causeType = null;
-        this.causeFrames = new StackTraceElement[0];
+        this.causeFrames = NO_FRAMES;
     }
 
     private PdfjigException(ErrorCode errorCode, Throwable cause) {
