@@ -78,11 +78,14 @@ final class OutputWorkspace implements AutoCloseable {
      * 1 つずつ積み上がることになる</b>（2026-09-01 実測。出力先が読み取り専用だと、
      * 改名は通るのに削除だけが {@code AccessDenied} で落ちる）。
      *
-     * <p><b>だから印は自分で作る。</b>こちらが作った空のファイルなら<b>必ず消せる</b>ので、
-     * 印を外し損ねて閉じ込められることがない。<b>控えを消せなかったときは作業場所ごと残るが、
+     * <p><b>だから印は自分で作る。</b>こちらが作った空のファイルは、ふつうは消せる
+     * （控えのように読み取り専用の属性を持ち込まない）。<b>それでも外し損ねたら、置き換えが済んでいれば
+     * 控えのほうを消す</b>（{@link #originalReplaced}。#218）——印だけが残れば、抱えていないと読める。<b>控えを消せなかったときは作業場所ごと残るが、
      * 印はもう無いので、次に同じフォルダへ書き出すときに片づけ直せる。</b>
+     *
+     * <p>package-private なのはテストのためである（{@code OutputWorkspaceTest}。名前を写さないため）。
      */
-    private static final String HELD = "held";
+    static final String HELD = "held";
 
     /**
      * 保存の間、作業場所を押さえておくために開いたままにするファイルの名前（#222。{@link #pin}）。
@@ -354,7 +357,7 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * 出力先に元からあった実体の退避先。まだ存在しない。
      *
-     * <p><b>ここへ退避したら {@link #holdOriginal} を、済んだら {@link #releaseOriginal} を呼ぶこと。</b>
+     * <p><b>ここへ退避したら {@link #holdOriginal} を、置き換えが済んだら {@link #originalReplaced} を、巻き戻したら {@link #releaseOriginal} を呼ぶこと。</b>
      * <b>済んだかどうかを知っているのは呼ぶ側だけである</b>（{@code DocumentWriter#move}）。
      */
     Path replaced() {
@@ -382,18 +385,41 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * もう抱えていないことを記す。
      *
-     * <p>置き換えが済んだか、巻き戻して元の場所へ返したときに呼ぶ。
+     * <p>巻き戻して元の場所へ返したときと、退避に失敗したときに呼ぶ。置き換えが済んだときは
+     * {@link #originalReplaced} を呼ぶ。
      *
      * <p><b>これで片づけの関門が開く。</b>控えそのものを消せるかどうかは
      * {@link #discard} の仕事であり、<b>消せなくても閉じ込められない</b>——
-     * 印はこちらが作った空のファイルなので、必ず消せる（{@link #HELD}）。
+     * 印はこちらが作った空のファイルなので、ふつうは消せる（{@link #HELD}）。
+     *
+     * @return 外せたか、もともと無ければ {@code true}
      */
-    void releaseOriginal() {
+    boolean releaseOriginal() {
         try {
             Files.deleteIfExists(workspace.resolve(HELD));
+            return true;
         } catch (IOException e) {
-            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
+            // ふつうは起きない。残ると作業場所が片づかないので、理由を追える先を残す。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return false;
+        }
+    }
+
+    /**
+     * 置き換えが済んで、控えはもう要らないことを記す（{@code DocumentWriter#move}）。
+     *
+     * <p>巻き戻して元の場所へ返したときは {@link #releaseOriginal} を呼ぶ。
+     *
+     * <p><b>★ 印を外せなければ、控えを消す</b>（#218）。印も控えも残ると、片づけはそれを「元はここにしか無い」
+     * と読み、<b>成功した保存を「途中で終わった」と伝え続ける</b>——同じフォルダへ保存するたびに窓が出て、
+     * 利用者は読まずに閉じることを覚える。控えは 1 世代前であって、もう要らない。
+     * 印だけが残れば、抱えていないと読める（{@link #holdsTheOnlyCopy}）ので次の書き出しが片づける。
+     * <b>印をもう 1 つ置く形は採らない</b>——それを消し損ねると、同じことが起きる。
+     * 控えも消せなければ、今までどおり知らせ続ける。
+     */
+    void originalReplaced() {
+        if (!releaseOriginal()) {
+            deleteQuietly(replaced());
         }
     }
 
@@ -578,12 +604,24 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * その作業場所が、元の実体を唯一の控えとして抱えているか。
      *
-     * <p><b>印だけを見る</b>（{@link #HELD}）。立てるのも外すのも、置き換えが済んだかを
+     * <p><b>印で決める</b>（{@link #HELD}。控えが無いと確信できれば開ける。下の★）。立てるのも外すのも、置き換えが済んだかを
      * 知っている側である（{@code DocumentWriter#move}）。
+     *
+     * <p><b>★ 印があっても、控えが無いと確信できれば抱えていない</b>（#218）。印を立ててから元をどけるまでの間に
+     * 落ちた回と、巻き戻して元へ返したのに印を外せなかった回である。どちらも元は出力先にあり、
+     * 失うものは無い。抱えていると読むと、<b>その作業場所は二度と片づかない</b>——控えが無いので知らせもせず、
+     * 説明の無い {@code .pdfjig-*} だけが残り続ける。
+     * <b>★ 生きている窓の「印を立てて、まだどけていない」作業場所も同じ形をしている。</b>Windows では
+     * あちらが押さえているので、片づけはそれを見て触らない（{@link #inUse}）。Windows 以外では押さえないので、
+     * 消しうる（押さえを入れる前の版の pdfjig も同じ）。そのときは、あちらの退避が消した後なら失敗し、
+     * 先に通っていれば入れ替えが失敗して巻き戻す。<b>巻き戻しまで失敗したときだけ、元は印の無い控えになる。</b>
+     *
+     * <p><b>★ 控えはリンクを辿らずに見る</b>（#218 の門の 2 段目）。出力先がリンクなら、退避はリンクそのものを
+     * 移す。相対リンクは移った先で辿れなくなるので、辿って「無い」と読むと唯一の控えを消す。
      *
      * <p><b>★★ 「無いと確信できる」ときだけ開ける。</b>{@link Files#exists} は
      * <b>「無い」と「確かめられない」を同じ {@code false} に潰す</b>ので、
-     * 権限や一時的な失敗で属性を読めないだけの作業場所を「印は無い」と読み、
+     * 権限や一時的な失敗で属性を読めないだけの作業場所を「印は無い」「控えは無い」と読み、
      * <b>唯一の控えごと消しにいく。</b>関門は消さない側へ倒す（{@code CLAUDE.md} 優先順位 1）。
      *
      * <p><b>★ 出力先の側を見に行かない。</b>「同じ名前が隣に戻っているか」で判断する形も
@@ -593,7 +631,8 @@ final class OutputWorkspace implements AutoCloseable {
      * <b>片づけの根拠に使ってよいものではない。</b>
      */
     private static boolean holdsTheOnlyCopy(Path workspace) {
-        return !Files.notExists(workspace.resolve(HELD));
+        return !Files.notExists(workspace.resolve(HELD))
+                && !Files.notExists(workspace.resolve(REPLACED), LinkOption.NOFOLLOW_LINKS);
     }
 
     /**
@@ -667,7 +706,7 @@ final class OutputWorkspace implements AutoCloseable {
             return false;
         }
         if (holdsTheOnlyCopy(directory)) {
-            // ★ 使われていないと見てから、印を読み直す。最初に読んでから見るまでの間に、持ち主が
+            // ★ 使われていないと見てから、印と控えを読み直す。最初に読んでから見るまでの間に、持ち主が
             //   済ませて印を外し、押さえを放しうる——控えを消し損ねていれば、無事な保存の 1 世代前を
             //   「元はここにしか無い」と伝えることになる。
             return !inUse(directory) && holdsTheOnlyCopy(directory);
@@ -685,7 +724,7 @@ final class OutputWorkspace implements AutoCloseable {
             return false;
         }
         try {
-            // ★ 押さえてから印を読み直す。押さえている間に持ち主が印を立てることはないが、
+            // ★ 押さえてから印と控えを読み直す。押さえている間に持ち主が印を立てることはないが、
             //   押さえない版の pdfjig は立てうる。関門は消さない側へ倒す。
             if (holdsTheOnlyCopy(directory)) {
                 return true;

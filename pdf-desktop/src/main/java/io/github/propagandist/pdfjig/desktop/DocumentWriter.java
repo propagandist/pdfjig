@@ -262,8 +262,9 @@ final class DocumentWriter {
      * 元は作業場所の中に実体として残る（{@link OutputWorkspace} は控えを抱えた作業場所を消さない）。
      * 2 本目に失敗したら 1 本目を巻き戻す（{@link #restore}）。
      *
-     * <p><b>★ 済んだあとも控えそのものは残す。</b>片づけるのは {@link OutputWorkspace} の仕事で、
-     * ここが下ろすのは<b>「抱えている」という印だけである</b>（{@link OutputWorkspace#releaseOriginal}）。
+     * <p><b>★ 済んだあとも控えそのものは残す</b>（印を下ろせなかったときを除く。下の 2 文目）。片づけるのは {@link OutputWorkspace} の仕事で、
+     * ここが下ろすのは<b>「抱えている」という印だけである</b>（{@link OutputWorkspace#originalReplaced}）。
+     * 印を下ろせなかったときに控えを消すのも、作業場所の側である（#218）。
      * <b>控えを印にすると、いちど消せなかっただけで片づけが永久に閉じる</b>
      * （{@link OutputWorkspace#HELD}）。
      *
@@ -331,7 +332,7 @@ final class DocumentWriter {
         }
         if (kept) {
             // 置き換えが済んだ。控えはもう要らない（作業場所ごと片づく）。
-            workspace.releaseOriginal();
+            workspace.originalReplaced();
         }
     }
 
