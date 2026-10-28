@@ -109,6 +109,7 @@ gh api repos/propagandist/.github/contents/docs/work-conventions.md --jq .conten
 | 決めるもの | pdfjig の値 |
 |---|---|
 | 既定ブランチ名 | `develop`。`main` は v0.1.0 のタグを打つときに作る（`HANDOVER.md`「ブランチをどう使っているか」） |
+| 常設ブランチ | **`main`。** 公開済みの版を指す。リリースのときに fast-forward で進めるだけで、PR を通さない（`HANDOVER.md` 4-3 の 9 番） |
 | ブランチの接頭辞 | `feature/` `fix/` `chore/` `ci/` `docs/` `build/` `test/` |
 | ブランチ名に issue 番号を入れるか | **入れない。** 何のブランチかは名前で読めるほうがよい |
 | コミット subject の言語と型 | 日本語。Conventional Commits の型を前に置く（`feat:` `fix:` `docs:` `build(deps):` `test(archtest):`） |
