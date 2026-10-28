@@ -2,8 +2,10 @@ package io.github.propagandist.pdfjig.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import com.sun.nio.file.ExtendedOpenOption;
 import java.io.FileNotFoundException;
@@ -27,6 +29,76 @@ class PdfDocumentTest {
 
     @TempDir
     Path tempDir;
+
+    /**
+     * 深すぎるページの木を開くスレッドのスタックの大きさ（#151）。
+     *
+     * <p><b>★ 機械の既定に任せない。</b>既定の上限は OS と JVM で違うので、深さを決め打ちにすると
+     * 別の機械では溢れずに緑になる。こちらで小さく決める。
+     */
+    private static final long SMALL_STACK = 64 * 1024;
+
+    /**
+     * 入れ子の深さと、溢れるまで開き直す回数（#151）。
+     *
+     * <p><b>★ 同じ深さとスタックでも、溢れるかどうかは揺れる。</b>PDFBox の構文解析は入れ子 500 段で止めるが、
+     * そこまでスタックがもてば {@code IOException}、もたなければ溢れる——1 段あたりの大きさは JIT の状態で変わる。
+     * 2026-10-28 実測（Linux、JDK 21、深さ 30000）: 256 KB では 40 回中 37〜38 回、64 KB では 40 回とも溢れた。
+     * だから何度か開き、<b>どれも包まれて出ること</b>と、<b>少なくとも 1 回は溢れたこと</b>を見る。
+     * 環境に依らずに縛るのは {@code PdfBoxGuardTest} である。
+     */
+    private static final int NESTING = 30000;
+
+    private static final int ATTEMPTS = 10;
+
+    @Test
+    @DisplayName("ページの木が深すぎる細工 PDF は、どちらの開き方でも PdfjigException になる")
+    void wrapsTheOverflowOfADeeplyNestedPageTree() throws Exception {
+        Path pdf = TestPdfs.withDeeplyNestedPages(tempDir.resolve("deep.pdf"), NESTING);
+
+        assertOverflowIsWrapped(ErrorCode.NOT_A_PDF, () -> {
+            try (PdfDocument document = PdfDocument.open(pdf)) {
+                document.pageCount();
+            }
+        });
+        assertOverflowIsWrapped(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
+            try (Password password = Password.of("x".toCharArray());
+                    PdfDocument document = PdfDocument.open(pdf, password)) {
+                document.pageCount();
+            }
+        });
+    }
+
+    /**
+     * 小さいスタックのスレッドで開き、失敗がどれも包まれて出ることを確かめる。溢れるまで開き直す。
+     *
+     * <p><b>★ 溢れたことまで見る。</b>見ないと、溢れずに {@code IOException} で終わる環境で、修正前でも緑になる。
+     */
+    private static void assertOverflowIsWrapped(ErrorCode expected, Runnable open) throws InterruptedException {
+        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+            Throwable[] thrown = {null};
+            Thread opener = new Thread(
+                    null,
+                    () -> {
+                        try {
+                            open.run();
+                        } catch (Throwable t) {
+                            thrown[0] = t;
+                        }
+                    },
+                    "small-stack",
+                    SMALL_STACK);
+            opener.start();
+            opener.join();
+
+            PdfjigException failure = assertInstanceOf(PdfjigException.class, thrown[0], "溢れた失敗が素のまま抜けている（#151）");
+            assertEquals(expected, failure.errorCode());
+            if (StackOverflowError.class.getName().equals(failure.causeType())) {
+                return;
+            }
+        }
+        fail(ATTEMPTS + " 回開いて 1 度も溢れなかった。前提が変わっている");
+    }
 
     @Test
     @DisplayName("平文の PDF はパスワードなしで開ける")

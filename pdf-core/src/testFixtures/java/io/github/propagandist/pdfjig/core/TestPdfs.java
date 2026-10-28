@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
@@ -365,6 +366,42 @@ public final class TestPdfs {
             document.getDocumentCatalog().getPages().getCOSObject().setInt(COSName.COUNT, declared);
             document.save(target.toFile());
         }
+        return target;
+    }
+
+    /**
+     * ページの木が {@code depth} 段の {@code /Pages} で入れ子になった、1 ページの PDF を作る（#151）。
+     *
+     * <p><b>入れ子は間接参照ではなく、1 つのオブジェクトの中に直に書く。</b>PDFBox は読み込みの途中で
+     * 直のオブジェクトを再帰で歩き（{@code COSUpdateState}）、深ければ {@code StackOverflowError} を投げる。
+     * 間接参照で繋ぐと、そこは歩かないので溢れない（2026-10-28 実測。深さ 30000 でも開けた）。
+     *
+     * <p><b>★ PDFBox で組まずに、バイト列を書く。</b>深い木は保存の側でも再帰しうるので、組めるかどうかが
+     * PDFBox の版とスタックの上限で変わる。手で書けば、作れることはどちらにも依らない。
+     */
+    public static Path withDeeplyNestedPages(Path target, int depth) throws IOException {
+        StringBuilder body = new StringBuilder("%PDF-1.7\n");
+        List<Integer> offsets = new ArrayList<>();
+        offsets.add(body.length());
+        body.append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        offsets.add(body.length());
+        body.append("2 0 obj\n");
+        body.append("<< /Type /Pages /Count 1 /Kids [ ".repeat(depth));
+        body.append("<< /Type /Page /MediaBox [0 0 612 792] >>");
+        body.append(" ] >>".repeat(depth));
+        body.append("\nendobj\n");
+        int xref = body.length();
+        // 相互参照表の 1 行は、改行まで含めてちょうど 20 バイトである。
+        body.append("xref\n0 ").append(offsets.size() + 1).append("\n0000000000 65535 f \n");
+        for (int offset : offsets) {
+            body.append(String.format(Locale.ROOT, "%010d 00000 n \n", offset));
+        }
+        body.append("trailer\n<< /Size ")
+                .append(offsets.size() + 1)
+                .append(" /Root 1 0 R >>\nstartxref\n")
+                .append(xref)
+                .append("\n%%EOF\n");
+        Files.writeString(target, body, StandardCharsets.US_ASCII);
         return target;
     }
 

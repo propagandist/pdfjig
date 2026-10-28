@@ -124,6 +124,50 @@ class LogsTest {
         assertFalse(written.contains(SECRET_PATH), "包んだ元のパスは出ない");
     }
 
+    /**
+     * 包んだ失敗でも、原因が投げられた位置を書く（#152）。
+     *
+     * <p><b>包む前は書けていた。</b>包んでから、診断ファイルに残るのは「{@code open} の中で
+     * 何かの {@code IllegalArgumentException} が起きた」までになった。報せを受けても、どこで落ちたのかが読めない。
+     */
+    @Test
+    @DisplayName("★ 包んだ失敗でも、原因が投げられた位置を書く。原因のメッセージは書かない")
+    void writesWhereTheWrappedCauseWasThrown(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IllegalArgumentException cause = new IllegalArgumentException("password=" + PASSWORD);
+        cause.setStackTrace(frames(3));
+
+        Logs.warn(LogEvent.OPERATION_FAILED, PdfjigException.wrapping(ErrorCode.NOT_A_PDF, cause));
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\tCaused by " + IllegalArgumentException.class.getName()), "原因の型を見出しにする");
+        assertTrue(written.contains("at Frame0.run(Frame.java:0)"), "原因が投げられた位置を落としている（#152）");
+        assertFalse(written.contains(PASSWORD), "原因のメッセージが出てはならない");
+    }
+
+    /**
+     * 抑えられた例外も、型名とフレームだけを書く（#152）。
+     *
+     * <p>try-with-resources は {@code close()} の失敗を抑えて付ける。{@code getCause} だけを辿ると、
+     * その失敗は診断ファイルに載りようがない。
+     */
+    @Test
+    @DisplayName("★ 抑えられた例外も、型名とフレームを書く。メッセージは書かない")
+    void writesSuppressedFailures(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IOException closing = new IOException("closing " + SECRET_PATH);
+        closing.setStackTrace(frames(2));
+        IllegalStateException failed = new IllegalStateException("failed " + SECRET_PATH);
+        failed.addSuppressed(closing);
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\tSuppressed: " + IOException.class.getName()), "抑えられた例外を辿っていない");
+        assertTrue(written.contains("at Frame1.run(Frame.java:1)"), "抑えられた例外の位置を落としている");
+        assertFalse(written.contains(SECRET_PATH), "抑えられた例外のメッセージが出てはならない");
+    }
+
     @Test
     @DisplayName("事象の名前と説明が、そのまま行に出る")
     void namesTheEvent(@TempDir Path logs) {
