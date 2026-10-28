@@ -164,7 +164,8 @@ public final class PdfBoxPageOperations implements PageOperations {
         return outputs;
     }
 
-    private List<Path> splitInto(Source input, SplitStrategy strategy, Path outputDir, Warnings warnings) {
+    private List<Path> splitInto(Source input, SplitStrategy strategy, Path outputDir, Warnings warnings)
+            throws IOException {
         List<PageRange> ranges;
         try (PdfDocument source = open(input, warnings)) {
             ranges = resolveRanges(strategy, source.pageCount());
@@ -178,7 +179,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         // 黙って失敗として返すと、利用者は何が出来上がったのか確かめる術がない。
         // requireAbsent を通しているため、ここで消してよいのはこの呼び出しが作ったものだけである。
         List<Path> written = new ArrayList<>(outputs.size());
-        try {
+        UndoOnFailure.runThrowing(e -> written.forEach(PdfBoxPageOperations::deleteQuietly), () -> {
             for (int i = 0; i < ranges.size(); i++) {
                 // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
                 written.add(outputs.get(i));
@@ -188,10 +189,7 @@ public final class PdfBoxPageOperations implements PageOperations {
                     writeRange(source, ranges.get(i), outputs.get(i), warnings);
                 }
             }
-        } catch (RuntimeException e) {
-            written.forEach(PdfBoxPageOperations::deleteQuietly);
-            throw e;
-        }
+        });
         return List.copyOf(outputs);
     }
 
@@ -282,16 +280,13 @@ public final class PdfBoxPageOperations implements PageOperations {
         // 途中で失敗したら、それまでに書いたものを消す。requireAbsent を通しているため、
         // ここで消してよいのはこの呼び出しが作ったものだけである。
         List<Path> written = new ArrayList<>(outputs.size());
-        try {
+        UndoOnFailure.runThrowing(e -> written.forEach(PdfBoxPageOperations::deleteQuietly), () -> {
             for (int i = 0; i < segments.size(); i++) {
                 // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
                 written.add(outputs.get(i));
                 assembleInto(inputs, segments.get(i), outputs.get(i), warnings, null);
             }
-        } catch (RuntimeException e) {
-            written.forEach(PdfBoxPageOperations::deleteQuietly);
-            throw e;
-        }
+        });
         return List.copyOf(outputs);
     }
 
@@ -764,25 +759,26 @@ public final class PdfBoxPageOperations implements PageOperations {
      */
     private static PdfDocument open(Source input, Warnings warnings) {
         PdfDocument document = openQuietly(input);
-        try {
-            if (document.encrypted()) {
-                warnings.add(Warning.ENCRYPTION_NOT_PROPAGATED);
-            }
-            if (document.signed()) {
-                warnings.add(Warning.SIGNATURE_INVALIDATED);
-            }
-        } catch (RuntimeException e) {
-            // ★★ 閉じる側も投げうる（PdfDocument#close は未検査例外を IO_FAILURE で包む）。
-            //   そのまま書くと、開いた後に投げた本当の失敗がそこで消える。
-            //   ★ 伝えるのは元の失敗である。閉じられなかったことは抑制例外として付ける
-            //   （OpenDocuments と同じ作法）。
-            try {
-                document.close();
-            } catch (RuntimeException closing) {
-                e.addSuppressed(closing);
-            }
-            throw e;
-        }
+        UndoOnFailure.run(
+                e -> {
+                    // ★★ 閉じる側も投げうる（PdfDocument#close は未検査例外を IO_FAILURE で包む）。
+                    //   そのまま書くと、開いた後に投げた本当の失敗がそこで消える。
+                    //   ★ 伝えるのは元の失敗である。閉じられなかったことは抑制例外として付ける
+                    //   （OpenDocuments と同じ作法）。
+                    try {
+                        document.close();
+                    } catch (RuntimeException closing) {
+                        e.addSuppressed(closing);
+                    }
+                },
+                () -> {
+                    if (document.encrypted()) {
+                        warnings.add(Warning.ENCRYPTION_NOT_PROPAGATED);
+                    }
+                    if (document.signed()) {
+                        warnings.add(Warning.SIGNATURE_INVALIDATED);
+                    }
+                });
         return document;
     }
 
@@ -973,12 +969,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <b>残った平文について言う言葉である。</b>
      */
     private void writingTo(Path output, PdfBoxGuard.PdfBoxAction write) throws IOException {
-        try {
-            write.run();
-        } catch (IOException | RuntimeException e) {
-            deleteQuietly(output);
-            throw e;
-        }
+        UndoOnFailure.runThrowing(e -> deleteQuietly(output), write);
     }
 
     /**
@@ -990,8 +981,9 @@ public final class PdfBoxPageOperations implements PageOperations {
     private static void deleteQuietly(Path path) {
         try {
             Files.deleteIfExists(path);
-        } catch (IOException e) {
-            // 消せなくても、元の失敗は元の失敗のまま伝わる。
+        } catch (IOException | RuntimeException e) {
+            // 消せなくても、元の失敗は元の失敗のまま伝わる。★ 未検査例外も受ける——巻き戻しの途中で抜けると、
+            //   残りの書いた分を消し損ねる（PdfBoxEncryption#deleteQuietly と同じ）。
         }
     }
 

@@ -124,6 +124,141 @@ class LogsTest {
         assertFalse(written.contains(SECRET_PATH), "包んだ元のパスは出ない");
     }
 
+    /**
+     * 包んだ失敗でも、原因が投げられた位置を書く（#152）。
+     *
+     * <p><b>包む前は書けていた。</b>包んでから、診断ファイルに残るのは「{@code open} の中で
+     * 何かの {@code IllegalArgumentException} が起きた」までになった。報せを受けても、どこで落ちたのかが読めない。
+     */
+    @Test
+    @DisplayName("★ 包んだ失敗でも、原因が投げられた位置を書く。原因のメッセージは書かない")
+    void writesWhereTheWrappedCauseWasThrown(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IllegalArgumentException cause = new IllegalArgumentException("password=" + PASSWORD);
+        cause.setStackTrace(frames(3));
+
+        Logs.warn(LogEvent.OPERATION_FAILED, PdfjigException.wrapping(ErrorCode.NOT_A_PDF, cause));
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\tCaused by " + IllegalArgumentException.class.getName()), "原因の型を見出しにする");
+        assertTrue(written.contains("at Frame0.run(Frame.java:0)"), "原因が投げられた位置を落としている（#152）");
+        assertFalse(written.contains(PASSWORD), "原因のメッセージが出てはならない");
+    }
+
+    /**
+     * 抑えられた例外も、型名とフレームだけを書く（#152）。
+     *
+     * <p>try-with-resources は {@code close()} の失敗を抑えて付ける。{@code getCause} だけを辿ると、
+     * その失敗は診断ファイルに載りようがない。
+     */
+    @Test
+    @DisplayName("★ 抑えられた例外も、型名とフレームを書く。メッセージは書かない")
+    void writesSuppressedFailures(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IOException closing = new IOException("closing " + SECRET_PATH);
+        closing.setStackTrace(frames(2));
+        IllegalStateException failed = new IllegalStateException("failed " + SECRET_PATH);
+        failed.addSuppressed(closing);
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\tSuppressed: " + IOException.class.getName()), "抑えられた例外を辿っていない");
+        assertTrue(written.contains("at Frame1.run(Frame.java:1)"), "抑えられた例外の位置を落としている");
+        assertFalse(written.contains(SECRET_PATH), "抑えられた例外のメッセージが出てはならない");
+    }
+
+    /**
+     * 抑えられた包んだ失敗も、原因が投げられた位置を書く（#152 の門の 2 段目）。
+     *
+     * <p>開いた後に投げた失敗へ、閉じ損ねた失敗（包んだもの）を抑えて付ける経路がある。
+     * そこで位置を落とすと、PDFBox のどこで閉じ損ねたのかが読めない。
+     */
+    @Test
+    @DisplayName("★ 抑えられた包んだ失敗も、原因が投げられた位置を書く")
+    void writesWhereASuppressedWrappedCauseWasThrown(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IOException closing = new IOException("closing " + SECRET_PATH);
+        closing.setStackTrace(frames(2));
+        IllegalStateException failed = new IllegalStateException("failed");
+        failed.addSuppressed(PdfjigException.wrapping(ErrorCode.IO_FAILURE, closing));
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("at Frame1.run(Frame.java:1)"), "抑えられた包んだ失敗の位置を落としている");
+        assertFalse(written.contains(SECRET_PATH));
+    }
+
+    /**
+     * 抑えられた失敗は、包んだ原因より先に書く（#152 の門の 2 段目）。
+     *
+     * <p>原因の型の下に続けて書くと、抑えられた失敗が原因のほうに付いていたと読まれる。
+     * {@code printStackTrace} と同じく、その例外のフレームの直後に置く。
+     */
+    @Test
+    @DisplayName("抑えられた失敗は、包んだ原因より先に書く")
+    void writesSuppressedBeforeTheWrappedCause(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        PdfjigException failure = PdfjigException.wrapping(ErrorCode.NOT_A_PDF, new IllegalArgumentException());
+        failure.addSuppressed(new IOException());
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failure);
+
+        String written = readAll(logs);
+        int suppressed = written.indexOf("\tSuppressed: " + IOException.class.getName());
+        int cause = written.indexOf("\tCaused by " + IllegalArgumentException.class.getName());
+        assertTrue(suppressed >= 0 && cause >= 0, "どちらかを書いていない");
+        assertTrue(suppressed < cause, "抑えられた失敗が、包んだ原因に付いていたように読める");
+    }
+
+    /**
+     * 抑えられた失敗の数も途中で切り、切ったことを書く（#152 の門の 2 段目）。
+     *
+     * <p>まとめて閉じると、閉じ損ねた数だけ付く。1 件が世代を丸ごと押し出すと、
+     * 押し出されるのは直前に起きた本当の原因のほうである（フレームの上限と同じ理由）。
+     */
+    @Test
+    @DisplayName("★ 抑えられた失敗の数も途中で切り、切ったことを書く")
+    void trimsManySuppressedFailures(@TempDir Path logs) {
+        Logs.startIn(logs, 512 * 1024, 2);
+        IllegalStateException failed = new IllegalStateException("failed");
+        for (int i = 0; i < 50; i++) {
+            failed.addSuppressed(new IOException());
+        }
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\tSuppressed: ... 以下 45 件は書いていない"), "切ったことを書く");
+        assertEquals(
+                5,
+                written.split("\tSuppressed: " + IOException.class.getName(), -1).length - 1,
+                "5 件までで切る（SPEC §10.4）");
+    }
+
+    /**
+     * 抑えられた失敗の原因は、一段深く書く（#152 の門の 2 段目）。
+     *
+     * <p>同じ深さで書くと、本体の原因の連鎖と見分けが付かない。{@code printStackTrace} も一段下げる。
+     * 奥を書かないときは、書いていないと書く——黙って切ると、そこが根だと読まれる。
+     */
+    @Test
+    @DisplayName("抑えられた失敗の原因は一段深く書き、奥を書かないときはそう書く")
+    void indentsTheCausesOfSuppressedFailures(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IllegalStateException failed = new IllegalStateException("failed");
+        failed.addSuppressed(PdfjigException.wrapping(ErrorCode.IO_FAILURE, new IOException()));
+        failed.addSuppressed(new java.io.UncheckedIOException(new IOException()));
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\t\tCaused by " + IOException.class.getName()), "抑えられた失敗の原因が、本体の原因と同じ深さにある");
+        assertFalse(written.contains("\n\tCaused by " + IOException.class.getName()), "抑えられた失敗の原因が、本体の原因と同じ深さにある");
+        assertTrue(written.contains("\t\tCaused by ... これより奥は書いていない"), "抑えられた失敗の奥を黙って切っている");
+    }
+
     @Test
     @DisplayName("事象の名前と説明が、そのまま行に出る")
     void namesTheEvent(@TempDir Path logs) {

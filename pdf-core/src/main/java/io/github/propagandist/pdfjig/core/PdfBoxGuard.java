@@ -22,11 +22,16 @@ import java.io.IOException;
  * <b>1 つずつ包まずに守れる</b>（#178 が「内側まで包むと 128 か所が {@code try} だらけになる」と
  * 数えた側である）。<b>だから規則が見るのは公開の入口だけでよい。</b>
  *
- * <p><b>★ {@code Error} は捕まえない。</b>包むかどうかは #151 が持つ判断であり、この差分では
- * 変えていない。<b>ただし変える場所はもうここ 1 か所である</b>——以前は同じ判断が
- * 境界ごとの {@code catch} に散っていた。<b>だから {@code pdf-core} に
- * 「{@code catch (IOException | RuntimeException)} を書いて包む」形を新しく作らないこと</b>
- * ——作った瞬間に、この行が嘘になる。
+ * <p><b>★ {@code Error} のうち包むのは {@link StackOverflowError} だけである</b>（#151）。
+ * 細工 PDF の深い入れ子で PDFBox が再帰しきれずに投げる。<b>スタックは巻き戻るので、JVM は壊れていない。
+ * 壊れているのは入力である</b>——素のまま抜けると、{@code pdf-cli} では
+ * スタックトレースがそのまま出ていた。<b>ほかの {@code Error} は通す。</b>メモリが尽きたなら続けても次の確保で
+ * 落ちるだけであり、クラスが見つからないのは配り方の誤りであって文書のせいではない。
+ * <b>★ 内側の後始末は {@link UndoOnFailure} が持ち、どの失敗でも走る</b>——こちらが包むようにしても、
+ * 書きかけが残ったまま「きれいに失敗した」とはならない（#151 の門の 2 段目）。
+ * <b>変える場所はここ 1 か所である</b>——以前は同じ判断が境界ごとの {@code catch} に散っていた。
+ * <b>だから {@code pdf-core} に「{@code catch (IOException | RuntimeException)} を書いて包む」形を
+ * 新しく作らないこと</b>——作った瞬間に、ここで引いた線と食い違う。
  *
  * <h2>符号の選び方</h2>
  *
@@ -65,7 +70,8 @@ final class PdfBoxGuard {
     static <T> T guarded(ErrorCode code, PdfBoxCall<T> call) {
         try {
             return call.call();
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | StackOverflowError e) {
+            // ★ 溢れた失敗を畳むのは、巻き戻った後のここである。包むのに使うスタックは浅い。
             throw PdfjigException.wrapping(code, e);
         }
     }

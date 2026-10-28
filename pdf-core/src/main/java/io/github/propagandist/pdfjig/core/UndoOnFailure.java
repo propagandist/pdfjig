@@ -1,0 +1,67 @@
+package io.github.propagandist.pdfjig.core;
+
+import java.io.IOException;
+import java.util.function.Consumer;
+
+/**
+ * 仕事が失敗したら後始末をしてから、同じ失敗を投げ直す（#151 の門の 2 段目）。
+ *
+ * <p>書きかけの出力を消す・書いた分を巻き戻す・開いた文書を閉じる、の置き場である。
+ * <b>失敗の分類（何を {@link PdfjigException} に包むか）は {@link PdfBoxGuard} が持ち、ここは持たない。</b>
+ *
+ * <p><b>★★ どの失敗でも後始末をする</b>（{@link Throwable} で受ける）。{@code PdfBoxGuard} が溢れた失敗
+ * （{@link StackOverflowError}）を包むようになったので、受ける範囲が {@code RuntimeException} までだと、
+ * <b>書きかけの平文を残したまま、包みが「きれいに失敗した」と言う。</b>包まない失敗（メモリ切れ）でも
+ * 書きかけは消す。投げ直すのは受けたものそのものなので、何を包むかは変わらない。
+ *
+ * <p><b>★ {@link PdfBoxGuard} に置かない。</b>{@code pdf-archtest} は公開の入口が {@code PdfBoxGuard} を
+ * 呼んだかを型で数えるので、そこに置くと、包まずに後始末だけをした入口まで「包みを通った」と数えられる。
+ */
+final class UndoOnFailure {
+
+    private UndoOnFailure() {}
+
+    /**
+     * 仕事を走らせ、失敗したら {@code undo} に渡してから投げ直す。
+     *
+     * @param undo 後始末。起きた失敗を受け取る（閉じ損ねを抑えて付けるため）
+     * @param work 仕事
+     */
+    static void runThrowing(Consumer<Throwable> undo, PdfBoxGuard.PdfBoxAction work) throws IOException {
+        try {
+            work.run();
+        } catch (Throwable e) {
+            undoKeeping(undo, e);
+            throw e;
+        }
+    }
+
+    /**
+     * チェック例外を投げない仕事の {@link #runThrowing}。
+     *
+     * <p><b>★ 同じ名前で重ねない。</b>ラムダはどちらの形にも当てはまるので、呼び出しが曖昧になる
+     * （{@code PdfBoxGuard#guardedRun} と同じ理由）。
+     */
+    static void run(Consumer<Throwable> undo, Runnable work) {
+        try {
+            work.run();
+        } catch (Throwable e) {
+            undoKeeping(undo, e);
+            throw e;
+        }
+    }
+
+    /**
+     * 後始末を走らせる。<b>後始末が投げても、元の失敗を上書きさせない</b>——抑えて付ける。
+     *
+     * <p>後始末はメモリ切れや溢れた直後にも走るので、後始末そのものが投げうる。そのまま抜けると、
+     * 伝わるのは後始末の失敗で、本当の原因が消える。呼ぶ側それぞれに「投げないこと」を頼む形にしない。
+     */
+    private static void undoKeeping(Consumer<Throwable> undo, Throwable failure) {
+        try {
+            undo.accept(failure);
+        } catch (Throwable undoing) {
+            failure.addSuppressed(undoing);
+        }
+    }
+}
