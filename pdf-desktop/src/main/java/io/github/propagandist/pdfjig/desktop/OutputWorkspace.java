@@ -78,8 +78,9 @@ final class OutputWorkspace implements AutoCloseable {
      * 1 つずつ積み上がることになる</b>（2026-09-01 実測。出力先が読み取り専用だと、
      * 改名は通るのに削除だけが {@code AccessDenied} で落ちる）。
      *
-     * <p><b>だから印は自分で作る。</b>こちらが作った空のファイルなら<b>必ず消せる</b>ので、
-     * 印を外し損ねて閉じ込められることがない。<b>控えを消せなかったときは作業場所ごと残るが、
+     * <p><b>だから印は自分で作る。</b>こちらが作った空のファイルは、ふつうは消せる
+     * （控えのように読み取り専用の属性を持ち込まない）。<b>それでも外し損ねたら、置き換えが済んでいれば
+     * 控えのほうを消す</b>（{@link #originalReplaced}。#218）——印だけが残れば、抱えていないと読める。<b>控えを消せなかったときは作業場所ごと残るが、
      * 印はもう無いので、次に同じフォルダへ書き出すときに片づけ直せる。</b>
      *
      * <p>package-private なのはテストのためである（{@code OutputWorkspaceTest}。名前を写さないため）。
@@ -389,7 +390,7 @@ final class OutputWorkspace implements AutoCloseable {
      *
      * <p><b>これで片づけの関門が開く。</b>控えそのものを消せるかどうかは
      * {@link #discard} の仕事であり、<b>消せなくても閉じ込められない</b>——
-     * 印はこちらが作った空のファイルなので、必ず消せる（{@link #HELD}）。
+     * 印はこちらが作った空のファイルなので、ふつうは消せる（{@link #HELD}）。
      *
      * @return 外せたか、もともと無ければ {@code true}
      */
@@ -398,7 +399,7 @@ final class OutputWorkspace implements AutoCloseable {
             Files.deleteIfExists(workspace.resolve(HELD));
             return true;
         } catch (IOException e) {
-            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
+            // ふつうは起きない。残ると作業場所が片づかないので、理由を追える先を残す。
             Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
             return false;
         }
@@ -612,7 +613,11 @@ final class OutputWorkspace implements AutoCloseable {
      * 説明の無い {@code .pdfjig-*} だけが残り続ける。
      * <b>★ 生きている窓の「印を立てて、まだどけていない」作業場所も同じ形をしている。</b>Windows では
      * あちらが押さえているので、片づけはそれを見て触らない（{@link #inUse}）。Windows 以外では押さえないので、
-     * 消せばあちらの退避が失敗する（元は出力先に残る）。
+     * 消しうる（押さえを入れる前の版の pdfjig も同じ）。そのときは、あちらの退避が消した後なら失敗し、
+     * 先に通っていれば入れ替えが失敗して巻き戻す。<b>巻き戻しまで失敗したときだけ、元は印の無い控えになる。</b>
+     *
+     * <p><b>★ 控えはリンクを辿らずに見る</b>（#218 の門の 2 段目）。出力先がリンクなら、退避はリンクそのものを
+     * 移す。相対リンクは移った先で辿れなくなるので、辿って「無い」と読むと唯一の控えを消す。
      *
      * <p><b>★★ 「無いと確信できる」ときだけ開ける。</b>{@link Files#exists} は
      * <b>「無い」と「確かめられない」を同じ {@code false} に潰す</b>ので、
@@ -626,7 +631,8 @@ final class OutputWorkspace implements AutoCloseable {
      * <b>片づけの根拠に使ってよいものではない。</b>
      */
     private static boolean holdsTheOnlyCopy(Path workspace) {
-        return !Files.notExists(workspace.resolve(HELD)) && !Files.notExists(workspace.resolve(REPLACED));
+        return !Files.notExists(workspace.resolve(HELD))
+                && !Files.notExists(workspace.resolve(REPLACED), LinkOption.NOFOLLOW_LINKS);
     }
 
     /**
