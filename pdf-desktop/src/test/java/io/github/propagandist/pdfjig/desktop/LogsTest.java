@@ -230,8 +230,33 @@ class LogsTest {
         Logs.warn(LogEvent.OPERATION_FAILED, failed);
 
         String written = readAll(logs);
-        assertTrue(written.contains("件は書いていない"), "切ったことを書く");
-        assertTrue(written.split("\tSuppressed: ", -1).length - 1 < 50, "抑えられた失敗を全部書いている");
+        assertTrue(written.contains("\tSuppressed: ... 以下 45 件は書いていない"), "切ったことを書く");
+        assertEquals(
+                5,
+                written.split("\tSuppressed: " + IOException.class.getName(), -1).length - 1,
+                "5 件までで切る（SPEC §10.4）");
+    }
+
+    /**
+     * 抑えられた失敗の原因は、一段深く書く（#152 の門の 2 段目）。
+     *
+     * <p>同じ深さで書くと、本体の原因の連鎖と見分けが付かない。{@code printStackTrace} も一段下げる。
+     * 奥を書かないときは、書いていないと書く——黙って切ると、そこが根だと読まれる。
+     */
+    @Test
+    @DisplayName("抑えられた失敗の原因は一段深く書き、奥を書かないときはそう書く")
+    void indentsTheCausesOfSuppressedFailures(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IllegalStateException failed = new IllegalStateException("failed");
+        failed.addSuppressed(PdfjigException.wrapping(ErrorCode.IO_FAILURE, new IOException()));
+        failed.addSuppressed(new java.io.UncheckedIOException(new IOException()));
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("\t\tCaused by " + IOException.class.getName()), "抑えられた失敗の原因が、本体の原因と同じ深さにある");
+        assertFalse(written.contains("\n\tCaused by " + IOException.class.getName()), "抑えられた失敗の原因が、本体の原因と同じ深さにある");
+        assertTrue(written.contains("\t\tCaused by ... これより奥は書いていない"), "抑えられた失敗の奥を黙って切っている");
     }
 
     @Test
