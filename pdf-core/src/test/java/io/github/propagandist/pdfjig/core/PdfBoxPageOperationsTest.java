@@ -593,6 +593,93 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * 絞れなかった失敗の符号は、入口が何をしていたかで決まり、内側の分岐で変わらない（#191）。
+     *
+     * <p><b>★ 書き出しの継ぎ目から、分類されていない失敗を投げる。</b>細工 PDF は要らない——
+     * 入口の包みまで素のまま届けば、どの分岐を通ったかが符号に出る。
+     */
+    @Nested
+    class FallbackErrorCodes {
+
+        @Test
+        @DisplayName("assemble は、出どころが 1 つでも混ざっても同じ符号を返す")
+        void assembleAnswersTheSameWhicheverBranchItTakes() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("second.pdf"), "B1");
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), unclassifiedFailure());
+
+            ErrorCode single = assertThrows(
+                            PdfjigException.class,
+                            () -> failing.assemble(
+                                    List.of(first, second),
+                                    List.of(PageSelection.of(0, 2), PageSelection.of(0, 1)),
+                                    tempDir.resolve("single.pdf")))
+                    .errorCode();
+            ErrorCode mixed = assertThrows(
+                            PdfjigException.class,
+                            () -> failing.assemble(
+                                    List.of(first, second),
+                                    List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                                    tempDir.resolve("mixed.pdf")))
+                    .errorCode();
+
+            assertEquals(ErrorCode.NOT_A_PDF, single);
+            assertEquals(single, mixed, "呼ぶ側から見えない分岐で、符号が変わっている");
+        }
+
+        @Test
+        @DisplayName("merge も、ページの木をいじる入口として NOT_A_PDF を返す")
+        void mergeAnswersLikeTheOtherPageOperations() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), unclassifiedFailure());
+
+            PdfjigException thrown = assertThrows(
+                    PdfjigException.class,
+                    () -> failing.merge(
+                            List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults()));
+
+            assertEquals(ErrorCode.NOT_A_PDF, thrown.errorCode(), "9 本中 merge だけが外れている");
+        }
+
+        @Test
+        @DisplayName("本物の書き出しの失敗は、どの入口でも IO_FAILURE のままである")
+        void realWriteFailuresKeepTheirCode() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
+            // 継ぎ目は数を数えるので、呼び出しごとに作り直す。
+
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> new PdfBoxPageOperations(WarningListener.ignoring(), failingOnSave(1))
+                                            .assemble(
+                                                    List.of(first, second),
+                                                    List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                                                    tempDir.resolve("mixed.pdf")))
+                            .errorCode());
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> new PdfBoxPageOperations(WarningListener.ignoring(), failingOnSave(1))
+                                            .merge(
+                                                    List.of(first, second),
+                                                    tempDir.resolve("merged.pdf"),
+                                                    MergeOptions.defaults()))
+                            .errorCode());
+        }
+
+        /** 分類されていない失敗を投げる書き出し。入口の包みまで素のまま届く。 */
+        private PdfBoxPageOperations.DocumentSaver unclassifiedFailure() {
+            return (document, output) -> {
+                throw new IllegalStateException("分類されていない失敗");
+            };
+        }
+    }
+
     @Nested
     class AssembleEach {
 
