@@ -589,12 +589,20 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * その作業場所が、元の実体を唯一の控えとして抱えているか。
      *
-     * <p><b>印だけを見る</b>（{@link #HELD}）。立てるのも外すのも、置き換えが済んだかを
+     * <p><b>印で決める</b>（{@link #HELD}）。立てるのも外すのも、置き換えが済んだかを
      * 知っている側である（{@code DocumentWriter#move}）。
+     *
+     * <p><b>★ 印があっても、控えが無いと確信できれば抱えていない</b>（#218）。印を立ててから元をどけるまでの間に
+     * 落ちた回と、巻き戻して元へ返したのに印を外せなかった回である。どちらも元は出力先にあり、
+     * 失うものは無い。抱えていると読むと、<b>その作業場所は二度と片づかない</b>——控えが無いので知らせもせず、
+     * 説明の無い {@code .pdfjig-*} だけが残り続ける。
+     * <b>★ 生きている窓の「印を立てて、まだどけていない」作業場所も同じ形をしている。</b>Windows では
+     * あちらが押さえているので、片づけはそれを見て触らない（{@link #inUse}）。Windows 以外では押さえないので、
+     * 消せばあちらの退避が失敗する（元は出力先に残る）。
      *
      * <p><b>★★ 「無いと確信できる」ときだけ開ける。</b>{@link Files#exists} は
      * <b>「無い」と「確かめられない」を同じ {@code false} に潰す</b>ので、
-     * 権限や一時的な失敗で属性を読めないだけの作業場所を「印は無い」と読み、
+     * 権限や一時的な失敗で属性を読めないだけの作業場所を「印は無い」「控えは無い」と読み、
      * <b>唯一の控えごと消しにいく。</b>関門は消さない側へ倒す（{@code CLAUDE.md} 優先順位 1）。
      *
      * <p><b>★ 出力先の側を見に行かない。</b>「同じ名前が隣に戻っているか」で判断する形も
@@ -604,7 +612,7 @@ final class OutputWorkspace implements AutoCloseable {
      * <b>片づけの根拠に使ってよいものではない。</b>
      */
     private static boolean holdsTheOnlyCopy(Path workspace) {
-        return !Files.notExists(workspace.resolve(HELD));
+        return !Files.notExists(workspace.resolve(HELD)) && !Files.notExists(workspace.resolve(REPLACED));
     }
 
     /**
