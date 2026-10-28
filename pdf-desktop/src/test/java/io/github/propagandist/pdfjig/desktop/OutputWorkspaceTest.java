@@ -581,6 +581,43 @@ class OutputWorkspaceTest {
     }
 
     /**
+     * 置き換えが済んだのに印を外せなければ、控えを消す（#218）。
+     *
+     * <p><b>印も控えも残ると、成功した保存を「途中で終わった」と伝え続ける</b>——同じフォルダへ保存するたびに
+     * 控えの窓が出て、利用者は読まずに閉じることを覚える。控えはもう 1 世代前であって、消してよい。
+     * 印だけが残れば、次の書き出しが片づける（{@link #discardsAWorkspaceLeftWithOnlyTheMark}）。
+     *
+     * <p>印を消せない状態は、掴んだままにして作る（{@link #stopsHoldingEvenWhenTheCopyCannotBeDeleted} と同じ）。
+     * <b>Windows でだけ作れる状態である。</b>
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("置き換えが済んだのに印を外せなければ、控えを消す")
+    void dropsTheCopyWhenTheMarkCannotBeReleased(@TempDir Path directory) throws IOException {
+        Path workspace;
+        Path copy;
+        try (OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            workspace = place.file().getParent();
+            Path held = workspace.resolve(OutputWorkspace.HELD);
+            place.holdOriginal();
+            copy = Files.writeString(place.replaced(), "1 世代前");
+
+            // ★ java.io で開く。理由は stopsHoldingEvenWhenTheCopyCannotBeDeleted にある。
+            try (OutputStream grip = new FileOutputStream(held.toFile(), true)) {
+                place.originalReplaced();
+                assertTrue(Files.exists(held), "印を外せない状態になっていない。前提が変わっている");
+                grip.flush();
+            }
+            assertFalse(Files.exists(copy), "印を外せずに控えも残した。次から成功した保存を「途中で終わった」と伝え続ける");
+        }
+
+        List<List<Path>> found = new ArrayList<>();
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add).close();
+        assertEquals(List.of(), found, "置き換えが済んだ作業場所を「途中で終わった」と伝えている");
+        assertFalse(Files.exists(workspace), "印だけ残った作業場所が片づいていない");
+    }
+
+    /**
      * 落ちた後に残った控えを、次の書き出しが消さない。
      *
      * <p><b>★★ ここがいちばんありそうな流れである</b>——保存が落ちる → 直して同じフォルダへ
@@ -771,6 +808,49 @@ class OutputWorkspaceTest {
         try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
             assertFalse(Files.exists(abandoned), "残ったものを片づけないと、利用者には正体の分からない隠しものが増えていく");
             assertTrue(Files.exists(workspace.file().getParent()), "片づけが自分の作業場所まで消してはならない");
+        }
+    }
+
+    /**
+     * 印だけが残って控えの無い作業場所を、次の書き出しが片づける（#218）。
+     *
+     * <p>印を立ててから元をどけるまでの間に落ちた回である。<b>元はまだ出力先にあるので、失うものは無い。</b>
+     * 片づけないと、説明の無い {@code .pdfjig-*} がいつまでも残る——控えが無いので、知らせることもない。
+     */
+    @Test
+    @DisplayName("印だけが残って控えの無い作業場所を、次の書き出しが片づける")
+    void discardsAWorkspaceLeftWithOnlyTheMark(@TempDir Path directory) throws IOException {
+        OutputWorkspace left = leftBehind(directory.resolve("out.pdf"));
+        left.holdOriginal();
+        Path abandoned = left.file().getParent();
+
+        List<List<Path>> found = new ArrayList<>();
+        try (OutputWorkspace workspace = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found::add)) {
+            assertFalse(Files.exists(abandoned), "印だけ残った作業場所が、いつまでも消えない");
+            assertTrue(Files.exists(workspace.file().getParent()), "片づけが自分の作業場所まで消してはならない");
+        }
+        assertEquals(List.of(), found, "控えが無いのに知らせている");
+    }
+
+    /**
+     * 印を立てて元をどける前の別の窓の作業場所は、控えが無くても片づけない（#218 の境界）。
+     *
+     * <p><b>落ちた後の「印だけ」と同じ形をしている。</b>消すと、あちらの退避が失敗する。
+     * 使っている窓は押さえを開いているので、それで見分ける（#222）。
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("印を立てて元をどける前の別の窓の作業場所は、片づけない")
+    void leavesAMarkedWorkspaceAnotherWindowIsUsing(@TempDir Path directory) throws IOException {
+        try (OutputWorkspace busy = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
+            busy.holdOriginal();
+
+            OutputWorkspace.nextTo(directory.resolve("other.pdf"), found -> {}).close();
+
+            assertTrue(
+                    Files.exists(busy.file().getParent().resolve(OutputWorkspace.HELD)),
+                    "使っている窓の作業場所を片づけている。あちらの退避が失敗する");
+            busy.releaseOriginal();
         }
     }
 

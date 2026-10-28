@@ -81,8 +81,10 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>だから印は自分で作る。</b>こちらが作った空のファイルなら<b>必ず消せる</b>ので、
      * 印を外し損ねて閉じ込められることがない。<b>控えを消せなかったときは作業場所ごと残るが、
      * 印はもう無いので、次に同じフォルダへ書き出すときに片づけ直せる。</b>
+     *
+     * <p>package-private なのはテストのためである（{@code OutputWorkspaceTest}。名前を写さないため）。
      */
-    private static final String HELD = "held";
+    static final String HELD = "held";
 
     /**
      * 保存の間、作業場所を押さえておくために開いたままにするファイルの名前（#222。{@link #pin}）。
