@@ -384,28 +384,45 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * もう抱えていないことを記す。
      *
-     * <p>置き換えが済んだか、巻き戻して元の場所へ返したときに呼ぶ。
+     * <p>巻き戻して元の場所へ返したときと、退避に失敗したときに呼ぶ。置き換えが済んだときは
+     * {@link #originalReplaced} を呼ぶ。
      *
      * <p><b>これで片づけの関門が開く。</b>控えそのものを消せるかどうかは
      * {@link #discard} の仕事であり、<b>消せなくても閉じ込められない</b>——
      * 印はこちらが作った空のファイルなので、必ず消せる（{@link #HELD}）。
      */
     void releaseOriginal() {
-        try {
-            Files.deleteIfExists(workspace.resolve(HELD));
-        } catch (IOException e) {
-            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
-            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-        }
+        dropMark();
     }
 
     /**
      * 置き換えが済んで、控えはもう要らないことを記す（{@code DocumentWriter#move}）。
      *
      * <p>巻き戻して元の場所へ返したときは {@link #releaseOriginal} を呼ぶ。
+     *
+     * <p><b>★ 印を外せなければ、控えを消す</b>（#218）。印も控えも残ると、片づけはそれを「元はここにしか無い」
+     * と読み、<b>成功した保存を「途中で終わった」と伝え続ける</b>——同じフォルダへ保存するたびに窓が出て、
+     * 利用者は読まずに閉じることを覚える。控えは 1 世代前であって、もう要らない。
+     * 印だけが残れば、抱えていないと読める（{@link #holdsTheOnlyCopy}）ので次の書き出しが片づける。
+     * <b>印をもう 1 つ置く形は採らない</b>——それを消し損ねると、同じことが起きる。
+     * 控えも消せなければ、今までどおり知らせ続ける。
      */
     void originalReplaced() {
-        releaseOriginal();
+        if (!dropMark()) {
+            deleteQuietly(replaced());
+        }
+    }
+
+    /** 印を外す。外せたか、もともと無ければ {@code true}。 */
+    private boolean dropMark() {
+        try {
+            Files.deleteIfExists(workspace.resolve(HELD));
+            return true;
+        } catch (IOException e) {
+            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return false;
+        }
     }
 
     /**
