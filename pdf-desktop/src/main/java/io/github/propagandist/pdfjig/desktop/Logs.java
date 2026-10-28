@@ -318,19 +318,15 @@ final class Logs {
         private static void appendCauses(StringBuilder text, Throwable thrown) {
             Throwable current = thrown;
             for (int depth = 0; current != null && depth < CAUSE_DEPTH; depth++) {
-                text.append(depth == 0 ? "\t" : "\tCaused by ")
-                        .append(describe(current))
-                        .append(NEW_LINE);
-                appendFrames(text, List.of(current.getStackTrace()));
+                appendEntry(
+                        text, depth == 0 ? "\t" : "\tCaused by ", describe(current), List.of(current.getStackTrace()));
                 if (current instanceof PdfjigException failure && failure.causeType() != null) {
                     // ★ 包んだ失敗は原因を繋いでいない。持っている位置を、原因の型の下に書く（#152）。
-                    text.append("\tCaused by ").append(failure.causeType()).append(NEW_LINE);
-                    appendFrames(text, failure.causeFrames());
+                    appendEntry(text, "\tCaused by ", failure.causeType(), failure.causeFrames());
                 }
                 for (Throwable suppressed : current.getSuppressed()) {
                     // ★ try-with-resources が付けた close の失敗はここにしか無い（#152）。1 段だけ書く。
-                    text.append("\tSuppressed: ").append(describe(suppressed)).append(NEW_LINE);
-                    appendFrames(text, List.of(suppressed.getStackTrace()));
+                    appendEntry(text, "\tSuppressed: ", describe(suppressed), List.of(suppressed.getStackTrace()));
                 }
                 Throwable cause = current.getCause();
                 current = cause == current ? null : cause;
@@ -341,7 +337,10 @@ final class Logs {
             }
         }
 
-        private static void appendFrames(StringBuilder text, List<StackTraceElement> frames) {
+        /** 見出しの 1 行と、その下のフレームを書く。 */
+        private static void appendEntry(
+                StringBuilder text, String prefix, String heading, List<StackTraceElement> frames) {
+            text.append(prefix).append(heading).append(NEW_LINE);
             int shown = Math.min(frames.size(), FRAME_LIMIT);
             for (int i = 0; i < shown; i++) {
                 text.append("\t\tat ").append(frames.get(i)).append(NEW_LINE);
