@@ -356,7 +356,7 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * 出力先に元からあった実体の退避先。まだ存在しない。
      *
-     * <p><b>ここへ退避したら {@link #holdOriginal} を、済んだら {@link #releaseOriginal} を呼ぶこと。</b>
+     * <p><b>ここへ退避したら {@link #holdOriginal} を、置き換えが済んだら {@link #originalReplaced} を、巻き戻したら {@link #releaseOriginal} を呼ぶこと。</b>
      * <b>済んだかどうかを知っているのは呼ぶ側だけである</b>（{@code DocumentWriter#move}）。
      */
     Path replaced() {
@@ -390,9 +390,18 @@ final class OutputWorkspace implements AutoCloseable {
      * <p><b>これで片づけの関門が開く。</b>控えそのものを消せるかどうかは
      * {@link #discard} の仕事であり、<b>消せなくても閉じ込められない</b>——
      * 印はこちらが作った空のファイルなので、必ず消せる（{@link #HELD}）。
+     *
+     * @return 外せたか、もともと無ければ {@code true}
      */
-    void releaseOriginal() {
-        dropMark();
+    boolean releaseOriginal() {
+        try {
+            Files.deleteIfExists(workspace.resolve(HELD));
+            return true;
+        } catch (IOException e) {
+            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
+            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
+            return false;
+        }
     }
 
     /**
@@ -408,20 +417,8 @@ final class OutputWorkspace implements AutoCloseable {
      * 控えも消せなければ、今までどおり知らせ続ける。
      */
     void originalReplaced() {
-        if (!dropMark()) {
+        if (!releaseOriginal()) {
             deleteQuietly(replaced());
-        }
-    }
-
-    /** 印を外す。外せたか、もともと無ければ {@code true}。 */
-    private boolean dropMark() {
-        try {
-            Files.deleteIfExists(workspace.resolve(HELD));
-            return true;
-        } catch (IOException e) {
-            // 消せないことは想定していない。残ると作業場所が片づかないので、理由を追える先を残す。
-            Logs.warn(LogEvent.WORKSPACE_NOT_DISCARDED, e);
-            return false;
         }
     }
 
@@ -606,7 +603,7 @@ final class OutputWorkspace implements AutoCloseable {
     /**
      * その作業場所が、元の実体を唯一の控えとして抱えているか。
      *
-     * <p><b>印で決める</b>（{@link #HELD}）。立てるのも外すのも、置き換えが済んだかを
+     * <p><b>印で決める</b>（{@link #HELD}。控えが無いと確信できれば開ける。下の★）。立てるのも外すのも、置き換えが済んだかを
      * 知っている側である（{@code DocumentWriter#move}）。
      *
      * <p><b>★ 印があっても、控えが無いと確信できれば抱えていない</b>（#218）。印を立ててから元をどけるまでの間に
@@ -703,7 +700,7 @@ final class OutputWorkspace implements AutoCloseable {
             return false;
         }
         if (holdsTheOnlyCopy(directory)) {
-            // ★ 使われていないと見てから、印を読み直す。最初に読んでから見るまでの間に、持ち主が
+            // ★ 使われていないと見てから、印と控えを読み直す。最初に読んでから見るまでの間に、持ち主が
             //   済ませて印を外し、押さえを放しうる——控えを消し損ねていれば、無事な保存の 1 世代前を
             //   「元はここにしか無い」と伝えることになる。
             return !inUse(directory) && holdsTheOnlyCopy(directory);
@@ -721,7 +718,7 @@ final class OutputWorkspace implements AutoCloseable {
             return false;
         }
         try {
-            // ★ 押さえてから印を読み直す。押さえている間に持ち主が印を立てることはないが、
+            // ★ 押さえてから印と控えを読み直す。押さえている間に持ち主が印を立てることはないが、
             //   押さえない版の pdfjig は立てうる。関門は消さない側へ倒す。
             if (holdsTheOnlyCopy(directory)) {
                 return true;
