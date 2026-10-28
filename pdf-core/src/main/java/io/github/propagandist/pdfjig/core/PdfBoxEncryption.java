@@ -91,29 +91,32 @@ public final class PdfBoxEncryption implements Encryption {
      */
     private static void protectInto(PDDocument document, Protection protection, Path output) {
         try {
-            // ★ 方針の組み立ては StandardProtection が持つ。組み立てながら掛ける側（#199）と
-            //   同じものを使う——写すと、片方だけ直した設定で書けるようになる。
-            StandardProtection.apply(document, protection);
-
-            // ★★ ここが漏えいの関門である（#28 の申し送り）。SASLprep が走るのは protect ではなく
-            //   save のほうであり、禁じられた文字に当たると PDFBox は本物のパスワードの文字と
-            //   位置をメッセージに載せた IllegalArgumentException を投げる——IOException ではない。
-            //   wrapping は型名しか残さないので、ここで包めば漏れない（#144 / INV-5）。
-            // ★ 届いたかは見ない（#219）。暗号化には伝える口が無く、既存の出力は拒むので置き換えも無い。
-            //   置き換えに使う呼ぶ側が現れたら、届いたかを返す口を足すこと（Encryption の契約）。
-            DurableSave.write(document, output);
+            // 書けたところまでを残さない。どの失敗でも、包む前に消す。
+            UndoOnFailure.runThrowing(e -> deleteQuietly(output), () -> write(document, protection, output));
         } catch (IOException e) {
             // ★★ 書けなかったことを、パスワードのせいにしない。出力先が無い・ディスクが満杯
             //   といった失敗まで PASSWORD_OR_DOCUMENT_FAILURE に畳むと、利用者は打ち直す
             //   ——ErrorCode 自身が「絞れないときにだけ使う」と書いている符号である。
-            deleteQuietly(output);
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
         } catch (RuntimeException e) {
-            // 書けたところまでを残さない。保護が掛かっていない半端な出力は、
-            // 保護されているつもりで配られる元になる（優先順位 1・2）。
-            deleteQuietly(output);
+            // 保護が掛かっていない半端な出力は、保護されているつもりで配られる元になる（優先順位 1・2）。
             throw PdfjigException.wrapping(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, e);
         }
+    }
+
+    /** 方針を当てて書く。後始末と分類は {@link #protectInto} が持つ。 */
+    private static void write(PDDocument document, Protection protection, Path output) throws IOException {
+        // ★ 方針の組み立ては StandardProtection が持つ。組み立てながら掛ける側（#199）と
+        //   同じものを使う——写すと、片方だけ直した設定で書けるようになる。
+        StandardProtection.apply(document, protection);
+
+        // ★★ ここが漏えいの関門である（#28 の申し送り）。SASLprep が走るのは protect ではなく
+        //   save のほうであり、禁じられた文字に当たると PDFBox は本物のパスワードの文字と
+        //   位置をメッセージに載せた IllegalArgumentException を投げる——IOException ではない。
+        //   wrapping は型名しか残さないので、protectInto で包めば漏れない（#144 / INV-5）。
+        // ★ 届いたかは見ない（#219）。暗号化には伝える口が無く、既存の出力は拒むので置き換えも無い。
+        //   置き換えに使う呼ぶ側が現れたら、届いたかを返す口を足すこと（Encryption の契約）。
+        DurableSave.write(document, output);
     }
 
     @Override
@@ -131,12 +134,13 @@ public final class PdfBoxEncryption implements Encryption {
     /** 保護を外して書き出す。<b>閉じる失敗をここへ入れない</b>（{@link #protectInto} と同じ理由）。 */
     private static void unprotectInto(PDDocument document, Path output) {
         try {
-            document.setAllSecurityToBeRemoved(true);
-            // ★ 届いたかは見ない（#219）。暗号化には伝える口が無く、既存の出力は拒むので置き換えも無い。
-            //   置き換えに使う呼ぶ側が現れたら、届いたかを返す口を足すこと（Encryption の契約）。
-            DurableSave.write(document, output);
+            UndoOnFailure.runThrowing(e -> deleteQuietly(output), () -> {
+                document.setAllSecurityToBeRemoved(true);
+                // ★ 届いたかは見ない（#219）。暗号化には伝える口が無く、既存の出力は拒むので置き換えも無い。
+                //   置き換えに使う呼ぶ側が現れたら、届いたかを返す口を足すこと（Encryption の契約）。
+                DurableSave.write(document, output);
+            });
         } catch (IOException | RuntimeException e) {
-            deleteQuietly(output);
             // ★ 自分で分類した失敗は塗り替えない。PdfDocument#open が INVALID_PASSWORD を
             //   付けていれば、wrapping がそれを素通しする。
             throw PdfjigException.wrapping(ErrorCode.IO_FAILURE, e);
