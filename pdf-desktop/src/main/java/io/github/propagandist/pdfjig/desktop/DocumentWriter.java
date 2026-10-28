@@ -331,7 +331,7 @@ final class DocumentWriter {
         }
         if (kept) {
             // 置き換えが済んだ。控えはもう要らない（作業場所ごと片づく）。
-            workspace.releaseOriginal();
+            workspace.originalReplaced();
         }
     }
 

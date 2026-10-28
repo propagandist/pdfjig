@@ -398,6 +398,15 @@ final class OutputWorkspace implements AutoCloseable {
     }
 
     /**
+     * 置き換えが済んで、控えはもう要らないことを記す（{@code DocumentWriter#move}）。
+     *
+     * <p>巻き戻して元の場所へ返したときは {@link #releaseOriginal} を呼ぶ。
+     */
+    void originalReplaced() {
+        releaseOriginal();
+    }
+
+    /**
      * 控えを抱えたまま失敗したなら、その在り処を載せた例外を返す。
      *
      * <p><b>★★ 抱えたままなら、出力先には何も無く、元はこの中にしか無い</b>
