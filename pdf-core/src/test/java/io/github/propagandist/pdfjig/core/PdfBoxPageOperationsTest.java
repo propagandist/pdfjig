@@ -181,8 +181,8 @@ class PdfBoxPageOperationsTest {
         @DisplayName("★★ 複数の入力を組み立てる経路でも、包みが飲まない")
         void callerFailureIsNotWrappedWhenMerging() throws Exception {
             // ★★ 平文の入力を 2 つ使う。暗号化されていると warnAboutContributing（包みの外）が
-            //   先に投げてしまい、writeByMerging の中まで届かない——それでは merge 側と同じ
-            //   ものしか縛れず、writeByMerging の report を包みの中へ戻しても緑になる。
+            //   先に投げてしまい、mergeCopiesInto の中まで届かない——それでは merge 側と同じ
+            //   ものしか縛れず、mergeCopiesInto の report を包みの中へ戻しても緑になる。
             //   平文なら METADATA_FROM_FIRST_INPUT が applyInformation（包みの中）から出る。
             Path first = TestPdfs.plain(tempDir.resolve("a.pdf"), 1);
             Path second = TestPdfs.plain(tempDir.resolve("b.pdf"), 1);
@@ -590,6 +590,126 @@ class PdfBoxPageOperationsTest {
                     tempDir.resolve("assembled.pdf"));
 
             assertFalse(collected.contains(Warning.SIGNATURE_INVALIDATED), "出力に含まれない入力について、署名が無効になると伝えている。");
+        }
+    }
+
+    /**
+     * 絞れなかった失敗の符号は、入口が何をしていたかで決まり、内側の分岐で変わらない（#191）。
+     *
+     * <p><b>★ 書き出しの継ぎ目から、分類されていない失敗を投げる。</b>細工 PDF は要らない——
+     * 入口の包みまで素のまま届けば、どの分岐を通ったかが符号に出る。
+     */
+    @Nested
+    class FallbackErrorCodes {
+
+        @Test
+        @DisplayName("assemble は、出どころが 1 つでも混ざっても同じ符号を返す")
+        void assembleAnswersTheSameWhicheverBranchItTakes() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("second.pdf"), "B1");
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), unclassifiedFailure());
+
+            ErrorCode single = assertThrows(
+                            PdfjigException.class,
+                            () -> failing.assemble(
+                                    List.of(first, second),
+                                    List.of(PageSelection.of(0, 2), PageSelection.of(0, 1)),
+                                    tempDir.resolve("single.pdf")))
+                    .errorCode();
+            ErrorCode mixed = assertThrows(
+                            PdfjigException.class,
+                            () -> failing.assemble(
+                                    List.of(first, second),
+                                    List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                                    tempDir.resolve("mixed.pdf")))
+                    .errorCode();
+
+            assertEquals(ErrorCode.NOT_A_PDF, single);
+            assertEquals(single, mixed, "呼ぶ側から見えない分岐で、符号が変わっている");
+        }
+
+        @Test
+        @DisplayName("merge も、ページの木をいじる入口として NOT_A_PDF を返す")
+        void mergeAnswersLikeTheOtherPageOperations() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), unclassifiedFailure());
+
+            PdfjigException thrown = assertThrows(
+                    PdfjigException.class,
+                    () -> failing.merge(
+                            List.of(first, second), tempDir.resolve("merged.pdf"), MergeOptions.defaults()));
+
+            assertEquals(ErrorCode.NOT_A_PDF, thrown.errorCode(), "merge だけが、ほかのページ操作と違う符号を返している");
+        }
+
+        /**
+         * 本物の書き出しの失敗は、どの入口でも IO_FAILURE のままである。
+         *
+         * <p><b>★ 継ぎ目を使わずに、本物の書き出しで失敗させる。</b>出力先のフォルダが無ければ、
+         * 既定の書き出し（{@code saveDocument}）が {@code IOException} を受けて {@code IO_FAILURE} を付ける。
+         * 継ぎ目から {@code IO_FAILURE} を投げる形だと、{@code saveDocument} の包みを外しても緑のままである。
+         */
+        @Test
+        @DisplayName("本物の書き出しの失敗は、どの入口でも IO_FAILURE のままである")
+        void realWriteFailuresKeepTheirCode() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("a.pdf"), "A1");
+            Path second = TestPdfs.withText(tempDir.resolve("b.pdf"), "B1");
+            Path nowhere = tempDir.resolve("no-such-folder");
+
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.assemble(
+                                            List.of(first, second),
+                                            List.of(PageSelection.of(0, 1), PageSelection.of(1, 1)),
+                                            nowhere.resolve("mixed.pdf")))
+                            .errorCode(),
+                    "書けなかっただけなのに、入力のせいにしている");
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> operations.merge(
+                                            List.of(first, second),
+                                            nowhere.resolve("merged.pdf"),
+                                            MergeOptions.defaults()))
+                            .errorCode(),
+                    "書けなかっただけなのに、入力のせいにしている");
+        }
+
+        @Test
+        @DisplayName("同じページを 2 度出す assemble と、assembleEach も同じ符号を返す")
+        void otherMergingBranchesAnswerTheSame() throws Exception {
+            Path first = TestPdfs.withText(tempDir.resolve("first.pdf"), "A1", "A2");
+            Path second = TestPdfs.withText(tempDir.resolve("second.pdf"), "B1");
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), unclassifiedFailure());
+
+            ErrorCode repeated = assertThrows(
+                            PdfjigException.class,
+                            () -> failing.assemble(
+                                    List.of(first),
+                                    List.of(PageSelection.of(0, 1), PageSelection.of(0, 1)),
+                                    tempDir.resolve("repeated.pdf")))
+                    .errorCode();
+            ErrorCode each = assertThrows(
+                            PdfjigException.class,
+                            () -> failing.assembleEach(
+                                    List.of(first, second),
+                                    List.of(List.of(PageSelection.of(0, 1), PageSelection.of(1, 1))),
+                                    tempDir.resolve("each")))
+                    .errorCode();
+
+            assertEquals(ErrorCode.NOT_A_PDF, repeated, "同じページを 2 度出す分岐で、符号が変わっている");
+            assertEquals(ErrorCode.NOT_A_PDF, each, "assembleEach の出どころが混ざる分岐で、符号が変わっている");
+        }
+
+        /** 分類されていない失敗を投げる書き出し。入口の包みまで素のまま届く。 */
+        private PdfBoxPageOperations.DocumentSaver unclassifiedFailure() {
+            return (document, output) -> {
+                throw new IllegalStateException("分類されていない失敗");
+            };
         }
     }
 

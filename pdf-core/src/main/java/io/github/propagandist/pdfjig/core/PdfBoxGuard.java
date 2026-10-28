@@ -43,9 +43,16 @@ import java.io.IOException;
  * <ul>
  *   <li><b>読む・ページの木をいじる</b> → {@link ErrorCode#NOT_A_PDF}</li>
  *   <li><b>書き出しが主である</b> → {@link ErrorCode#IO_FAILURE}</li>
- *   <li><b>パスワードを渡して開く</b> → {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}</li>
+ *   <li><b>パスワードを渡して開くこと自体が仕事である</b>（{@code Encryption#inspect} と {@code PdfDocument#open}） → {@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE}</li>
  *   <li><b>描画・抽出</b> → それぞれの専用の符号</li>
  * </ul>
+ *
+ * <p><b>★ 決めるのは「どう開いたか」ではなく「ここまで届く失敗が何か」である</b>（#191）。
+ * 開く段は {@link PdfDocument#open} が自分で分類し、書き出しは {@code saveDocument} が分類するので、
+ * 入口まで届くのは<b>開いた後、内側が絞れなかった失敗</b>だけである。保護の付け外し（{@code Encryption#protect}
+ * ／ {@code #unprotect}）はどちらもパスワードを渡して開きうるが、届くのは開けた後の失敗なので {@link ErrorCode#NOT_A_PDF}
+ * にしている——{@link ErrorCode#PASSWORD_OR_DOCUMENT_FAILURE} は「開けませんでした」で終わり、開けたのに
+ * 正しいパスワードを打ち直させる。
  *
  * <p><b>★ 揃えていないと、同じ公開メソッドが内側の分岐で違う符号を返すことになる</b>
  * ——呼ぶ側は分岐を見られないので、<b>何をすればよいか分からなくなる</b>

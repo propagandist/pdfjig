@@ -108,7 +108,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         requireAbsent(output);
 
         Warnings warnings = new Warnings(listener);
-        guardedRun(ErrorCode.IO_FAILURE, () -> mergeInto(inputs, output, warnings));
+        guardedRun(ErrorCode.NOT_A_PDF, () -> mergeInto(inputs, output, warnings));
         warnings.report();
         return output;
     }
@@ -406,12 +406,13 @@ public final class PdfBoxPageOperations implements PageOperations {
             List<PageSelection> pages,
             Path output,
             Warnings warnings,
-            Protection protection) {
+            Protection protection)
+            throws IOException {
         int single = singleSourceIndexOf(pages);
         if (single >= 0) {
             writeFromSingleSource(sources.get(single), pages, output, warnings, protection);
         } else {
-            writeByMerging(inputs, pages, output, warnings, protection);
+            mergeCopiesInto(inputs, pages, output, warnings, protection);
         }
     }
 
@@ -538,22 +539,11 @@ public final class PdfBoxPageOperations implements PageOperations {
      *
      * <p>同じページを複数回出す場合は、その入力を回数ぶん別々に切り詰めて足す。
      *
-     * <p><b>★ ここだけ符号が {@link ErrorCode#IO_FAILURE} である。</b>公開の入口の包みは
-     * {@link ErrorCode#NOT_A_PDF} を渡すので、<b>内側で言い直す</b>——
-     * {@link PdfjigException#wrapping} が既に包んであるものを素通しするため、
-     * <b>入口の符号には塗り替わらない。</b>
-     *
-     * <p><b>★★ 同じ公開メソッドが内側の分岐で違う符号を返す。</b>{@code assemble} は
-     * 出どころが 1 つなら {@link ErrorCode#NOT_A_PDF}、混ざれば {@link ErrorCode#IO_FAILURE} に
-     * なる——<b>呼ぶ側はその分岐を見られない</b>（{@code CLAUDE.md} 優先順位 2）。
-     * <b>この差分では揃えていない</b>——{@code merge} の符号ごと動かすことになり、
-     * <b>利用者へ届く値が変わる</b>。#191 が持つ。
+     * <p><b>★ ここで符号を言い直さない</b>（#191）。以前は {@link ErrorCode#IO_FAILURE} で包み直していたので、
+     * {@code assemble} は出どころが 1 つなら {@link ErrorCode#NOT_A_PDF}、混ざれば {@code IO_FAILURE} になった
+     * ——<b>呼ぶ側はその分岐を見られない</b>（{@code CLAUDE.md} 優先順位 2）。絞れなかった失敗は入口の符号へ行く。
+     * 本物の書き出しの失敗は {@link #saveDocument} が {@code IO_FAILURE} を付けているので、符号を失わない。
      */
-    private void writeByMerging(
-            Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection) {
-        guardedRun(ErrorCode.IO_FAILURE, () -> mergeCopiesInto(inputs, pages, output, warnings, protection));
-    }
-
     private void mergeCopiesInto(
             Sources inputs, List<PageSelection> pages, Path output, Warnings warnings, Protection protection)
             throws IOException {
