@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -594,21 +595,21 @@ class OutputWorkspaceTest {
     @EnabledOnOs(OS.WINDOWS)
     @DisplayName("置き換えが済んだのに印を外せなければ、控えを消す")
     void dropsTheCopyWhenTheMarkCannotBeReleased(@TempDir Path directory) throws IOException {
-        Path workspace;
-        Path copy;
-        try (OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {})) {
-            workspace = place.file().getParent();
-            Path held = workspace.resolve(OutputWorkspace.HELD);
-            place.holdOriginal();
-            copy = Files.writeString(place.replaced(), "1 世代前");
+        // try-with-resources にしない。印を掴んだまま閉じさせ、片づけを次の書き出しに残す。
+        OutputWorkspace place = OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {});
+        Path workspace = place.file().getParent();
+        Path held = workspace.resolve(OutputWorkspace.HELD);
+        place.holdOriginal();
+        Path copy = Files.writeString(place.replaced(), "1 世代前");
 
-            // ★ java.io で開く。理由は stopsHoldingEvenWhenTheCopyCannotBeDeleted にある。
-            try (OutputStream grip = new FileOutputStream(held.toFile(), true)) {
-                place.originalReplaced();
-                assertTrue(Files.exists(held), "印を外せない状態になっていない。前提が変わっている");
-                grip.flush();
-            }
+        // ★ java.io で開く。理由は stopsHoldingEvenWhenTheCopyCannotBeDeleted にある。
+        try (OutputStream grip = new FileOutputStream(held.toFile(), true)) {
+            place.originalReplaced();
+            assertTrue(Files.exists(held), "印を外せない状態になっていない。前提が変わっている");
             assertFalse(Files.exists(copy), "印を外せずに控えも残した。次から成功した保存を「途中で終わった」と伝え続ける");
+            place.close();
+            assertTrue(Files.exists(workspace), "印を掴んでいるのに作業場所が消えている。前提が変わっている");
+            grip.flush();
         }
 
         List<List<Path>> found = new ArrayList<>();
@@ -830,6 +831,31 @@ class OutputWorkspaceTest {
             assertTrue(Files.exists(workspace.file().getParent()), "片づけが自分の作業場所まで消してはならない");
         }
         assertEquals(List.of(), found, "控えが無いのに知らせている");
+    }
+
+    /**
+     * 控えがリンクなら、指す先が無くても「控えは無い」と読まない（#218 の門の 2 段目）。
+     *
+     * <p>出力先が相対リンクだと、退避はリンクそのものを作業場所へ移す。移った先では指す先が辿れない。
+     * 辿って「無い」と読むと、<b>唯一の控えを抱えた作業場所を、印だけの残り物として消す。</b>
+     * リンクを作れない環境（権限の無い Windows）では見ない。
+     */
+    @Test
+    @DisplayName("控えがリンクなら、指す先が無くても「控えは無い」と読まない")
+    void keepsACopyThatIsADanglingLink(@TempDir Path directory) throws IOException {
+        OutputWorkspace left = leftBehind(directory.resolve("out.pdf"));
+        left.holdOriginal();
+        Path copy;
+        try {
+            copy = Files.createSymbolicLink(left.replaced(), Path.of("..", "shared", "out.pdf"));
+        } catch (UnsupportedOperationException | FileSystemException e) {
+            Assumptions.abort("リンクを作れない環境である: " + e);
+            return;
+        }
+
+        OutputWorkspace.nextTo(directory.resolve("out.pdf"), found -> {}).close();
+
+        assertTrue(Files.exists(copy, LinkOption.NOFOLLOW_LINKS), "リンクの控えを、指す先が無いからと消している");
     }
 
     /**
