@@ -73,7 +73,8 @@ public final class PdfBoxEncryption implements Encryption {
         //   中でやると IllegalArgumentException が PdfjigException に畳まれる
         //   （PdfBoxPageOperations の冒頭の枠と同じ規律）。
         Protection protection = new Protection(userPassword, ownerPassword, permissions, algorithm);
-        return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
+        // ★ 絞れなかったときの符号は、パスワードなしで開いて書く入口なので NOT_A_PDF である（#191。PdfBoxGuard の表）。
+        return guarded(ErrorCode.NOT_A_PDF, () -> {
             try (PdfDocument source = PdfDocument.open(input)) {
                 protectInto(source.delegate(), protection, output);
             }
@@ -123,7 +124,8 @@ public final class PdfBoxEncryption implements Encryption {
     public Path unprotect(Path input, Password password, Path output) {
         requireAbsent(output);
 
-        return guarded(ErrorCode.IO_FAILURE, () -> {
+        // ★ 絞れなかったときの符号は、パスワードを渡して開く入口なので PASSWORD_OR_DOCUMENT_FAILURE である（#191）。
+        return guarded(ErrorCode.PASSWORD_OR_DOCUMENT_FAILURE, () -> {
             try (PdfDocument source = PdfDocument.open(input, password)) {
                 unprotectInto(source.delegate(), output);
             }
