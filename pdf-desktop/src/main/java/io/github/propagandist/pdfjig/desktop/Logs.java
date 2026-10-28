@@ -88,6 +88,9 @@ final class Logs {
      */
     private static final int FRAME_LIMIT = 40;
 
+    /** 1 つの例外について書く、抑えられた失敗の数の上限（#152）。原因の連鎖と同じ数にする。 */
+    private static final int SUPPRESSED_LIMIT = CAUSE_DEPTH;
+
     /**
      * 記録の口。
      *
@@ -320,20 +323,46 @@ final class Logs {
             for (int depth = 0; current != null && depth < CAUSE_DEPTH; depth++) {
                 appendEntry(
                         text, depth == 0 ? "\t" : "\tCaused by ", describe(current), List.of(current.getStackTrace()));
-                if (current instanceof PdfjigException failure && failure.causeType() != null) {
-                    // ★ 包んだ失敗は原因を繋いでいない。持っている位置を、原因の型の下に書く（#152）。
-                    appendEntry(text, "\tCaused by ", failure.causeType(), failure.causeFrames());
-                }
-                for (Throwable suppressed : current.getSuppressed()) {
-                    // ★ try-with-resources が付けた close の失敗はここにしか無い（#152）。1 段だけ書く。
-                    appendEntry(text, "\tSuppressed: ", describe(suppressed), List.of(suppressed.getStackTrace()));
-                }
+                // ★ 抑えられた失敗は、その例外のフレームの直後に書く（printStackTrace と同じ）。
+                //   包んだ原因の後に書くと、原因のほうに付いていたと読まれる。
+                appendSuppressed(text, current);
+                appendWrappedCause(text, current);
                 Throwable cause = current.getCause();
                 current = cause == current ? null : cause;
                 if (current != null && depth + 1 == CAUSE_DEPTH) {
                     // フレームと同じ理由で、切ったことを書く。黙って切ると 5 つ目が根だと読まれる。
                     text.append("\tCaused by ... これより奥は書いていない").append(NEW_LINE);
                 }
+            }
+        }
+
+        /**
+         * 抑えられた失敗を、型名とフレームだけで書く（#152）。
+         *
+         * <p>try-with-resources が付けた {@code close} の失敗はここにしか無い。1 段だけ書き、
+         * 数も {@link #SUPPRESSED_LIMIT} で切る——まとめて閉じると閉じ損ねた数だけ付き、
+         * 1 件が世代を押し出す（{@link #FRAME_LIMIT} と同じ理由）。
+         */
+        private static void appendSuppressed(StringBuilder text, Throwable thrown) {
+            Throwable[] suppressed = thrown.getSuppressed();
+            int shown = Math.min(suppressed.length, SUPPRESSED_LIMIT);
+            for (int i = 0; i < shown; i++) {
+                appendEntry(text, "\tSuppressed: ", describe(suppressed[i]), List.of(suppressed[i].getStackTrace()));
+                appendWrappedCause(text, suppressed[i]);
+            }
+            if (suppressed.length > shown) {
+                // 切ったことを書く。黙って切ると、それで全部だと読まれる。
+                text.append("\tSuppressed: ... 以下 ")
+                        .append(suppressed.length - shown)
+                        .append(" 件は書いていない")
+                        .append(NEW_LINE);
+            }
+        }
+
+        /** 包んだ失敗は原因を繋いでいない。持っている位置を、原因の型の下に書く（#152）。 */
+        private static void appendWrappedCause(StringBuilder text, Throwable thrown) {
+            if (thrown instanceof PdfjigException failure && failure.causeType() != null) {
+                appendEntry(text, "\tCaused by ", failure.causeType(), failure.causeFrames());
             }
         }
 
