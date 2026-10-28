@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.logging.FileHandler;
 import java.util.logging.Formatter;
 import java.util.logging.Handler;
@@ -320,17 +321,16 @@ final class Logs {
                 text.append(depth == 0 ? "\t" : "\tCaused by ")
                         .append(describe(current))
                         .append(NEW_LINE);
-                StackTraceElement[] frames = current.getStackTrace();
-                int shown = Math.min(frames.length, FRAME_LIMIT);
-                for (int i = 0; i < shown; i++) {
-                    text.append("\t\tat ").append(frames[i]).append(NEW_LINE);
+                appendFrames(text, List.of(current.getStackTrace()));
+                if (current instanceof PdfjigException failure && failure.causeType() != null) {
+                    // ★ 包んだ失敗は原因を繋いでいない。持っている位置を、原因の型の下に書く（#152）。
+                    text.append("\tCaused by ").append(failure.causeType()).append(NEW_LINE);
+                    appendFrames(text, failure.causeFrames());
                 }
-                if (frames.length > shown) {
-                    // 切ったことを書く。黙って切ると、そこが底だと読まれる。
-                    text.append("\t\t... 以下 ")
-                            .append(frames.length - shown)
-                            .append(" フレームは書いていない")
-                            .append(NEW_LINE);
+                for (Throwable suppressed : current.getSuppressed()) {
+                    // ★ try-with-resources が付けた close の失敗はここにしか無い（#152）。1 段だけ書く。
+                    text.append("\tSuppressed: ").append(describe(suppressed)).append(NEW_LINE);
+                    appendFrames(text, List.of(suppressed.getStackTrace()));
                 }
                 Throwable cause = current.getCause();
                 current = cause == current ? null : cause;
@@ -338,6 +338,20 @@ final class Logs {
                     // フレームと同じ理由で、切ったことを書く。黙って切ると 5 つ目が根だと読まれる。
                     text.append("\tCaused by ... これより奥は書いていない").append(NEW_LINE);
                 }
+            }
+        }
+
+        private static void appendFrames(StringBuilder text, List<StackTraceElement> frames) {
+            int shown = Math.min(frames.size(), FRAME_LIMIT);
+            for (int i = 0; i < shown; i++) {
+                text.append("\t\tat ").append(frames.get(i)).append(NEW_LINE);
+            }
+            if (frames.size() > shown) {
+                // 切ったことを書く。黙って切ると、そこが底だと読まれる。
+                text.append("\t\t... 以下 ")
+                        .append(frames.size() - shown)
+                        .append(" フレームは書いていない")
+                        .append(NEW_LINE);
             }
         }
 
