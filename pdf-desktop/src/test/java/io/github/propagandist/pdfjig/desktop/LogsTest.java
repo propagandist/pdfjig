@@ -168,6 +168,72 @@ class LogsTest {
         assertFalse(written.contains(SECRET_PATH), "抑えられた例外のメッセージが出てはならない");
     }
 
+    /**
+     * 抑えられた包んだ失敗も、原因が投げられた位置を書く（#152 の門の 2 段目）。
+     *
+     * <p>開いた後に投げた失敗へ、閉じ損ねた失敗（包んだもの）を抑えて付ける経路がある。
+     * そこで位置を落とすと、PDFBox のどこで閉じ損ねたのかが読めない。
+     */
+    @Test
+    @DisplayName("★ 抑えられた包んだ失敗も、原因が投げられた位置を書く")
+    void writesWhereASuppressedWrappedCauseWasThrown(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        IOException closing = new IOException("closing " + SECRET_PATH);
+        closing.setStackTrace(frames(2));
+        IllegalStateException failed = new IllegalStateException("failed");
+        failed.addSuppressed(PdfjigException.wrapping(ErrorCode.IO_FAILURE, closing));
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("at Frame1.run(Frame.java:1)"), "抑えられた包んだ失敗の位置を落としている");
+        assertFalse(written.contains(SECRET_PATH));
+    }
+
+    /**
+     * 抑えられた失敗は、包んだ原因より先に書く（#152 の門の 2 段目）。
+     *
+     * <p>原因の型の下に続けて書くと、抑えられた失敗が原因のほうに付いていたと読まれる。
+     * {@code printStackTrace} と同じく、その例外のフレームの直後に置く。
+     */
+    @Test
+    @DisplayName("抑えられた失敗は、包んだ原因より先に書く")
+    void writesSuppressedBeforeTheWrappedCause(@TempDir Path logs) {
+        Logs.startIn(logs, 64 * 1024, 2);
+        PdfjigException failure = PdfjigException.wrapping(ErrorCode.NOT_A_PDF, new IllegalArgumentException());
+        failure.addSuppressed(new IOException());
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failure);
+
+        String written = readAll(logs);
+        int suppressed = written.indexOf("\tSuppressed: " + IOException.class.getName());
+        int cause = written.indexOf("\tCaused by " + IllegalArgumentException.class.getName());
+        assertTrue(suppressed >= 0 && cause >= 0, "どちらかを書いていない");
+        assertTrue(suppressed < cause, "抑えられた失敗が、包んだ原因に付いていたように読める");
+    }
+
+    /**
+     * 抑えられた失敗の数も途中で切り、切ったことを書く（#152 の門の 2 段目）。
+     *
+     * <p>まとめて閉じると、閉じ損ねた数だけ付く。1 件が世代を丸ごと押し出すと、
+     * 押し出されるのは直前に起きた本当の原因のほうである（フレームの上限と同じ理由）。
+     */
+    @Test
+    @DisplayName("★ 抑えられた失敗の数も途中で切り、切ったことを書く")
+    void trimsManySuppressedFailures(@TempDir Path logs) {
+        Logs.startIn(logs, 512 * 1024, 2);
+        IllegalStateException failed = new IllegalStateException("failed");
+        for (int i = 0; i < 50; i++) {
+            failed.addSuppressed(new IOException());
+        }
+
+        Logs.warn(LogEvent.OPERATION_FAILED, failed);
+
+        String written = readAll(logs);
+        assertTrue(written.contains("件は書いていない"), "切ったことを書く");
+        assertTrue(written.split("\tSuppressed: ", -1).length - 1 < 50, "抑えられた失敗を全部書いている");
+    }
+
     @Test
     @DisplayName("事象の名前と説明が、そのまま行に出る")
     void namesTheEvent(@TempDir Path logs) {

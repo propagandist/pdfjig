@@ -3,6 +3,7 @@ package io.github.propagandist.pdfjig.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -91,6 +92,7 @@ class PdfDocumentTest {
             opener.start();
             opener.join();
 
+            assertNotNull(thrown[0], "開けてしまった。前提が変わっている");
             PdfjigException failure = assertInstanceOf(PdfjigException.class, thrown[0], "溢れた失敗が素のまま抜けている（#151）");
             assertEquals(expected, failure.errorCode());
             if (StackOverflowError.class.getName().equals(failure.causeType())) {
