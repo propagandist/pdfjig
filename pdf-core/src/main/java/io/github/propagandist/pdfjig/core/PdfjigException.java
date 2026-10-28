@@ -17,7 +17,7 @@ import java.util.List;
  */
 public final class PdfjigException extends RuntimeException {
 
-    /** 原因のフレームを持たせたときに上げた（#152）。古い形を読むと、フレームが {@code null} になる。 */
+    /** 原因のフレームを持たせたときに上げた（#152）。古い形は {@code InvalidClassException} で読めない。 */
     private static final long serialVersionUID = 2L;
 
     private static final StackTraceElement[] NO_FRAMES = new StackTraceElement[0];

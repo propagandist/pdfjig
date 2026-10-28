@@ -981,8 +981,9 @@ public final class PdfBoxPageOperations implements PageOperations {
     private static void deleteQuietly(Path path) {
         try {
             Files.deleteIfExists(path);
-        } catch (IOException e) {
-            // 消せなくても、元の失敗は元の失敗のまま伝わる。
+        } catch (IOException | RuntimeException e) {
+            // 消せなくても、元の失敗は元の失敗のまま伝わる。★ 未検査例外も受ける——巻き戻しの途中で抜けると、
+            //   残りの書いた分を消し損ねる（PdfBoxEncryption#deleteQuietly と同じ）。
         }
     }
 

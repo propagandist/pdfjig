@@ -24,14 +24,14 @@ final class UndoOnFailure {
     /**
      * 仕事を走らせ、失敗したら {@code undo} に渡してから投げ直す。
      *
-     * @param undo 後始末。起きた失敗を受け取る（閉じ損ねを抑えて付けるため）。<b>投げないこと</b>
+     * @param undo 後始末。起きた失敗を受け取る（閉じ損ねを抑えて付けるため）
      * @param work 仕事
      */
     static void runThrowing(Consumer<Throwable> undo, PdfBoxGuard.PdfBoxAction work) throws IOException {
         try {
             work.run();
         } catch (Throwable e) {
-            undo.accept(e);
+            undoKeeping(undo, e);
             throw e;
         }
     }
@@ -46,8 +46,22 @@ final class UndoOnFailure {
         try {
             work.run();
         } catch (Throwable e) {
-            undo.accept(e);
+            undoKeeping(undo, e);
             throw e;
+        }
+    }
+
+    /**
+     * 後始末を走らせる。<b>後始末が投げても、元の失敗を上書きさせない</b>——抑えて付ける。
+     *
+     * <p>後始末はメモリ切れや溢れた直後にも走るので、後始末そのものが投げうる。そのまま抜けると、
+     * 伝わるのは後始末の失敗で、本当の原因が消える。呼ぶ側それぞれに「投げないこと」を頼む形にしない。
+     */
+    private static void undoKeeping(Consumer<Throwable> undo, Throwable failure) {
+        try {
+            undo.accept(failure);
+        } catch (Throwable undoing) {
+            failure.addSuppressed(undoing);
         }
     }
 }
