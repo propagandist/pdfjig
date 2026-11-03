@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -939,6 +940,70 @@ class PdfBoxPageOperationsTest {
                                     () -> operations.extractPages(
                                             input, PageRange.of(2, 5), tempDir.resolve("extracted.pdf")))
                             .errorCode());
+        }
+    }
+
+    /**
+     * 単一の出力を書く 6 経路は、書き終えた後に落ちても出力を残さない（#190）。
+     *
+     * <p><b>★ 経路ごとに持つ。</b>どれも {@code writingTo} を通るが、通ることを見ているのはこのテストだけである。
+     * 1 経路だけ関門を外しても、代表の 1 本では赤にならない。
+     */
+    @Nested
+    class FailedWriteLeavesNothing {
+
+        private final PageOperations failing =
+                new PdfBoxPageOperations(WarningListener.ignoring(), (document, target) -> {
+                    PdfBoxPageOperations.saveDocument(document, target);
+                    throw new PdfjigException(ErrorCode.IO_FAILURE);
+                });
+
+        @Test
+        @DisplayName("merge")
+        void merge() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.merge(List.of(input), output, MergeOptions.defaults()));
+        }
+
+        @Test
+        @DisplayName("rotate")
+        void rotate() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.rotate(input, Map.of(1, Rotation.CLOCKWISE_90), output));
+        }
+
+        @Test
+        @DisplayName("reorder")
+        void reorder() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.reorder(input, List.of(2, 1), output));
+        }
+
+        @Test
+        @DisplayName("extractPages")
+        void extractPages() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.extractPages(input, PageRange.of(1, 1), output));
+        }
+
+        @Test
+        @DisplayName("deletePages")
+        void deletePages() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.deletePages(input, PageRange.of(1, 1), output));
+        }
+
+        @Test
+        @DisplayName("assemble")
+        void assemble() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.assemble(input, List.of(PageSelection.of(0, 1)), output));
+        }
+
+        private void assertLeavesNothing(Consumer<Path> write) {
+            Path output = tempDir.resolve("out.pdf");
+            assertThrows(PdfjigException.class, () -> write.accept(output));
+            assertFalse(Files.exists(output), "失敗したと告げたのに、書いた出力が残っている");
         }
     }
 
