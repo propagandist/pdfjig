@@ -952,10 +952,12 @@ class PdfBoxPageOperationsTest {
     @Nested
     class FailedWriteLeavesNothing {
 
+        private final AtomicInteger saves = new AtomicInteger();
+
         private final PageOperations failing =
                 new PdfBoxPageOperations(WarningListener.ignoring(), (document, target) -> {
-                    PdfBoxPageOperations.saveDocument(document, target);
-                    throw new PdfjigException(ErrorCode.IO_FAILURE);
+                    saves.incrementAndGet();
+                    return writesThenFails().save(document, target);
                 });
 
         @Test
@@ -1002,7 +1004,10 @@ class PdfBoxPageOperationsTest {
 
         private void assertLeavesNothing(Consumer<Path> write) {
             Path output = tempDir.resolve("out.pdf");
-            assertThrows(PdfjigException.class, () -> write.accept(output));
+            PdfjigException failure = assertThrows(PdfjigException.class, () -> write.accept(output));
+            // ★ 保存の前に落ちると出力は作られず、関門が無くても緑になる。保存まで届いたことを見る。
+            assertEquals(1, saves.get(), "保存まで届かずに失敗している。関門を見ていない");
+            assertEquals(ErrorCode.IO_FAILURE, failure.errorCode());
             assertFalse(Files.exists(output), "失敗したと告げたのに、書いた出力が残っている");
         }
     }
@@ -1164,11 +1169,7 @@ class PdfBoxPageOperationsTest {
             //   書き終えた後の失敗がいちばん危ない——継ぎ目で、書けた後に落とす。
             Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
             Path output = out("leaked");
-            PdfBoxPageOperations.DocumentSaver writesThenFails = (document, target) -> {
-                PdfBoxPageOperations.saveDocument(document, target);
-                throw new PdfjigException(ErrorCode.IO_FAILURE);
-            };
-            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFails);
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFails());
 
             try (Password password = Password.copyOf("user")) {
                 assertThrows(
@@ -2556,6 +2557,14 @@ class PdfBoxPageOperationsTest {
                 throw new PdfjigException(ErrorCode.IO_FAILURE);
             }
             return PdfBoxPageOperations.saveDocument(document, output);
+        };
+    }
+
+    /** 書き終えた後に落ちる。閉じるときに初めて投げる失敗（#150）の代わりに、継ぎ目で作る。 */
+    private static PdfBoxPageOperations.DocumentSaver writesThenFails() {
+        return (document, output) -> {
+            PdfBoxPageOperations.saveDocument(document, output);
+            throw new PdfjigException(ErrorCode.IO_FAILURE);
         };
     }
 

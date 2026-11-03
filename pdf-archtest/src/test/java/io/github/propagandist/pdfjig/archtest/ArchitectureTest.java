@@ -99,7 +99,7 @@ class ArchitectureTest {
     /** PDFBox の文書。書き出しの入口 {@code save} を持つ。 */
     private static final String PD_DOCUMENT = "org.apache.pdfbox.pdmodel.PDDocument";
 
-    /** 失敗したときの後始末の置き場。書きかけを消す実装もここだけが持つ。 */
+    /** 失敗したときの後始末の置き場。pdf-core で書きかけを消す実装もここだけが持つ。 */
     private static final String UNDO_ON_FAILURE = "io.github.propagandist.pdfjig.core.UndoOnFailure";
 
     /** 保護の付け外しの実体。閉じる失敗を消す範囲へ入れない規則（#190）が見る。 */
@@ -817,14 +817,15 @@ class ArchitectureTest {
     }
 
     /**
-     * 書きかけを消す実装は 1 つである（#190）。
+     * {@code pdf-core} で書きかけを消す実装は 1 つである（#190）。
      *
      * <p>2 つあると、受ける範囲が片方だけ変わる——#285 が揃えるまで実際に違っていた。
      *
-     * <p><b>★ 見ているのは名前である。</b>別の名前で同じものを書けば通る。
+     * <p><b>★ 見ているのは {@code pdf-core} の中の名前である。</b>別の名前で同じものを書けば通る。
+     * {@code pdf-desktop} の {@code OutputWorkspace} と {@code Settings} にある同名の実装は見ていない。
      */
     @Test
-    @DisplayName("書きかけを消す実装は UndoOnFailure にだけある")
+    @DisplayName("pdf-core で書きかけを消す実装は UndoOnFailure にだけある")
     void deleteQuietlyHasOneImplementation() {
         assertEquals(
                 Set.of(UNDO_ON_FAILURE),
@@ -837,25 +838,32 @@ class ArchitectureTest {
     }
 
     /**
-     * 保護の付け外しで「失敗したら消す」範囲を張るのは、書き出しの 2 つのメソッドだけである（#190）。
+     * 保護を掛ける経路で出力を消すのは {@code protectInto} の中だけである（#190）。
      *
-     * <p><b>★★ 入力を閉じるのは、この 2 つを呼んだ後である。</b>範囲を公開メソッドの側へ広げると、
-     * <b>完全に書けた出力が、入力を閉じ損ねただけで消える</b>（{@code PdfBoxEncryption#protectInto}）。
+     * <p><b>★★ 入力を閉じるのは {@code protectInto} を呼んだ後である。</b>消す場所を {@code protect} の側へ
+     * 広げると、<b>完全に書けた保護付きの出力が、入力を閉じ損ねただけで消える。</b>
      *
-     * <p><b>★ 振る舞いではなく、範囲を張る場所を見ている。</b>閉じるときに投げる入力は、
+     * <p><b>★ 振る舞いではなく、消す呼び出しの場所を見ている。</b>閉じるときに投げる入力は、
      * テストの中で作れていない（{@code PdfBoxEncryption} に継ぎ目が無い）。
+     * {@code Files} を直に呼んで消す形も見えない。
+     *
+     * <p><b>★ {@code unprotect} は見ない。</b>あちらの出力は平文なので、閉じる失敗を消す範囲から外す理由が
+     * {@code protect} と同じではない。この規則で今の形を正としないために除いてある。
      */
     @Test
-    @DisplayName("保護の付け外しで消す範囲を張るのは、入力を閉じる前の 2 つだけである")
-    void encryptionUndoesOnlyAroundTheWrite() {
+    @DisplayName("保護を掛ける経路で出力を消すのは protectInto の中だけである")
+    void protectDeletesOnlyInsideProtectInto() {
         assertEquals(
-                Set.of(
-                        PDFBOX_ENCRYPTION + ".protectInto(PDDocument, Protection, Path)",
-                        PDFBOX_ENCRYPTION + ".unprotectInto(PDDocument, Path)"),
-                unitsAccessing(UNDO_ON_FAILURE, "runThrowing").stream()
-                        .filter(unit -> unit.startsWith(PDFBOX_ENCRYPTION + "."))
+                Set.of("protectInto"),
+                coreClasses()
+                        .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
+                        .filter(access -> access.getOriginOwner().getName().equals(PDFBOX_ENCRYPTION))
+                        .filter(access -> access.getTargetOwner().getName().equals(UNDO_ON_FAILURE))
+                        .filter(access -> access.getTarget().getName().equals("deleteQuietly"))
+                        .map(access -> access.getOrigin().getName())
+                        .filter(origin -> !origin.contains("unprotect"))
                         .collect(Collectors.toSet()),
-                "消す範囲を張る場所が動いた。入力を閉じるところまで覆うと、書けた出力が閉じ損ねで消える（#190）");
+                "出力を消す場所が動いた。入力を閉じるところまで覆うと、書けた出力が閉じ損ねで消える（#190）");
     }
 
     /**
