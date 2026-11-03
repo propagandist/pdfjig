@@ -99,6 +99,12 @@ class ArchitectureTest {
     /** PDFBox の文書。書き出しの入口 {@code save} を持つ。 */
     private static final String PD_DOCUMENT = "org.apache.pdfbox.pdmodel.PDDocument";
 
+    /** 失敗したときの後始末の置き場。書きかけを消す実装もここだけが持つ。 */
+    private static final String UNDO_ON_FAILURE = "io.github.propagandist.pdfjig.core.UndoOnFailure";
+
+    /** 保護の付け外しの実体。閉じる失敗を消す範囲へ入れない規則（#190）が見る。 */
+    private static final String PDFBOX_ENCRYPTION = "io.github.propagandist.pdfjig.core.PdfBoxEncryption";
+
     /** 警告の受け口。動かしてよいのは {@code Warnings} だけである。 */
     private static final String WARNING_LISTENER = "io.github.propagandist.pdfjig.core.WarningListener";
 
@@ -808,6 +814,48 @@ class ArchitectureTest {
                 Set.of(PASSWORD + ".close()"),
                 unitsZeroingCharArrays(),
                 "char[] のゼロ埋めが Password の外で起きている。持ち主の型を通らない片づけは、" + "作った場所からは見えないので、二重に消すか、一度も消さないかになる（#146）");
+    }
+
+    /**
+     * 書きかけを消す実装は 1 つである（#190）。
+     *
+     * <p>2 つあると、受ける範囲が片方だけ変わる——#285 が揃えるまで実際に違っていた。
+     *
+     * <p><b>★ 見ているのは名前である。</b>別の名前で同じものを書けば通る。
+     */
+    @Test
+    @DisplayName("書きかけを消す実装は UndoOnFailure にだけある")
+    void deleteQuietlyHasOneImplementation() {
+        assertEquals(
+                Set.of(UNDO_ON_FAILURE),
+                coreClasses()
+                        .flatMap(javaClass -> javaClass.getMethods().stream())
+                        .filter(method -> method.getName().equals("deleteQuietly"))
+                        .map(method -> method.getOwner().getName())
+                        .collect(Collectors.toSet()),
+                "deleteQuietly の実装が UndoOnFailure の外にある。受ける範囲が実装ごとに分かれる（#190）");
+    }
+
+    /**
+     * 保護の付け外しで「失敗したら消す」範囲を張るのは、書き出しの 2 つのメソッドだけである（#190）。
+     *
+     * <p><b>★★ 入力を閉じるのは、この 2 つを呼んだ後である。</b>範囲を公開メソッドの側へ広げると、
+     * <b>完全に書けた出力が、入力を閉じ損ねただけで消える</b>（{@code PdfBoxEncryption#protectInto}）。
+     *
+     * <p><b>★ 振る舞いではなく、範囲を張る場所を見ている。</b>閉じるときに投げる入力は、
+     * テストの中で作れていない（{@code PdfBoxEncryption} に継ぎ目が無い）。
+     */
+    @Test
+    @DisplayName("保護の付け外しで消す範囲を張るのは、入力を閉じる前の 2 つだけである")
+    void encryptionUndoesOnlyAroundTheWrite() {
+        assertEquals(
+                Set.of(
+                        PDFBOX_ENCRYPTION + ".protectInto(PDDocument, Protection, Path)",
+                        PDFBOX_ENCRYPTION + ".unprotectInto(PDDocument, Path)"),
+                unitsAccessing(UNDO_ON_FAILURE, "runThrowing").stream()
+                        .filter(unit -> unit.startsWith(PDFBOX_ENCRYPTION + "."))
+                        .collect(Collectors.toSet()),
+                "消す範囲を張る場所が動いた。入力を閉じるところまで覆うと、書けた出力が閉じ損ねで消える（#190）");
     }
 
     /**
