@@ -64,17 +64,22 @@ class EncryptionUiTest extends DesktopUiTest {
         Path output =
                 protectTo(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2"), dir.resolve("protected.pdf"));
 
-        // ★ 鍵なしでは開けない。画面が何を出したかではなく、出来たファイルを見る。
-        assertEquals(
-                ErrorCode.PASSWORD_REQUIRED,
-                assertThrows(PdfjigException.class, () -> PdfDocument.open(output))
-                        .errorCode());
+        assertOpensOnlyWithUserKey(output, 2);
+    }
 
-        try (Password user = Password.copyOf(USER);
-                PdfDocument written = PdfDocument.open(output, user)) {
-            assertEquals(2, written.pageCount());
-            assertTrue(written.encrypted(), "保護が掛かっていない");
-        }
+    @Test
+    void ツールバーの保護からも鍵の要るファイルができる(@TempDir Path dir, FxRobot robot) throws Exception {
+        Path output = dir.resolve("protected.pdf");
+        openFixture(robot, TestPdfs.withText(dir.resolve("doc.pdf"), "P1", "P2"));
+        dialogs.willSaveTo(output);
+        // ★ 「保存」と同じ editingBlocked で縛られている。読み込み中に押しても何も起きない。
+        waitFor(() -> !button(robot, "#tool-protect").isDisabled());
+        robot.clickOn("#tool-protect");
+        waitForNode(robot, "#encryption-dialog");
+        typeKeys(robot);
+        applyAndWaitFor(robot, output);
+
+        assertOpensOnlyWithUserKey(output, 2);
     }
 
     @Test
@@ -359,6 +364,25 @@ class EncryptionUiTest extends DesktopUiTest {
         waitForNode(robot, "#encryption-dialog");
     }
 
+    /**
+     * 鍵なしでは開けず、ユーザーパスワードでは開けて、保護が掛かっていることを見る。
+     *
+     * <p><b>★ 画面が何を出したかではなく、出来たファイルを見る。</b>
+     *
+     * @param pages 書き出したはずのページ数
+     */
+    private static void assertOpensOnlyWithUserKey(Path output, int pages) throws Exception {
+        assertEquals(
+                ErrorCode.PASSWORD_REQUIRED,
+                assertThrows(PdfjigException.class, () -> PdfDocument.open(output))
+                        .errorCode());
+        try (Password user = Password.copyOf(USER);
+                PdfDocument written = PdfDocument.open(output, user)) {
+            assertEquals(pages, written.pageCount());
+            assertTrue(written.encrypted(), "保護が掛かっていない");
+        }
+    }
+
     /** 開いて、既定のまま保護して書き出し、ファイルができるまで待つ。 */
     private Path protectTo(FxRobot robot, Path fixture, Path output) throws Exception {
         openPrompt(robot, fixture, output);
@@ -398,8 +422,8 @@ class EncryptionUiTest extends DesktopUiTest {
      *
      * <p><b>★ ここだけは文言で掴む</b>（{@code .claude/rules/ui-tests.md}）——
      * <b>{@code MenuItem} は {@code Node} ではなく、id では掴めない。</b>
-     * ツールバーには出していない操作なので（{@code MainWindow#buildActions}）、
-     * <b>画面から辿れる道はメニューだけである。</b>
+     * ツールバーの「保護」からも辿れるが、そちらは
+     * {@code ツールバーの保護からも鍵の要るファイルができる} が見ている。
      *
      * <p><b>★ 選べるようになるのを待つ。</b>「保護して保存」と「保存」は同じ
      * {@code editingBlocked} で縛られており、<b>読み込みが走っている間に選んでも何も起きない。</b>
