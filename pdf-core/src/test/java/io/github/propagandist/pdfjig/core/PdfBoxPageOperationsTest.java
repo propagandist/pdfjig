@@ -299,7 +299,12 @@ class PdfBoxPageOperationsTest {
             Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
             Path outputDir = tempDir.resolve("out");
 
-            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFailsOn(2));
+            AtomicInteger saves = new AtomicInteger();
+            PdfBoxPageOperations.DocumentSaver fails = writesThenFailsOn(2);
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), (document, target) -> {
+                saves.incrementAndGet();
+                return fails.save(document, target);
+            });
 
             assertEquals(
                     ErrorCode.IO_FAILURE,
@@ -308,6 +313,8 @@ class PdfBoxPageOperationsTest {
                                     () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir))
                             .errorCode());
 
+            // ★ 2 個目の保存より前に落ちると、何も書かれずに緑になる。2 個目まで届いたことを見る。
+            assertEquals(2, saves.get(), "2 個目の保存まで届かずに失敗している");
             assertEquals(List.of(), listFilesIn(outputDir), "書き終えた出力が残っている。");
         }
 
@@ -2582,7 +2589,7 @@ class PdfBoxPageOperationsTest {
         };
     }
 
-    /** n 個目を書き終えた後に落ちる。それより前は普通に書く。 */
+    /** n 個目だけ、書き終えた後に落ちる。ほかの回は普通に書く（毎回落とすのは {@link #writesThenFails}）。 */
     private static PdfBoxPageOperations.DocumentSaver writesThenFailsOn(int nth) {
         AtomicInteger saved = new AtomicInteger();
         return (document, output) -> {
