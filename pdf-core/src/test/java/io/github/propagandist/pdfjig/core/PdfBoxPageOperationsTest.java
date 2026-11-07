@@ -954,10 +954,12 @@ class PdfBoxPageOperationsTest {
 
         private final AtomicInteger saves = new AtomicInteger();
 
+        private final PdfBoxPageOperations.DocumentSaver fails = writesThenFails();
+
         private final PageOperations failing =
                 new PdfBoxPageOperations(WarningListener.ignoring(), (document, target) -> {
                     saves.incrementAndGet();
-                    return writesThenFails().save(document, target);
+                    return fails.save(document, target);
                 });
 
         @Test
