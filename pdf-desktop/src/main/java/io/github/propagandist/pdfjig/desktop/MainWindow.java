@@ -635,9 +635,16 @@ public final class MainWindow {
                         null,
                         this::splitIntoSinglePages,
                         notSplittable),
-                // ★ ツールバーには出さない。繰り返し使う操作ではなく、
-                //   ツールバーの文言は起動スモークとの契約でもある（desktop-ui.md）。
-                new Action("protect", "パスワードで保護して保存…", null, null, null, this::protectAndSave, editingBlocked),
+                // ツールバーでは「保存」の隣に置く（Actions#toolBar）。保存の別形であり、
+                //   どちらで書き出すかを同じ場所で選べるほうがよい。
+                new Action(
+                        "protect",
+                        "パスワードで保護して保存…",
+                        "保護",
+                        ToolIcons.PROTECT,
+                        null,
+                        this::protectAndSave,
+                        editingBlocked),
                 // 常に開ける。いま何版が動いているのかを確かめるのに、文書は要らない。
                 new Action("about", AppInfo.NAME + " について", null, null, null, this::showAbout, null));
     }
