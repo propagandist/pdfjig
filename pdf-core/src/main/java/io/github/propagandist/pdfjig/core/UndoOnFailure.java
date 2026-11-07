@@ -1,6 +1,8 @@
 package io.github.propagandist.pdfjig.core;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.function.Consumer;
 
 /**
@@ -48,6 +50,22 @@ final class UndoOnFailure {
         } catch (Throwable e) {
             undoKeeping(undo, e);
             throw e;
+        }
+    }
+
+    /**
+     * 書きかけを消す。消せなくても黙っている。
+     *
+     * <p>ここに来ている時点で、既に何かが失敗している。伝えるべきは元の失敗である。
+     * <b>★ 未検査例外も受ける</b>——巻き戻しの途中で抜けると、残りの書いた分を消し損ねる。
+     *
+     * @param path 消すファイル
+     */
+    static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException | RuntimeException e) {
+            // 消せなくても、元の失敗は元の失敗のまま伝わる。
         }
     }
 

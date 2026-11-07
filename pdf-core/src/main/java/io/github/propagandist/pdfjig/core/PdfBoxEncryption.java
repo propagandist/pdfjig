@@ -93,7 +93,8 @@ public final class PdfBoxEncryption implements Encryption {
     private static void protectInto(PDDocument document, Protection protection, Path output) {
         try {
             // 書けたところまでを残さない。どの失敗でも、包む前に消す。
-            UndoOnFailure.runThrowing(e -> deleteQuietly(output), () -> write(document, protection, output));
+            UndoOnFailure.runThrowing(
+                    e -> UndoOnFailure.deleteQuietly(output), () -> write(document, protection, output));
         } catch (IOException e) {
             // ★★ 書けなかったことを、パスワードのせいにしない。出力先が無い・ディスクが満杯
             //   といった失敗まで PASSWORD_OR_DOCUMENT_FAILURE に畳むと、利用者は打ち直す
@@ -137,7 +138,7 @@ public final class PdfBoxEncryption implements Encryption {
     /** 保護を外して書き出す。<b>閉じる失敗をここへ入れない</b>（{@link #protectInto} と同じ理由）。 */
     private static void unprotectInto(PDDocument document, Path output) {
         try {
-            UndoOnFailure.runThrowing(e -> deleteQuietly(output), () -> {
+            UndoOnFailure.runThrowing(e -> UndoOnFailure.deleteQuietly(output), () -> {
                 document.setAllSecurityToBeRemoved(true);
                 // ★ 届いたかは見ない（#219）。暗号化には伝える口が無く、既存の出力は拒むので置き換えも無い。
                 //   置き換えに使う呼ぶ側が現れたら、届いたかを返す口を足すこと（Encryption の契約）。
@@ -163,15 +164,6 @@ public final class PdfBoxEncryption implements Encryption {
         }
         if (Files.exists(output)) {
             throw new PdfjigException(ErrorCode.OUTPUT_ALREADY_EXISTS);
-        }
-    }
-
-    /** 書きかけを消す。消せなくても、伝えるべきは元の失敗である。 */
-    private static void deleteQuietly(Path path) {
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException | RuntimeException ignored) {
-            // 握りつぶす。ここで投げると本当の失敗が消える。
         }
     }
 }

@@ -179,7 +179,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         // 黙って失敗として返すと、利用者は何が出来上がったのか確かめる術がない。
         // requireAbsent を通しているため、ここで消してよいのはこの呼び出しが作ったものだけである。
         List<Path> written = new ArrayList<>(outputs.size());
-        UndoOnFailure.runThrowing(e -> written.forEach(PdfBoxPageOperations::deleteQuietly), () -> {
+        UndoOnFailure.runThrowing(e -> written.forEach(UndoOnFailure::deleteQuietly), () -> {
             for (int i = 0; i < ranges.size(); i++) {
                 // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
                 written.add(outputs.get(i));
@@ -280,7 +280,7 @@ public final class PdfBoxPageOperations implements PageOperations {
         // 途中で失敗したら、それまでに書いたものを消す。requireAbsent を通しているため、
         // ここで消してよいのはこの呼び出しが作ったものだけである。
         List<Path> written = new ArrayList<>(outputs.size());
-        UndoOnFailure.runThrowing(e -> written.forEach(PdfBoxPageOperations::deleteQuietly), () -> {
+        UndoOnFailure.runThrowing(e -> written.forEach(UndoOnFailure::deleteQuietly), () -> {
             for (int i = 0; i < segments.size(); i++) {
                 // 書く前に控える。書きかけで失敗したファイルも後始末の対象にする。
                 written.add(outputs.get(i));
@@ -959,22 +959,7 @@ public final class PdfBoxPageOperations implements PageOperations {
      * <b>残った平文について言う言葉である。</b>
      */
     private void writingTo(Path output, PdfBoxGuard.PdfBoxAction write) throws IOException {
-        UndoOnFailure.runThrowing(e -> deleteQuietly(output), write);
-    }
-
-    /**
-     * 後始末で消す。消せなくても黙っている。
-     *
-     * <p>ここに来ている時点で、既に何かが失敗している。その失敗のほうが利用者にとって
-     * 重要であり、後始末できなかったことを重ねて伝えても混乱するだけである。
-     */
-    private static void deleteQuietly(Path path) {
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException | RuntimeException e) {
-            // 消せなくても、元の失敗は元の失敗のまま伝わる。★ 未検査例外も受ける——巻き戻しの途中で抜けると、
-            //   残りの書いた分を消し損ねる（PdfBoxEncryption#deleteQuietly と同じ）。
-        }
+        UndoOnFailure.runThrowing(e -> UndoOnFailure.deleteQuietly(output), write);
     }
 
     private static void createDirectories(Path directory) {

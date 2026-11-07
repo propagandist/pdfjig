@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -288,6 +289,33 @@ class PdfBoxPageOperationsTest {
                             .errorCode());
 
             assertEquals(List.of(), listFilesIn(outputDir), "途中まで書いた出力が残っている。");
+        }
+
+        @Test
+        @DisplayName("2 個目を書き終えた後に落ちても、書いたものを残さない")
+        void removesOutputWrittenBeforeTheFailure() throws Exception {
+            // ★ 隣の removesPartialOutputOnFailure は 2 個目を書く前に落とすので、
+            //   消す一覧へ載せるのを書いた後へ動かしても緑のままになる。書いた後に落とす（#190）。
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            Path outputDir = tempDir.resolve("out");
+
+            AtomicInteger saves = new AtomicInteger();
+            PdfBoxPageOperations.DocumentSaver fails = writesThenFailsOn(2);
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), (document, target) -> {
+                saves.incrementAndGet();
+                return fails.save(document, target);
+            });
+
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir))
+                            .errorCode());
+
+            // ★ 2 個目の保存より前に落ちると、何も書かれずに緑になる。2 個目まで届いたことを見る。
+            assertEquals(2, saves.get(), "2 個目の保存まで届かずに失敗している");
+            assertEquals(List.of(), listFilesIn(outputDir), "書き終えた出力が残っている。");
         }
 
         @Test
@@ -942,6 +970,77 @@ class PdfBoxPageOperationsTest {
         }
     }
 
+    /**
+     * 単一の出力を書く 6 経路は、書き終えた後に落ちても出力を残さない（#190）。
+     *
+     * <p><b>★ 経路ごとに持つ。</b>どれも {@code writingTo} を通るが、通ることを見ているのはこのテストだけである。
+     * 1 経路だけ関門を外しても、代表の 1 本では赤にならない。
+     */
+    @Nested
+    class FailedWriteLeavesNothing {
+
+        private final AtomicInteger saves = new AtomicInteger();
+
+        private final PdfBoxPageOperations.DocumentSaver fails = writesThenFails();
+
+        private final PageOperations failing =
+                new PdfBoxPageOperations(WarningListener.ignoring(), (document, target) -> {
+                    saves.incrementAndGet();
+                    return fails.save(document, target);
+                });
+
+        @Test
+        @DisplayName("merge")
+        void merge() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.merge(List.of(input), output, MergeOptions.defaults()));
+        }
+
+        @Test
+        @DisplayName("rotate")
+        void rotate() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.rotate(input, Map.of(1, Rotation.CLOCKWISE_90), output));
+        }
+
+        @Test
+        @DisplayName("reorder")
+        void reorder() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.reorder(input, List.of(2, 1), output));
+        }
+
+        @Test
+        @DisplayName("extractPages")
+        void extractPages() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.extractPages(input, PageRange.of(1, 1), output));
+        }
+
+        @Test
+        @DisplayName("deletePages")
+        void deletePages() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.deletePages(input, PageRange.of(1, 1), output));
+        }
+
+        @Test
+        @DisplayName("assemble")
+        void assemble() throws Exception {
+            Path input = TestPdfs.plain(tempDir.resolve("in.pdf"), 2);
+            assertLeavesNothing(output -> failing.assemble(input, List.of(PageSelection.of(0, 1)), output));
+        }
+
+        private void assertLeavesNothing(Consumer<Path> write) {
+            Path output = tempDir.resolve("out.pdf");
+            PdfjigException failure = assertThrows(PdfjigException.class, () -> write.accept(output));
+            // ★ 保存の前に落ちると出力は作られず、関門が無くても緑になる。保存まで届いたことを見る。
+            assertEquals(1, saves.get(), "保存まで届かずに失敗している。関門を見ていない");
+            assertEquals(ErrorCode.IO_FAILURE, failure.errorCode());
+            assertFalse(Files.exists(output), "失敗したと告げたのに、書いた出力が残っている");
+        }
+    }
+
     @Nested
     class OutputProtection {
 
@@ -1099,11 +1198,7 @@ class PdfBoxPageOperationsTest {
             //   書き終えた後の失敗がいちばん危ない——継ぎ目で、書けた後に落とす。
             Path input = TestPdfs.encrypted(tempDir.resolve("enc.pdf"), "user");
             Path output = out("leaked");
-            PdfBoxPageOperations.DocumentSaver writesThenFails = (document, target) -> {
-                PdfBoxPageOperations.saveDocument(document, target);
-                throw new PdfjigException(ErrorCode.IO_FAILURE);
-            };
-            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFails);
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFails());
 
             try (Password password = Password.copyOf("user")) {
                 assertThrows(
@@ -2491,6 +2586,26 @@ class PdfBoxPageOperationsTest {
                 throw new PdfjigException(ErrorCode.IO_FAILURE);
             }
             return PdfBoxPageOperations.saveDocument(document, output);
+        };
+    }
+
+    /** n 個目だけ、書き終えた後に落ちる。ほかの回は普通に書く（毎回落とすのは {@link #writesThenFails}）。 */
+    private static PdfBoxPageOperations.DocumentSaver writesThenFailsOn(int nth) {
+        AtomicInteger saved = new AtomicInteger();
+        return (document, output) -> {
+            boolean result = PdfBoxPageOperations.saveDocument(document, output);
+            if (saved.incrementAndGet() == nth) {
+                throw new PdfjigException(ErrorCode.IO_FAILURE);
+            }
+            return result;
+        };
+    }
+
+    /** 書き終えた後に落ちる。閉じるときに初めて投げる失敗（#150）の代わりに、継ぎ目で作る。 */
+    private static PdfBoxPageOperations.DocumentSaver writesThenFails() {
+        return (document, output) -> {
+            PdfBoxPageOperations.saveDocument(document, output);
+            throw new PdfjigException(ErrorCode.IO_FAILURE);
         };
     }
 

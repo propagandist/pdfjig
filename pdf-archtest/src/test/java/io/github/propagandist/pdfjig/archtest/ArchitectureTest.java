@@ -99,6 +99,12 @@ class ArchitectureTest {
     /** PDFBox の文書。書き出しの入口 {@code save} を持つ。 */
     private static final String PD_DOCUMENT = "org.apache.pdfbox.pdmodel.PDDocument";
 
+    /** 失敗したときの後始末の置き場。pdf-core で書きかけを消す実装もここだけが持つ。 */
+    private static final String UNDO_ON_FAILURE = "io.github.propagandist.pdfjig.core.UndoOnFailure";
+
+    /** 保護の付け外しの実体。閉じる失敗を消す範囲へ入れない規則（#190）が見る。 */
+    private static final String PDFBOX_ENCRYPTION = "io.github.propagandist.pdfjig.core.PdfBoxEncryption";
+
     /** 警告の受け口。動かしてよいのは {@code Warnings} だけである。 */
     private static final String WARNING_LISTENER = "io.github.propagandist.pdfjig.core.WarningListener";
 
@@ -808,6 +814,70 @@ class ArchitectureTest {
                 Set.of(PASSWORD + ".close()"),
                 unitsZeroingCharArrays(),
                 "char[] のゼロ埋めが Password の外で起きている。持ち主の型を通らない片づけは、" + "作った場所からは見えないので、二重に消すか、一度も消さないかになる（#146）");
+    }
+
+    /**
+     * {@code pdf-core} で書きかけを消す実装は {@code UndoOnFailure#deleteQuietly} の 1 つである（#190）。
+     *
+     * <p>消す実装が 2 つあると、受ける範囲が片方だけ変わる——#285 が揃えるまで実際に違っていた。
+     *
+     * <p><b>★ 2 通りで見る。</b>{@code Files#deleteIfExists} と {@code Files#delete} を呼ぶ場所と、
+     * {@code deleteQuietly} という名前のメソッドの置き場所である。前者だけだと {@code Files} を通らずに消す
+     * 同名の実装が通り、後者だけだと別の名前の実装や、呼び出し元で直に消す形が通る。
+     *
+     * <p><b>★ 見ていないもの。</b>{@code java.io.File#delete}、{@code REPLACE_EXISTING} の
+     * {@code Files#move}、{@code DELETE_ON_CLOSE} で開く形。{@code pdf-desktop} の {@code OutputWorkspace} と
+     * {@code Settings} にある同名の実装（#296）。見る範囲は {@code core} パッケージだけで、下位のパッケージは
+     * 見ない（2026-11-07 実測で下位のパッケージは無い）。
+     */
+    @Test
+    @DisplayName("pdf-core で Files.deleteIfExists と Files.delete を呼び、deleteQuietly を持つのは UndoOnFailure だけである")
+    void deletesGoThroughOneImplementation() {
+        assertEquals(
+                Set.of(UNDO_ON_FAILURE),
+                coreClasses()
+                        .flatMap(javaClass -> javaClass.getMethods().stream())
+                        .filter(method -> method.getName().equals("deleteQuietly"))
+                        .map(method -> method.getOwner().getName())
+                        .collect(Collectors.toSet()),
+                "deleteQuietly の実装が UndoOnFailure の外にある。受ける範囲が実装ごとに分かれる（#190）");
+        assertEquals(
+                Set.of(UNDO_ON_FAILURE + ".deleteQuietly(Path)"),
+                unitsAccessing(Files.class.getName(), "deleteIfExists"),
+                "UndoOnFailure.deleteQuietly の外で消している。受ける範囲が実装ごとに分かれる（#190）");
+        assertEquals(
+                Set.of(),
+                unitsAccessing(Files.class.getName(), "delete"),
+                "Files.delete で消している。消す実装は UndoOnFailure.deleteQuietly の 1 つにする（#190）");
+    }
+
+    /**
+     * 保護を掛ける経路で出力を消すのは {@code protectInto} の中だけである（#190）。
+     *
+     * <p><b>★★ 入力を閉じるのは {@code protectInto} を呼んだ後である。</b>消す場所を {@code protect} の側へ
+     * 広げると、<b>完全に書けた保護付きの出力が、入力を閉じ損ねただけで消える。</b>
+     *
+     * <p><b>★ 振る舞いではなく、消す呼び出しの場所を見ている。</b>閉じるときに投げる入力は、
+     * テストの中で作れていない（{@code PdfBoxEncryption} に継ぎ目が無い）。
+     * {@code Files} を直に呼んで消す形は、隣の {@code deletesGoThroughOneImplementation} が止める。
+     * 入れ子のクラスから消す形も数える。
+     *
+     * <p><b>★ {@code unprotect} は見ない。</b>あちらの出力は平文なので、閉じる失敗を消す範囲から外す理由が
+     * {@code protect} と同じではない。この規則で今の形を正としないために、名前を完全一致で除いてある（#292）。
+     */
+    @Test
+    @DisplayName("保護を掛ける経路で出力を消すのは protectInto の中だけである")
+    void protectDeletesOnlyInsideProtectInto() {
+        assertEquals(
+                Set.of("protectInto"),
+                unitsAccessing(UNDO_ON_FAILURE, "deleteQuietly").stream()
+                        .filter(unit ->
+                                unit.startsWith(PDFBOX_ENCRYPTION + ".") || unit.startsWith(PDFBOX_ENCRYPTION + "$"))
+                        .map(unit -> unit.substring(PDFBOX_ENCRYPTION.length(), unit.indexOf('('))
+                                .replaceFirst("^\\.", ""))
+                        .filter(name -> !Set.of("unprotect", "unprotectInto").contains(name))
+                        .collect(Collectors.toSet()),
+                "出力を消す場所が動いた。入力を閉じるところまで覆うと、書けた出力が閉じ損ねで消える（#190）");
     }
 
     /**
