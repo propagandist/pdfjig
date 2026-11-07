@@ -817,24 +817,27 @@ class ArchitectureTest {
     }
 
     /**
-     * {@code pdf-core} で書きかけを消す実装は 1 つである（#190）。
+     * {@code pdf-core} でファイルを消すのは {@code UndoOnFailure#deleteQuietly} だけである（#190）。
      *
-     * <p>2 つあると、受ける範囲が片方だけ変わる——#285 が揃えるまで実際に違っていた。
+     * <p>消す実装が 2 つあると、受ける範囲が片方だけ変わる——#285 が揃えるまで実際に違っていた。
      *
-     * <p><b>★ 見ているのは {@code pdf-core} の中の名前である。</b>別の名前で同じものを書けば通る。
-     * {@code pdf-desktop} の {@code OutputWorkspace} と {@code Settings} にある同名の実装は見ていない。
+     * <p><b>★ 名前ではなく、{@code Files} を呼んで消す場所を見る。</b>名前で見ると、別の名前で書いた実装や、
+     * 呼び出し元で直に消す形が通る。
+     *
+     * <p><b>★ 見ていないもの。</b>{@code java.io.File#delete} と、{@code pdf-desktop} の
+     * {@code OutputWorkspace} と {@code Settings} にある同名の実装（#296）。
      */
     @Test
-    @DisplayName("pdf-core で書きかけを消す実装は UndoOnFailure にだけある")
-    void deleteQuietlyHasOneImplementation() {
+    @DisplayName("pdf-core で Files を呼んでファイルを消すのは UndoOnFailure.deleteQuietly だけである")
+    void deletesGoThroughOneImplementation() {
         assertEquals(
-                Set.of(UNDO_ON_FAILURE),
-                coreClasses()
-                        .flatMap(javaClass -> javaClass.getMethods().stream())
-                        .filter(method -> method.getName().equals("deleteQuietly"))
-                        .map(method -> method.getOwner().getName())
-                        .collect(Collectors.toSet()),
-                "deleteQuietly の実装が UndoOnFailure の外にある。受ける範囲が実装ごとに分かれる（#190）");
+                Set.of(UNDO_ON_FAILURE + ".deleteQuietly(Path)"),
+                unitsAccessing(Files.class.getName(), "deleteIfExists"),
+                "UndoOnFailure.deleteQuietly の外で消している。受ける範囲が実装ごとに分かれる（#190）");
+        assertEquals(
+                Set.of(),
+                unitsAccessing(Files.class.getName(), "delete"),
+                "Files.delete で消している。消す実装は UndoOnFailure.deleteQuietly の 1 つにする（#190）");
     }
 
     /**
@@ -848,20 +851,17 @@ class ArchitectureTest {
      * {@code Files} を直に呼んで消す形も見えない。
      *
      * <p><b>★ {@code unprotect} は見ない。</b>あちらの出力は平文なので、閉じる失敗を消す範囲から外す理由が
-     * {@code protect} と同じではない。この規則で今の形を正としないために除いてある。
+     * {@code protect} と同じではない。この規則で今の形を正としないために、名前を完全一致で除いてある（#292）。
      */
     @Test
     @DisplayName("保護を掛ける経路で出力を消すのは protectInto の中だけである")
     void protectDeletesOnlyInsideProtectInto() {
         assertEquals(
                 Set.of("protectInto"),
-                coreClasses()
-                        .flatMap(javaClass -> javaClass.getCodeUnitAccessesFromSelf().stream())
-                        .filter(access -> access.getOriginOwner().getName().equals(PDFBOX_ENCRYPTION))
-                        .filter(access -> access.getTargetOwner().getName().equals(UNDO_ON_FAILURE))
-                        .filter(access -> access.getTarget().getName().equals("deleteQuietly"))
-                        .map(access -> access.getOrigin().getName())
-                        .filter(origin -> !origin.contains("unprotect"))
+                unitsAccessing(UNDO_ON_FAILURE, "deleteQuietly").stream()
+                        .filter(unit -> unit.startsWith(PDFBOX_ENCRYPTION + "."))
+                        .map(unit -> unit.substring(PDFBOX_ENCRYPTION.length() + 1, unit.indexOf('(')))
+                        .filter(name -> !Set.of("unprotect", "unprotectInto").contains(name))
                         .collect(Collectors.toSet()),
                 "出力を消す場所が動いた。入力を閉じるところまで覆うと、書けた出力が閉じ損ねで消える（#190）");
     }
