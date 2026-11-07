@@ -292,6 +292,26 @@ class PdfBoxPageOperationsTest {
         }
 
         @Test
+        @DisplayName("2 個目を書き終えた後に落ちても、書いたものを残さない")
+        void removesOutputWrittenBeforeTheFailure() throws Exception {
+            // ★ 隣の removesPartialOutputOnFailure は 2 個目を書く前に落とすので、
+            //   消す一覧へ載せるのを書いた後へ動かしても緑のままになる。書いた後に落とす（#190）。
+            Path input = TestPdfs.withText(tempDir.resolve("doc.pdf"), "P1", "P2", "P3");
+            Path outputDir = tempDir.resolve("out");
+
+            PageOperations failing = new PdfBoxPageOperations(WarningListener.ignoring(), writesThenFailsOn(2));
+
+            assertEquals(
+                    ErrorCode.IO_FAILURE,
+                    assertThrows(
+                                    PdfjigException.class,
+                                    () -> failing.split(input, SplitStrategy.everyNPages(1), outputDir))
+                            .errorCode());
+
+            assertEquals(List.of(), listFilesIn(outputDir), "書き終えた出力が残っている。");
+        }
+
+        @Test
         @DisplayName("★★ 通知で失敗しても、書けた N 個は消さない")
         void outputsSurviveAFailingListener() throws Exception {
             // ★★ 差分の前は、ここで全部消えていた——受け手を後始末の try の中で動かしていたので、
@@ -2559,6 +2579,18 @@ class PdfBoxPageOperationsTest {
                 throw new PdfjigException(ErrorCode.IO_FAILURE);
             }
             return PdfBoxPageOperations.saveDocument(document, output);
+        };
+    }
+
+    /** n 個目を書き終えた後に落ちる。それより前は普通に書く。 */
+    private static PdfBoxPageOperations.DocumentSaver writesThenFailsOn(int nth) {
+        AtomicInteger saved = new AtomicInteger();
+        return (document, output) -> {
+            boolean result = PdfBoxPageOperations.saveDocument(document, output);
+            if (saved.incrementAndGet() == nth) {
+                throw new PdfjigException(ErrorCode.IO_FAILURE);
+            }
+            return result;
         };
     }
 
