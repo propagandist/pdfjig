@@ -34,6 +34,7 @@ class MainWindowUiTest extends DesktopUiTest {
     void 文書を開いていなければページへの操作は押せない(FxRobot robot) {
         for (String id : new String[] {
             "#tool-save",
+            "#tool-protect",
             "#tool-delete",
             "#tool-rotate-right",
             "#tool-rotate-left",

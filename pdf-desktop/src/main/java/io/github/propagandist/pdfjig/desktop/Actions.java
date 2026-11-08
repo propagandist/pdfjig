@@ -76,13 +76,15 @@ record Actions(
     /**
      * ツールバーを組む。
      *
-     * <p>置くのは繰り返し使う操作だけで、メニューは全部を持ったまま残す。
+     * <p>置くのは繰り返し使う操作と、その別形だけである（「保存」に対する「保護」）。
+     * メニューは全部を持ったまま残す。
      * 区切りは「ファイル」「ページ」「文書」の 3 つのまとまりに対応させてある。
      */
     ToolBar toolBar() {
         return new ToolBar(
                 open.toolButton(),
                 save.toolButton(),
+                protect.toolButton(),
                 new Separator(),
                 delete.toolButton(),
                 rotateLeft.toolButton(),

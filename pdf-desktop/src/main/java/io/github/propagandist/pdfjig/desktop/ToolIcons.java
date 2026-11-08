@@ -39,6 +39,9 @@ final class ToolIcons {
     /** 右に回転。時計回りの矢印。 */
     static final String ROTATE_RIGHT = "M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10";
 
+    /** パスワードで保護して保存。錠前。 */
+    static final String PROTECT = "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M12 15v2";
+
     /** PDF を追加。紙にプラス。 */
     static final String ADD =
             "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" + "M14 2v6h6M12 18v-6M9 15h6";
