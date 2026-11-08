@@ -43,7 +43,16 @@ record Actions(
     /** メニューバーを組む。ここに全部の操作が出る。 */
     MenuBar menuBar() {
         return new MenuBar(
-                new Menu("ファイル", null, open.menuItem(), save.menuItem(), close.menuItem(), quit.menuItem()),
+                new Menu(
+                        "ファイル",
+                        null,
+                        open.menuItem(),
+                        save.menuItem(),
+                        // ★ 保存の別形なので保存のすぐ下に置く。ツールバーで「保存」の隣に置いたのと同じ分け方である
+                        //   （#298 / #300）。確認の窓の案内（ProtectionPrompt.Outcome#PLAIN）がこの場所を書いている。
+                        protect.menuItem(),
+                        close.menuItem(),
+                        quit.menuItem()),
                 new Menu(
                         "ページ",
                         null,
@@ -67,9 +76,7 @@ record Actions(
                         //   JavaFX は 2 つ目のバーへ黙って移し、1 つ目から消える。呼ぶのは画面を組む 1 度だけにする。
                         removeSources,
                         split.menuItem(),
-                        splitPages.menuItem(),
-                        new SeparatorMenuItem(),
-                        protect.menuItem()),
+                        splitPages.menuItem()),
                 new Menu("ヘルプ", null, about.menuItem()));
     }
 
