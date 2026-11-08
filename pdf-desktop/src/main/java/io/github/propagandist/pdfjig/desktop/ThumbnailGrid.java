@@ -376,16 +376,15 @@ final class ThumbnailGrid {
         int size = order.size();
         int current = selectedIndex.get();
 
-        int next =
-                switch (event.getCode()) {
-                    case LEFT -> current - 1;
-                    case RIGHT -> current + 1;
-                    case UP -> current - columns;
-                    case DOWN -> current + columns;
-                    case HOME -> 0;
-                    case END -> size - 1;
-                    default -> current;
-                };
+        int next = switch (event.getCode()) {
+            case LEFT -> current - 1;
+            case RIGHT -> current + 1;
+            case UP -> current - columns;
+            case DOWN -> current + columns;
+            case HOME -> 0;
+            case END -> size - 1;
+            default -> current;
+        };
 
         if (next != current && next >= 0 && next < size) {
             // キーで動かす選択は画面の外へ出る。行が変わったぶんだけ追いかける。
