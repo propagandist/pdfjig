@@ -21,6 +21,7 @@ import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Labeled;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.TitledPane;
 import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
@@ -418,21 +419,25 @@ class EncryptionUiTest extends DesktopUiTest {
     }
 
     /**
-     * ツールメニューから「パスワードで保護して保存…」を選ぶ。
+     * メニューの「パスワードで保護して保存…」を実行する。
      *
-     * <p><b>★ ここだけは文言で掴む</b>（{@code .claude/rules/ui-tests.md}）——
-     * <b>{@code MenuItem} は {@code Node} ではなく、id では掴めない。</b>
-     * ツールバーの「保護」からも辿れるが、そちらは
+     * <p><b>★ id で掴み、押すのは本物のクリックにする。</b>文言は書き写さず、掴んだ項目と
+     * その親のメニューから取る（{@code DesktopUiTest#menuItem}）——書き写すと、文言や場所を変えたときに
+     * ここを通る全部が落ちる。<b>{@code MenuItem#fire} を直に呼ばない</b>——CI の uiTest を 15 分の上限まで
+     * 止めた記録がある（{@code SourceLegendUiTest}。2026-09-25 実測）。<b>押した先には窓が 3 つ重なる</b>
+     * （保護の指定 → 確認 → 保存先）ので、同じ形を踏みうる。
+     * <b>どのメニューに入っているかは {@code MainWindowUiTest} が見ている。</b>ツールバーの「保護」からの道は
      * {@code ツールバーの保護からも鍵の要るファイルができる} が見ている。
      *
      * <p><b>★ 選べるようになるのを待つ。</b>「保護して保存」と「保存」は同じ
-     * {@code editingBlocked} で縛られており、<b>読み込みが走っている間に選んでも何も起きない。</b>
-     * 待たずに開くと「ダイアログが出てこない」形で落ち、原因が読めなくなる。
+     * {@code editingBlocked} で縛られており、<b>読み込みが走っている間に押しても何も起きない。</b>
+     * 待たずに押すと「ダイアログが出てこない」形で落ち、原因が読めなくなる。
      */
     private void protectFromMenu(FxRobot robot) throws Exception {
-        waitFor(() -> !button(robot, "#tool-save").isDisabled());
-        robot.clickOn("ツール");
-        robot.clickOn("パスワードで保護して保存…");
+        MenuItem item = menuItem(robot, "menu-protect").orElseThrow();
+        waitFor(() -> !item.isDisable());
+        robot.clickOn(item.getParentMenu().getText());
+        robot.clickOn(item.getText());
         WaitForAsyncUtils.waitForFxEvents();
     }
 
