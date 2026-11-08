@@ -12,3 +12,6 @@
 
 # style: Spotless を全体に掛ける
 9e19ea694a037b1875ce3cc923c2295ea59c226c
+
+# style: palantir-java-format 2.102.0 で整形し直す（#260）
+8a1ef17b78b0e4ac92e755f7b32b83550755c04c
