@@ -635,8 +635,10 @@ public final class MainWindow {
                         null,
                         this::splitIntoSinglePages,
                         notSplittable),
-                // ツールバーでは「保存」の隣に置く（Actions#toolBar）。保存の別形であり、
-                //   どちらで書き出すかを同じ場所で選べるほうがよい。
+                // ツールバーでは「保存」の隣、メニューでは「ファイル」の保存の下に置く（Actions。#298 / #300）。
+                //   保存の別形であり、どちらで書き出すかを同じ場所で選べるほうがよい。
+                // ★ 確認の窓の案内（ProtectionPrompt.Outcome#PLAIN）が、この 2 つの文言と場所を書いている。
+                //   変えたら案内も直す（ProtectionPromptUiTest が画面の文言と突き合わせる）。
                 new Action(
                         "protect",
                         "パスワードで保護して保存…",

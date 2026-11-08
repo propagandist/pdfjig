@@ -2,12 +2,15 @@ package io.github.propagandist.pdfjig.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Path;
 import java.util.List;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,6 +50,25 @@ class MainWindowUiTest extends DesktopUiTest {
         }) {
             assertTrue(button(robot, id).isDisabled(), id + " が押せてしまう");
         }
+    }
+
+    /**
+     * 「パスワードで保護して保存…」は「名前を付けて保存…」のすぐ下にある（#300）。
+     *
+     * <p>ツールバーで「保存」の隣に置いたのと同じ分け方である（#298）。保存の別形なので、
+     * メニューでもツールバーでも、どちらで書き出すかを同じ場所で選べる。
+     */
+    @Test
+    void 保護して保存はメニューでも保存のすぐ下にある(FxRobot robot) {
+        MenuItem save = menuItem(robot, "menu-save").orElseThrow();
+        MenuItem protect = menuItem(robot, "menu-protect").orElseThrow();
+        Menu file = save.getParentMenu();
+
+        assertSame(
+                file,
+                protect.getParentMenu(),
+                "「保存」と別のメニューにある: " + protect.getParentMenu().getText());
+        assertEquals(file.getItems().indexOf(save) + 1, file.getItems().indexOf(protect), "「保存」のすぐ下にない");
     }
 
     @Test

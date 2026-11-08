@@ -8,6 +8,7 @@ import io.github.propagandist.pdfjig.core.PdfDocument;
 import io.github.propagandist.pdfjig.core.TestPdfs;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javafx.scene.control.MenuItem;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -70,6 +71,14 @@ class ProtectionPromptUiTest extends DesktopUiTest {
         //   一度ディスクに落ちる順を踏ませる（2026-09-26、v0.2.0 のリリース本文の門で見つかった）。
         String advice = textOf(robot, "#protection-advice");
         assertTrue(advice.contains("パスワードで保護して保存"), "保護したまま書き出す道を案内していない: " + advice);
+        // ★ 道は 2 つとも案内する。いま押した「保存」の隣に「保護」がある（#298）。
+        // ★★ 案内する名前と場所は、画面に実際に出ているものから取る（#300）。書き写した文字列と比べると、
+        //   メニューやボタンを動かしても通り、案内どおりに辿れない窓が残る。
+        String toolbar = "ツールバーの「" + button(robot, "#tool-protect").getText() + "」";
+        assertTrue(advice.contains(toolbar), "ツールバーの道が実際と違う（" + toolbar + "）: " + advice);
+        MenuItem protect = menuItem(robot, "menu-protect").orElseThrow();
+        String menu = "メニューの「" + protect.getParentMenu().getText() + "」→「" + protect.getText() + "」";
+        assertTrue(advice.contains(menu), "メニューの道が実際と違う（" + menu + "）: " + advice);
         assertFalse(advice.contains("書き出したあとで"), "平文を一度ディスクに落とす順を勧めている: " + advice);
 
         clickWhenReady(robot, "#protection-cancel");
