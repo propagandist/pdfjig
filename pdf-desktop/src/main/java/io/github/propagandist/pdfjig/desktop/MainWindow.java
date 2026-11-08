@@ -36,6 +36,8 @@ import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.ToolBar;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
@@ -98,6 +100,14 @@ public final class MainWindow {
 
     /** 利用者に伝える手段。 */
     private final Messages messages;
+
+    /**
+     * 保護して書き出す道。確認の窓の案内に使う（{@link ProtectionPrompt.Route}。#302）。
+     *
+     * <p><b>{@link #build()} で、組み上がったメニューバーとツールバーから取る。</b>
+     * 確認の窓が出るのは画面を組んだ後だけである。
+     */
+    private ProtectionPrompt.Route protectRoute;
 
     private final Label status = new Label();
 
@@ -298,6 +308,9 @@ public final class MainWindow {
         legend.setOnRemove(this::removeSource);
 
         Actions actions = buildActions();
+        MenuBar menuBar = actions.menuBar();
+        ToolBar toolBar = actions.toolBar();
+        protectRoute = actions.protectRoute(menuBar, toolBar);
 
         status.setId("status-label");
 
@@ -306,7 +319,7 @@ public final class MainWindow {
         statusBar.setPadding(new Insets(6, 12, 6, 12));
 
         BorderPane root = new BorderPane();
-        root.setTop(new VBox(actions.menuBar(), actions.toolBar(), legend.node()));
+        root.setTop(new VBox(menuBar, toolBar, legend.node()));
         root.setCenter(thumbnails.node());
         root.setBottom(statusBar);
 
@@ -637,8 +650,7 @@ public final class MainWindow {
                         notSplittable),
                 // ツールバーでは「保存」の隣、メニューでは「ファイル」の保存の下に置く（Actions。#298 / #300）。
                 //   保存の別形であり、どちらで書き出すかを同じ場所で選べるほうがよい。
-                // ★ 確認の窓の案内（ProtectionPrompt.Outcome#PLAIN）が、この 2 つの文言と場所を書いている。
-                //   変えたら案内も直す（ProtectionPromptUiTest が画面の文言と突き合わせる）。
+                // 確認の窓の案内は、この Action から組む（Actions#protectRoute。#302）。
                 new Action(
                         "protect",
                         "パスワードで保護して保存…",
@@ -1682,7 +1694,10 @@ public final class MainWindow {
     private boolean consentsToDroppingProtection(
             DocumentSession saving, List<PageSelection> pages, ProtectionPrompt.Outcome outcome) {
         List<String> dropping = saving.keyedContributors(pages);
-        return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping, outcome);
+        // ★ 画面を組む前には届かない（保存も分割も、画面の操作からしか始まらない）。届いたら、案内の崩れた窓を
+        //   出すより先に落とす。
+        Objects.requireNonNull(protectRoute, "画面を組む前に、保護が落ちる確認へ届いた");
+        return dropping.isEmpty() || ProtectionPrompt.confirm(stage, dropping, outcome, protectRoute);
     }
 
     /**

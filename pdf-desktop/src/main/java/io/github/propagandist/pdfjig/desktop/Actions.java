@@ -1,7 +1,9 @@
 package io.github.propagandist.pdfjig.desktop;
 
+import javafx.scene.control.Labeled;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.ToolBar;
@@ -49,7 +51,7 @@ record Actions(
                         open.menuItem(),
                         save.menuItem(),
                         // ★ 保存の別形なので保存のすぐ下に置く。ツールバーで「保存」の隣に置いたのと同じ分け方である
-                        //   （#298 / #300）。確認の窓の案内（ProtectionPrompt.Outcome#PLAIN）がこの場所を書いている。
+                        //   （#298 / #300）。
                         protect.menuItem(),
                         close.menuItem(),
                         quit.menuItem()),
@@ -78,6 +80,33 @@ record Actions(
                         split.menuItem(),
                         splitPages.menuItem()),
                 new Menu("ヘルプ", null, about.menuItem()));
+    }
+
+    /**
+     * 保護して書き出す道。確認の窓が案内に使う（{@link ProtectionPrompt.Route}。#302）。
+     *
+     * <p><b>★★ 組み上がった節点から取る。</b>{@link #protect} の文言だけを取ると、<b>どこに置いたか</b>
+     * （どのメニューに入れたか・ツールバーに出したか）を案内の側で書き写すことになり、
+     * 動かした日に案内どおりに辿れなくなる。節点は {@link Action} が配る id で探す。
+     *
+     * @param bar   {@link #menuBar()} が組んだもの
+     * @param tools {@link #toolBar()} が組んだもの
+     * @return 道。ツールバーに出していなければ、ツールバーの道は {@code null}
+     * @throws IllegalStateException メニューに入っていないとき——画面を組む時点で落とす
+     */
+    ProtectionPrompt.Route protectRoute(MenuBar bar, ToolBar tools) {
+        String itemId = "menu-" + protect.id();
+        MenuItem item = bar.getMenus().stream()
+                .flatMap(menu -> menu.getItems().stream())
+                .filter(candidate -> itemId.equals(candidate.getId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(itemId + " がメニューに無い"));
+        String toolbar = tools.getItems().stream()
+                .filter(node -> ("tool-" + protect.id()).equals(node.getId()))
+                .map(node -> ((Labeled) node).getText())
+                .findFirst()
+                .orElse(null);
+        return new ProtectionPrompt.Route(toolbar, item.getParentMenu().getText(), item.getText());
     }
 
     /**

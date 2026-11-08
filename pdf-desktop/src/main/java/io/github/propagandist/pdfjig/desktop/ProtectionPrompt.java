@@ -2,6 +2,7 @@ package io.github.propagandist.pdfjig.desktop;
 
 import io.github.propagandist.pdfjig.core.Warning;
 import java.util.List;
+import java.util.Objects;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -56,9 +57,10 @@ final class ProtectionPrompt {
      * @param owner    親ウィンドウ
      * @param dropping 保護が落ちる出どころのファイル名。<b>空で呼ばないこと</b>
      * @param outcome  書き出した先がどうなるのか。<b>文言と、後から出す警告のどれを落とすかを決める</b>
+     * @param route    保護して書き出す道。<b>案内に出す名前はここから取る</b>（{@link Route}）
      * @return 続けるなら {@code true}
      */
-    static boolean confirm(Stage owner, List<String> dropping, Outcome outcome) {
+    static boolean confirm(Stage owner, List<String> dropping, Outcome outcome, Route route) {
         if (dropping.isEmpty()) {
             throw new IllegalArgumentException("保護が落ちる出どころが無いのに問うことはできません。");
         }
@@ -76,7 +78,7 @@ final class ProtectionPrompt {
         alert.setTitle(outcome.titleText);
         alert.setHeaderText(headerFor(dropping, outcome));
         alert.getDialogPane().setId("protection-dialog");
-        alert.getDialogPane().setContent(body(dropping, outcome));
+        alert.getDialogPane().setContent(body(dropping, outcome.advice(route)));
         alert.getButtonTypes().setAll(proceed, cancel);
 
         Button proceedButton = (Button) alert.getDialogPane().lookupButton(proceed);
@@ -96,12 +98,35 @@ final class ProtectionPrompt {
     }
 
     /**
+     * 保護して書き出す道。案内に出す名前を、画面を組む側から受け取る（#302）。
+     *
+     * <p><b>★★ 書き写さない。</b>案内に名前を書き写すと、ボタンやメニューを動かしたときに
+     * <b>案内どおりに辿れない窓が残る</b>（{@code CLAUDE.md} 優先順位 2）。作るのは
+     * {@code Actions#protectRoute} で、<b>組み上がったメニューバーとツールバーの節点から取る</b>——
+     * 文言だけでなく、<b>どこに置いたかもそこから決まる。</b>
+     *
+     * @param toolbar ツールバーのボタンの文言。<b>ツールバーに出していなければ {@code null}</b>
+     *                ——そのときは案内からツールバーの道を外す
+     * @param menu    項目が入っているメニューの名前
+     * @param item    メニューの項目の文言
+     */
+    record Route(String toolbar, String menu, String item) {
+
+        Route {
+            Objects.requireNonNull(menu, "menu");
+            Objects.requireNonNull(item, "item");
+        }
+    }
+
+    /**
      * 書き出した先がどうなるのか。
      *
      * <p><b>★★ 文言を分ける。</b>どちらも<b>「パスワードなしで開ける」は同じ</b>だが、
      * <b>保護を掛けている最中に「保護されません」「保護を外して書き出す」と出すと、
      * 何を押しているのかが読んで分からなくなる</b>（{@code CLAUDE.md} 優先順位 2。#30 の門の 2 段目）
      * ——<b>オーナーパスワードと権限フラグは、確かに出力へ載る。</b>
+     *
+     * <p><b>道を案内するのは {@link #PLAIN} だけである</b>（{@link #advice(Route)} を上書きしている）。
      */
     enum Outcome {
 
@@ -109,20 +134,31 @@ final class ProtectionPrompt {
         PLAIN(
                 "保護は引き継がれません",
                 "書き出すファイルはパスワードで保護されません",
-                // ★★ 「書き出したあとで設定」を勧めない。その順だと、保護されていない中身が一度ディスクに落ちる
-                //   （共有フォルダならそこに平文が置かれる）。中止して「パスワードで保護して保存」を使えば、
-                //   平文は一度もディスクに書かれない（#199）。2026-09-26、v0.2.0 のリリース本文の門で見つかった。
-                // ★ 道は 2 つとも書く。ツールバーの「保護」は、いま押した「保存」の隣にある（#298）。
-                //   メニューの場所は Actions#menuBar が持つ。動かしたらここも直す（#300）。
-                "書き出したファイルは、パスワードなしで開けるようになります。" + System.lineSeparator()
-                        + "パスワードで保護して書き出すには、中止して、ツールバーの「保護」か、メニューの「ファイル」→「パスワードで保護して保存…」を使ってください。",
+                "書き出したファイルは、パスワードなしで開けるようになります。",
                 "保護を外して書き出す…",
-                Warning.ENCRYPTION_NOT_PROPAGATED),
+                Warning.ENCRYPTION_NOT_PROPAGATED) {
+
+            /**
+             * 保護して書き出す道を添える。
+             *
+             * <p><b>★★ 「書き出したあとで設定」を勧めない。</b>その順だと、保護されていない中身が一度ディスクに落ちる
+             * （共有フォルダならそこに平文が置かれる）。中止して保護して書き出せば、平文は一度もディスクに書かれない
+             * （#199）。2026-09-26、v0.2.0 のリリース本文の門で見つかった。
+             *
+             * <p><b>★ 道は出ているものを全部書く</b>（#298 / #300）。名前と場所は渡された道から組む（#302）。
+             */
+            @Override
+            String advice(Route route) {
+                String menu = "メニューの「" + route.menu() + "」→「" + route.item() + "」";
+                String ways = route.toolbar() == null ? menu : "ツールバーの「" + route.toolbar() + "」か、" + menu;
+                return adviceText + System.lineSeparator() + "パスワードで保護して書き出すには、中止して、" + ways + "を使ってください。";
+            }
+        },
 
         /**
          * 分割で、保護を掛けられない。出力はどれも平文である。
          *
-         * <p><b>★★ 保存へ案内しない。</b>「パスワードで保護して保存」は分割しない 1 ファイルを書くので、
+         * <p><b>★★ 保存へ案内しない。</b>保護して保存は分割しない 1 ファイルを書くので、
          * 分割の代わりにならない。後から掛け直す順も勧めない（{@link #PLAIN} と同じ理由）——
          * <b>分割の出力を保護する道は今は無い</b>ので、無いと書く（{@code CLAUDE.md} 優先順位 2。#172 の門）。
          */
@@ -138,6 +174,7 @@ final class ProtectionPrompt {
          *
          * <p><b>★ 出力には暗号化辞書が載るが、鍵は空文字列から導かれるので
          * 誰でも開ける</b>（2026-09-16 実測。{@code Protection#userPasswordRequired}）。
+         * いま保護して書き出している最中なので、道は案内しない。
          */
         OPENS_WITHOUT_A_KEY(
                 "書き出すファイルは誰でも開けます",
@@ -153,7 +190,7 @@ final class ProtectionPrompt {
         /** 見出し。<b>句点は付けない</b>——件数を後ろへ挿すので、付けるのは組む側である。 */
         final String headerText;
 
-        /** 添える一文。 */
+        /** 添える一文。{@link #PLAIN} は、この後ろに道を足す。 */
         final String adviceText;
 
         /** 続ける側のボタンの文言。 */
@@ -175,6 +212,16 @@ final class ProtectionPrompt {
             this.proceedText = proceedText;
             this.preempts = preempts;
         }
+
+        /**
+         * 窓に添える一文。
+         *
+         * @param route 保護して書き出す道。道を案内しないものは使わない
+         * @return 窓に出す一文
+         */
+        String advice(Route route) {
+            return adviceText;
+        }
     }
 
     private static String headerFor(List<String> dropping, Outcome outcome) {
@@ -190,12 +237,12 @@ final class ProtectionPrompt {
      * <p><b>★ 出どころの名前を出す。</b>どのファイルの保護が落ちるのかは、
      * <b>数だけでは辿れない。</b>
      */
-    private static VBox body(List<String> dropping, Outcome outcome) {
+    private static VBox body(List<String> dropping, String advice) {
         Label sources = new Label(String.join(System.lineSeparator(), dropping));
         sources.setId("protection-sources");
         sources.setWrapText(true);
 
-        Label consequence = new Label(outcome.adviceText);
+        Label consequence = new Label(advice);
         consequence.setId("protection-advice");
         consequence.setWrapText(true);
 
